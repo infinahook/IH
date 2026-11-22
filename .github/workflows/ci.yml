@@ -42,11 +42,13 @@ jobs:
       - name: Formatage Rust
         run: cargo fmt --all -- --check
 
+      # `generate_context!` embarque `dist/` : le frontend doit exister avant
+      # toute compilation du crate Tauri (clippy et tests compris).
+      - name: Build frontend
+        run: npm run build
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Build frontend (nécessaire à `generate_context!`)
-        run: npm run build
 
       - name: Tests Rust
         run: cargo test --workspace
