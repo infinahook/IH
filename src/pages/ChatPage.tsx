@@ -1,15 +1,28 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import {
   Activity,
+  AtSign,
   Ban,
+  FileCode2,
   MessageSquare,
   MessagesSquare,
   MoreHorizontal,
+  PanelBottom,
+  PanelLeft,
   Pencil,
   Plus,
   RefreshCw,
+  RotateCcw,
   Search,
   Send,
+  ShieldAlert,
   Trash2,
   X,
 } from "lucide-react";
@@ -18,8 +31,10 @@ import {
   api,
   toAppError,
   type ChatUsage,
+  type FileMatch,
   type Message,
   type ModelEntry,
+  type PreparedContext,
   type ProviderView,
   type Thread,
 } from "../lib/api";
@@ -41,18 +56,41 @@ import {
 } from "../lib/chat";
 import { errorIsFixable } from "../lib/errors";
 import { useTauriEvent } from "../lib/events";
-import { formatDate } from "../lib/format";
+import { formatBytes, formatDate } from "../lib/format";
+import {
+  MIN_BOTTOM_HEIGHT,
+  MIN_CONVERSATION_WIDTH,
+  MIN_EDITOR_WIDTH,
+  MIN_EXPLORER_WIDTH,
+  maxBottomHeight,
+  maxConversationWidth,
+  maxExplorerWidth,
+} from "../lib/layout";
+import {
+  addChip,
+  clearChips,
+  extractContextPaths,
+  findMentionToken,
+  insertMention,
+  removeChip,
+  type ContextChip,
+} from "../lib/mentions";
+import { useWorkspace } from "../lib/useWorkspace";
 import { useAction, useAsync, useDebouncedValue } from "../lib/hooks";
 import { useApp } from "../lib/store";
 import { Badge, type BadgeTone } from "../components/Badge";
+import { BottomPanel } from "../components/BottomPanel";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState, LoadingRow, Spinner } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Field } from "../components/Field";
+import { FileExplorer } from "../components/FileExplorer";
 import { Modal } from "../components/Modal";
 import { Notice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectGate } from "../components/ProjectGate";
+import { Resizer } from "../components/Resizer";
+import { WorkspaceEditor } from "../components/WorkspaceEditor";
 
 const MESSAGE_LIMIT = 500;
 const ACTIVE_POLL_MS = 5_000;
@@ -66,6 +104,8 @@ interface ActiveTurn {
   localUserId: string;
   startedAt: number;
   finished: boolean;
+  contextPaths: string[];
+  allowSensitiveContext: boolean;
 }
 
 interface RetryInfo {
@@ -73,6 +113,8 @@ interface RetryInfo {
   providerId: string;
   model: string;
   threadId: string | null;
+  contextPaths: string[];
+  allowSensitiveContext: boolean;
 }
 
 interface LastTurnStats {
@@ -119,6 +161,7 @@ function roleTone(role: string): BadgeTone {
 
 export function ChatPage() {
   const { t, locale, project, navigate } = useApp();
+  const ws = useWorkspace(project?.id ?? null);
   const projectIdRef = useRef<string | null>(project?.id ?? null);
   projectIdRef.current = project?.id ?? null;
 
@@ -462,6 +505,8 @@ export function ChatPage() {
       providerId: turn.providerId,
       model: turn.model,
       threadId: payload.thread_id,
+      contextPaths: turn.contextPaths,
+      allowSensitiveContext: turn.allowSensitiveContext,
     });
     setLastTurn(null);
     setStopping(false);
@@ -553,6 +598,180 @@ export function ChatPage() {
   const cancelAction = useAction();
   const [prompt, setPrompt] = useState("");
 
+  // -------------------------------------------------- contexte et mentions @
+  const [chips, setChips] = useState<ContextChip[]>([]);
+  const [allowSensitiveContext, setAllowSensitiveContext] = useState(false);
+  const [sensitiveConfirm, setSensitiveConfirm] = useState(false);
+  const [mentionResults, setMentionResults] = useState<FileMatch[]>([]);
+  const [mentionLoading, setMentionLoading] = useState(false);
+  const [mentionError, setMentionError] = useState<AppError | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  const [prepared, setPrepared] = useState<PreparedContext | null>(null);
+  const [prepareError, setPrepareError] = useState<AppError | null>(null);
+  const [prepareBusy, setPrepareBusy] = useState(false);
+  const [prepareNonce, setPrepareNonce] = useState(0);
+
+  const mentionToken = useMemo(() => findMentionToken(prompt), [prompt]);
+  const mentionOpen = mentionToken !== null && !mentionDismissed;
+  const debouncedMentionQuery = useDebouncedValue(
+    mentionOpen && mentionToken ? mentionToken.query : null,
+    150,
+  );
+
+  useEffect(() => {
+    if (!project || !mentionOpen || debouncedMentionQuery === null) {
+      setMentionResults([]);
+      setMentionLoading(false);
+      setMentionError(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setMentionLoading(true);
+    setMentionError(null);
+    api.workspace.match(project.id, debouncedMentionQuery, 20).then(
+      (results) => {
+        if (!cancelled) {
+          setMentionResults(results.filter((entry) => !entry.is_dir));
+          setMentionIndex(0);
+          setMentionLoading(false);
+        }
+      },
+      (reason: unknown) => {
+        if (!cancelled) {
+          setMentionError(toAppError(reason));
+          setMentionLoading(false);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.id, mentionOpen, debouncedMentionQuery]);
+
+  const chooseMention = (match: FileMatch) => {
+    if (!project || !mentionToken) {
+      return;
+    }
+    const scope = project.id;
+    const inserted = insertMention(prompt, mentionToken, match.path);
+    setPrompt(inserted.text);
+    setMentionDismissed(true);
+    setMentionResults([]);
+    setChips((current) => addChip(current, { path: match.path, size: null }));
+    composerRef.current?.focus();
+    window.requestAnimationFrame(() => {
+      const element = composerRef.current;
+      if (element) {
+        element.setSelectionRange(inserted.caret, inserted.caret);
+      }
+    });
+    void api.workspace.meta(scope, match.path).then(
+      (meta) => {
+        if (projectIdRef.current === scope) {
+          setChips((current) => addChip(current, { path: match.path, size: meta.size }));
+        }
+      },
+      () => undefined,
+    );
+  };
+
+  const handleMentionKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (!mentionOpen) {
+      return false;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setMentionIndex((current) =>
+        mentionResults.length === 0 ? 0 : (current + 1) % mentionResults.length,
+      );
+      return true;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setMentionIndex((current) =>
+        mentionResults.length === 0
+          ? 0
+          : (current - 1 + mentionResults.length) % mentionResults.length,
+      );
+      return true;
+    }
+    if (event.key === "Enter") {
+      const target = mentionResults[mentionIndex];
+      if (target) {
+        event.preventDefault();
+        chooseMention(target);
+        return true;
+      }
+      return false;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setMentionDismissed(true);
+      return true;
+    }
+    return false;
+  };
+
+  const chipPaths = useMemo(() => extractContextPaths(chips), [chips]);
+  const chipKey = chipPaths.join("\n");
+  const debouncedChipKey = useDebouncedValue(chipKey, 300);
+
+  useEffect(() => {
+    if (!project) {
+      setPrepared(null);
+      setPrepareError(null);
+      setPrepareBusy(false);
+      return undefined;
+    }
+    const paths = debouncedChipKey.length > 0 ? debouncedChipKey.split("\n") : [];
+    if (paths.length === 0) {
+      setPrepared(null);
+      setPrepareError(null);
+      setPrepareBusy(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setPrepareBusy(true);
+    setPrepareError(null);
+    api.workspace.prepareContext(project.id, paths, allowSensitiveContext).then(
+      (result) => {
+        if (!cancelled) {
+          setPrepared(result);
+          setPrepareBusy(false);
+        }
+      },
+      (reason: unknown) => {
+        if (!cancelled) {
+          setPrepareError(toAppError(reason));
+          setPrepareBusy(false);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.id, debouncedChipKey, allowSensitiveContext, prepareNonce]);
+
+  const sensitiveSkipped = useMemo(
+    () => (prepared?.skipped ?? []).filter((entry) => /sensible|sensitive/i.test(entry.reason)),
+    [prepared],
+  );
+
+  const clearContext = () => {
+    setChips(clearChips());
+    setAllowSensitiveContext(false);
+    setSensitiveConfirm(false);
+    setPrepared(null);
+    setPrepareError(null);
+  };
+
+  const removeContextChip = (path: string) => {
+    setChips((current) => removeChip(current, path));
+    // Retirer un fichier ne doit pas laisser une autorisation sensible active.
+    setAllowSensitiveContext(false);
+  };
+
   const sendTurn = async (rawPrompt: string, override?: RetryInfo) => {
     if (!project || sendPendingRef.current || activeTurnRef.current || finalizingRef.current) {
       return;
@@ -574,6 +793,10 @@ export function ChatPage() {
     if (!targetProvider || !text || !targetModel) {
       return;
     }
+    const contextPathsSent = override ? override.contextPaths : chipPaths;
+    const allowSensitiveSent = override
+      ? override.allowSensitiveContext
+      : allowSensitiveContext;
     sendPendingRef.current = true;
     finalizingRef.current = null;
     pendingDeltasRef.current.clear();
@@ -584,7 +807,17 @@ export function ChatPage() {
     setStopping(false);
 
     const accepted = await sendAction.run(() =>
-      api.chat.send(project.id, targetThreadId, targetProvider.id, targetModel, text),
+      api.chat.send(
+        project.id,
+        targetThreadId,
+        targetProvider.id,
+        targetModel,
+        text,
+        null,
+        null,
+        contextPathsSent,
+        allowSensitiveSent,
+      ),
     );
     sendPendingRef.current = false;
     if (!accepted) {
@@ -600,6 +833,13 @@ export function ChatPage() {
       return;
     }
 
+    if (!override) {
+      // Le contexte a été joint : on vide les chips sans toucher au message.
+      setChips(clearChips());
+      setAllowSensitiveContext(false);
+      setSensitiveConfirm(false);
+      setPrepared(null);
+    }
     if (selectedThreadRef.current !== accepted.thread_id) {
       const now = new Date().toISOString();
       const stub: Thread = {
@@ -628,6 +868,8 @@ export function ChatPage() {
       localUserId: `local-${accepted.request_id}`,
       startedAt: Date.now(),
       finished: false,
+      contextPaths: contextPathsSent,
+      allowSensitiveContext: allowSensitiveSent,
     };
     setActiveTurn(turn);
     dispatchStream({
@@ -835,6 +1077,15 @@ export function ChatPage() {
     setStreamError(null);
     setRetryInfo(null);
     setLastTurn(null);
+    setChips(clearChips());
+    setAllowSensitiveContext(false);
+    setSensitiveConfirm(false);
+    setMentionResults([]);
+    setMentionError(null);
+    setMentionDismissed(false);
+    setPrepared(null);
+    setPrepareError(null);
+    setPrepareBusy(false);
     setStopping(false);
     setActiveTurn(null);
     finalizingRef.current = null;
@@ -1008,11 +1259,30 @@ export function ChatPage() {
       )
     : t("chat.last_turn_none");
 
+  const maxChatWidth = Math.max(
+    MIN_CONVERSATION_WIDTH,
+    Math.min(
+      maxConversationWidth(ws.bounds),
+      ws.bounds.width -
+        (ws.layout.explorer_visible ? MIN_EXPLORER_WIDTH : 0) -
+        MIN_EDITOR_WIDTH -
+        14,
+    ),
+  );
+  const maxExplorer = Math.max(
+    MIN_EXPLORER_WIDTH,
+    Math.min(
+      maxExplorerWidth(ws.bounds),
+      ws.bounds.width - ws.layout.conversation_width - MIN_EDITOR_WIDTH - 14,
+    ),
+  );
+  const maxBottom = maxBottomHeight(ws.bounds);
+
   return (
     <>
       <PageHeader
-        title={t("chat.title")}
-        subtitle={t("chat.subtitle")}
+        title={t("workspace.title")}
+        subtitle={project.path}
         actions={
           <>
             <button
@@ -1027,6 +1297,33 @@ export function ChatPage() {
               <RefreshCw size={15} aria-hidden="true" />
               {t("common.refresh")}
             </button>
+            <button
+              type="button"
+              className="ghost"
+              onClick={ws.toggleExplorer}
+              aria-pressed={ws.layout.explorer_visible}
+            >
+              <PanelLeft size={15} aria-hidden="true" />
+              {ws.layout.explorer_visible
+                ? t("workspace.hide_explorer")
+                : t("workspace.show_explorer")}
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              onClick={ws.toggleBottom}
+              aria-expanded={ws.layout.bottom_open}
+              aria-controls="workspace-bottom-panel"
+            >
+              <PanelBottom size={15} aria-hidden="true" />
+              {ws.layout.bottom_open
+                ? t("workspace.hide_bottom")
+                : t("workspace.show_bottom")}
+            </button>
+            <button type="button" className="ghost" onClick={ws.resetLayout}>
+              <RotateCcw size={15} aria-hidden="true" />
+              {t("workspace.reset_layout")}
+            </button>
           </>
         }
       />
@@ -1038,6 +1335,9 @@ export function ChatPage() {
         </span>
         <span className="chat-resource-item" title={t("chat.last_turn")}>
           {lastTurnLabel}
+        </span>
+        <span className="chat-resource-item" title={project.path}>
+          {t("workspace.project_label", { name: project.name })}
         </span>
         {activeTurn && !activeTurn.finished ? (
           <button
@@ -1082,8 +1382,29 @@ export function ChatPage() {
         />
       ) : null}
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
+      {ws.layoutError ? (
+        <ErrorBanner error={ws.layoutError} onDismiss={ws.dismissLayoutError} />
+      ) : null}
 
-      <div className="chat-layout">
+      {!ws.hydrated ? (
+        <LoadingRow label={t("workspace.loading")} />
+      ) : (
+      <div className="workspace-shell" ref={ws.containerRef}>
+        <div
+          className="workspace-main"
+          style={{
+            height: ws.layout.bottom_open
+              ? `calc(100% - ${ws.layout.bottom_height}px - 10px)`
+              : "100%",
+          }}
+        >
+          <div
+            className={
+              ws.layout.conversation_width < 560 ? "workspace-chat compact" : "workspace-chat"
+            }
+            style={{ width: ws.layout.conversation_width }}
+          >
+            <div className="chat-layout">
         <section className="card chat-threads" aria-labelledby="chat-threads-title">
           <div className="section-heading">
             <h2 id="chat-threads-title">{t("chat.threads")}</h2>
@@ -1437,7 +1758,191 @@ export function ChatPage() {
               ) : null}
             </div>
 
+            <div className="context-bar" aria-labelledby="context-bar-title">
+              <div className="context-bar-head">
+                <span className="context-bar-title" id="context-bar-title">
+                  <AtSign size={13} aria-hidden="true" />
+                  {t("workspace.project_label", { name: project.name })}
+                </span>
+                {chipPaths.length > 0 ? (
+                  <button type="button" className="ghost small" onClick={clearContext}>
+                    <Trash2 size={12} aria-hidden="true" />
+                    {t("workspace.clear_context")}
+                  </button>
+                ) : null}
+              </div>
+              <p className="small muted">{t("workspace.context_hint")}</p>
+              {chips.length > 0 ? (
+                <ul className="context-chips" aria-label={t("workspace.context_files")}>
+                  {chips.map((chip) => (
+                    <li key={chip.path} className="context-chip">
+                      <FileCode2 size={12} aria-hidden="true" />
+                      <span className="mono small" title={chip.path}>
+                        {chip.path}
+                      </span>
+                      <span className="small muted">
+                        {chip.size !== null
+                          ? formatBytes(chip.size)
+                          : t("workspace.size_unknown")}
+                      </span>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={t("workspace.remove_context_file", { path: chip.path })}
+                        title={t("workspace.remove_context_file", { path: chip.path })}
+                        onClick={() => removeContextChip(chip.path)}
+                      >
+                        <X size={12} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {allowSensitiveContext ? (
+                <div className="context-sensitive-flag">
+                  <Badge tone="warning">
+                    <ShieldAlert size={12} aria-hidden="true" />
+                    {t("workspace.sensitive_allowed")}
+                  </Badge>
+                  <button
+                    type="button"
+                    className="ghost small"
+                    onClick={() => setAllowSensitiveContext(false)}
+                  >
+                    {t("workspace.sensitive_revoke")}
+                  </button>
+                </div>
+              ) : null}
+              {ws.settingsError ? (
+                <p className="small danger-text">
+                  {t("workspace.settings_error", { message: ws.settingsError.message })}
+                </p>
+              ) : null}
+              {prepareBusy ? (
+                <p className="small muted" role="status">
+                  <Spinner /> {t("workspace.context_preparing")}
+                </p>
+              ) : null}
+              {prepareError ? (
+                <ErrorBanner
+                  error={prepareError}
+                  onRetry={() => setPrepareNonce((value) => value + 1)}
+                />
+              ) : null}
+              {prepared ? (
+                <div className="context-preview" aria-live="polite">
+                  <p className="small">
+                    {t("workspace.context_included", { count: prepared.files.length })} ·{" "}
+                    {t("workspace.context_bytes", {
+                      bytes: formatBytes(prepared.total_bytes),
+                    })}
+                    {ws.settings
+                      ? ` · ${t("workspace.context_budget", {
+                          max: formatBytes(ws.settings.max_total_bytes),
+                          files: ws.settings.max_files,
+                        })}`
+                      : ""}
+                  </p>
+                  {prepared.files.length === 0 ? (
+                    <p className="small muted">{t("workspace.context_none")}</p>
+                  ) : (
+                    <ul className="context-preview-list">
+                      {prepared.files.map((file) => (
+                        <li key={file.path}>
+                          <span className="mono small" title={file.path}>
+                            {file.path}
+                          </span>
+                          <span className="small muted">{formatBytes(file.bytes)}</span>
+                          {file.truncated ? (
+                            <Badge tone="warning">{t("workspace.context_truncated")}</Badge>
+                          ) : null}
+                          {file.sensitive ? (
+                            <Badge tone="warning">{t("workspace.context_sensitive")}</Badge>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {prepared.skipped.length > 0 ? (
+                    <div className="context-skipped">
+                      <p className="small">
+                        <strong>
+                          {t("workspace.context_skipped_title", {
+                            count: prepared.skipped.length,
+                          })}
+                        </strong>
+                      </p>
+                      <ul className="context-preview-list">
+                        {prepared.skipped.map((entry) => (
+                          <li key={entry.path}>
+                            <span className="mono small" title={entry.path}>
+                              {entry.path}
+                            </span>
+                            <span className="small muted">{entry.reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      {sensitiveSkipped.length > 0 && !allowSensitiveContext ? (
+                        <button
+                          type="button"
+                          className="ghost small"
+                          onClick={() => setSensitiveConfirm(true)}
+                        >
+                          <ShieldAlert size={12} aria-hidden="true" />
+                          {t("workspace.include_sensitive")}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
             <div className="chat-composer">
+              {mentionOpen ? (
+                <div
+                  className="mention-pop"
+                  role="listbox"
+                  id="chat-mention-list"
+                  aria-label={t("workspace.mention_label")}
+                >
+                  <div className="mention-pop-head">
+                    <span className="small muted">{t("workspace.mention_hint")}</span>
+                    {mentionLoading ? <Spinner /> : null}
+                  </div>
+                  {mentionError ? (
+                    <p className="small danger-text">{mentionError.message}</p>
+                  ) : null}
+                  {!mentionLoading && mentionResults.length === 0 && !mentionError ? (
+                    <p className="small muted">
+                      {t("workspace.mention_empty", { query: mentionToken?.query ?? "" })}
+                    </p>
+                  ) : null}
+                  {mentionResults.map((match, index) => (
+                    <button
+                      key={match.path}
+                      type="button"
+                      role="option"
+                      aria-selected={index === mentionIndex}
+                      className={
+                        index === mentionIndex
+                          ? "mention-option active"
+                          : "mention-option"
+                      }
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => chooseMention(match)}
+                    >
+                      <FileCode2 size={13} aria-hidden="true" />
+                      <span className="mono small" title={match.path}>
+                        {match.path}
+                      </span>
+                      {match.excluded ? (
+                        <Badge tone="warning">{t("workspace.excluded")}</Badge>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <Field label={t("chat.prompt_label")} htmlFor="chat-prompt" hint={t("chat.prompt_hint")}>
                 <textarea
                   id="chat-prompt"
@@ -1447,9 +1952,18 @@ export function ChatPage() {
                   value={prompt}
                   placeholder={t("chat.prompt_placeholder")}
                   aria-label={t("chat.prompt_label")}
+                  aria-autocomplete="list"
+                  aria-expanded={mentionOpen}
+                  aria-controls={mentionOpen ? "chat-mention-list" : undefined}
                   disabled={generating || selectedProvider === null}
-                  onChange={(event) => setPrompt(event.target.value)}
+                  onChange={(event) => {
+                    setPrompt(event.target.value);
+                    setMentionDismissed(false);
+                  }}
                   onKeyDown={(event) => {
+                    if (handleMentionKeyDown(event)) {
+                      return;
+                    }
                     if (
                       event.key === "Enter" &&
                       !event.shiftKey &&
@@ -1491,7 +2005,62 @@ export function ChatPage() {
             </div>
           </section>
         )}
+            </div>
+          </div>
+
+          <Resizer
+            orientation="vertical"
+            value={ws.layout.conversation_width}
+            min={MIN_CONVERSATION_WIDTH}
+            max={Math.max(MIN_CONVERSATION_WIDTH, maxChatWidth)}
+            label={t("workspace.resize_conversation")}
+            onChange={(value) => ws.updateLayout({ conversation_width: value })}
+          />
+
+          {ws.layout.explorer_visible ? (
+            <>
+              <FileExplorer
+                projectId={project.id}
+                projectName={project.name}
+                activePath={ws.activePath}
+                width={ws.layout.explorer_width}
+                onOpen={(path) => void ws.openFile(path)}
+                onHide={ws.toggleExplorer}
+              />
+              <Resizer
+                orientation="vertical"
+                value={ws.layout.explorer_width}
+                min={MIN_EXPLORER_WIDTH}
+                max={Math.max(MIN_EXPLORER_WIDTH, maxExplorer)}
+                label={t("workspace.resize_explorer")}
+                onChange={(value) => ws.updateLayout({ explorer_width: value })}
+              />
+            </>
+          ) : null}
+
+          <WorkspaceEditor workspace={ws} />
+        </div>
+
+        {ws.layout.bottom_open ? (
+          <Resizer
+            orientation="horizontal"
+            value={ws.layout.bottom_height}
+            min={MIN_BOTTOM_HEIGHT}
+            max={Math.max(MIN_BOTTOM_HEIGHT, maxBottom)}
+            label={t("workspace.resize_bottom")}
+            onChange={(value) => ws.updateLayout({ bottom_height: value })}
+          />
+        ) : null}
+        <BottomPanel
+          workspace={ws}
+          projectId={project.id}
+          activeTab={ws.layout.bottom_tab}
+          open={ws.layout.bottom_open}
+          onTabChange={ws.setBottomTab}
+          onClose={ws.toggleBottom}
+        />
       </div>
+      )}
 
       <Modal
         open={renameTarget !== null}
@@ -1551,6 +2120,25 @@ export function ChatPage() {
         onCancel={() => setToDelete(null)}
         onConfirm={() => void handleDelete()}
         busy={deleteAction.busy}
+        danger
+      />
+
+      <ConfirmDialog
+        open={sensitiveConfirm}
+        title={t("workspace.sensitive_confirm_title")}
+        description={
+          <>
+            <p>{t("workspace.sensitive_confirm_text", { count: sensitiveSkipped.length })}</p>
+            <p className="small muted">{t("workspace.sensitive_confirm_hint")}</p>
+          </>
+        }
+        confirmLabel={t("workspace.include_sensitive")}
+        onCancel={() => setSensitiveConfirm(false)}
+        onConfirm={() => {
+          setSensitiveConfirm(false);
+          setPrepared(null);
+          setAllowSensitiveContext(true);
+        }}
         danger
       />
     </>

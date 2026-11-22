@@ -14,11 +14,13 @@
 //! - Les fichiers binaires (octet nul) et les fichiers de plus de 2 Mio sont
 //!   ignorés par la recherche et bornés en lecture.
 
+pub mod diff;
 pub mod fs;
 pub mod git;
 pub mod pty;
 
-pub use fs::{FileContent, FileNode, ProjectFs, SearchHit};
+pub use diff::{diff_lines, DiffKind, DiffLine, Hunk, LineDiff};
+pub use fs::{FileContent, FileMeta, FileNode, ProjectFs, SearchHit, WriteOutcome};
 pub use git::{CommitInfo, GitRepo, GitStatus, StatusEntry, Worktree};
 pub use pty::{read_chunk, AsyncPtyReader, PtySession};
 

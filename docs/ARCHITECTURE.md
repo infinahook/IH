@@ -50,6 +50,8 @@
 | `ih-workspace` | Git, édition confinée, terminal PTY | prison de chemins, worktrees, absence de zombie |
 | `ih-orchestrator` | graphe de tâches, équipes, ordonnanceur, mémoire injectée | cycles, disponibilité, budget de contexte |
 | `ih-update` | manifeste signé Ed25519, SHA-256, staging, plan d'installation, rollback AppImage | signature, digest, remplacement atomique |
+| `ih-chat` | moteur de conversation : streaming, annulation, contexte injecté | annulation, historique borné, e2e Ollama réel |
+| `ih-context` | assemblage du contexte projet, exclusions, mentions `@` | exclusions, secrets, troncature, budget, prison de chemins |
 | `ih-i18n` | catalogues FR/EN partagés avec l'interface | parité stricte des clés |
 
 ## Flux d'une session d'agent
@@ -65,6 +67,18 @@
    le groupe de processus ; l'état final est conservé pour que
    `agent_state`/`wait` ne dépendent pas d'une course.
 6. L'état est persisté dans `sessions` par `ih-desktop`.
+
+## Flux du contexte projet
+
+1. L'interface appelle `files_match` pour la complétion `@` (recherche floue,
+   fichiers exclus signalés).
+2. L'utilisateur sélectionne des fichiers : ils deviennent des « chips ».
+3. `context_prepare` assemble l'aperçu : fichiers inclus, octets réellement lus,
+   troncatures, fichiers écartés avec motif.
+4. À l'envoi, `chat_send` reçoit **les chemins**, pas le contenu. Le noyau
+   assemble le bloc et l'injecte dans le message système de `ih-chat`.
+5. Le diff (`diff_prepare`) calcule les lignes modifiées sans écrire ; l'écriture
+   n'a lieu qu'après `diff_accept`, avec revérification de l'empreinte SHA-256.
 
 ## Politique de ressources (16 Go / GTX 1660 Ti)
 

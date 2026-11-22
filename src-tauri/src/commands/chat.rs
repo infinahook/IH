@@ -37,6 +37,10 @@ pub async fn chat_send(
     prompt: String,
     system: Option<String>,
     history_limit: Option<usize>,
+    // Chemins relatifs des fichiers joints comme contexte : le contenu est lu
+    // et assemblé par le noyau (`ih-context`), jamais par l'interface.
+    context_paths: Option<Vec<String>>,
+    allow_sensitive_context: Option<bool>,
 ) -> IhResult<ChatAccepted> {
     if prompt.trim().is_empty() {
         return Err(IhError::Invalid("message vide".into()));
@@ -86,6 +90,23 @@ pub async fn chat_send(
         prompt,
     );
     turn.system = system;
+    if let Some(paths) = context_paths {
+        if !paths.is_empty() {
+            let config = state.config_snapshot()?;
+            let options = ih_context::ContextOptions {
+                max_files: config.workspace.max_context_files,
+                max_bytes_per_file: config.workspace.max_context_bytes_per_file,
+                max_total_bytes: config.workspace.max_context_bytes,
+                allow_sensitive: allow_sensitive_context.unwrap_or(false),
+                extra_exclusions: config.workspace.exclusions.clone(),
+            };
+            let root = super::project_path(&state, project.as_str())?;
+            let prepared = ih_context::prepare(&root, &paths, &options)?;
+            if !prepared.prompt_block.trim().is_empty() {
+                turn.context = Some(prepared.prompt_block);
+            }
+        }
+    }
     if let Some(limit) = history_limit {
         turn.history_limit = limit;
     }

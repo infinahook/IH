@@ -49,6 +49,22 @@ et un lien interne légitime.
 - Les CLI héritent de `PATH`/`HOME` mais **aucun secret** ne leur est injecté
   par IH.
 
+### Contexte projet et écriture de fichiers
+- Le contexte est assemblé **côté Rust** (`ih-context`) : l'interface ne lit
+  jamais un fichier pour le compte du modèle.
+- Toute lecture passe par `ProjectFs` (prison de chemins, canonicalisation,
+  refus des symlinks sortants).
+- Exclusions par défaut : `.env`, `.env.*`, `id_rsa`, `id_ed25519`, `*.pem`,
+  `*.key`, `*.p12`, `.ssh/`, `node_modules/`, `target/`, `.git/`, `dist/`,
+  `build/`, `.venv/`, `__pycache__/`. Liste complétable dans la configuration.
+- Détection de secrets **par contenu** (clé privée, `api_key =`, `sk-…`,
+  mot de passe) : inclusion seulement après confirmation explicite, et le
+  fichier est marqué `sensitive` dans l'aperçu.
+- Limites : 12 fichiers, 64 Kio par fichier, 256 Kio au total (configurables).
+- **Écriture** : `workspace_save` et `diff_accept` exigent l'empreinte SHA-256
+  lue à l'ouverture ; une divergence produit `conflict` et rien n'est écrit.
+  Une sauvegarde de l'ancien contenu est créée dans `~/.config/ih/backups/`.
+
 ### Mises à jour
 - Signature Ed25519 détachée obligatoire + SHA-256 obligatoire.
 - Téléchargement dans un fichier `.part`, renommé seulement après vérification.

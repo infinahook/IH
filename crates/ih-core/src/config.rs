@@ -169,6 +169,37 @@ impl Default for UiConfig {
     }
 }
 
+/// Réglages du workspace et du contexte projet.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkspaceConfig {
+    /// Motifs d'exclusion additionnels (en plus de ceux d'`ih-context`).
+    pub exclusions: Vec<String>,
+    /// Nombre maximal de fichiers envoyés comme contexte.
+    pub max_context_files: usize,
+    /// Octets maximaux lus par fichier de contexte.
+    pub max_context_bytes_per_file: usize,
+    /// Octets maximaux pour l'ensemble du contexte.
+    pub max_context_bytes: usize,
+    /// Taille maximale d'un fichier ouvert dans l'éditeur.
+    pub max_editor_bytes: usize,
+    /// Restaurer les onglets ouverts au redémarrage.
+    pub restore_tabs: bool,
+}
+
+impl Default for WorkspaceConfig {
+    fn default() -> Self {
+        Self {
+            exclusions: Vec::new(),
+            max_context_files: 12,
+            max_context_bytes_per_file: 64 * 1024,
+            max_context_bytes: 256 * 1024,
+            max_editor_bytes: 2 * 1024 * 1024,
+            restore_tabs: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LoggingConfig {
@@ -200,6 +231,7 @@ pub struct AppConfig {
     pub terminal: TerminalConfig,
     pub ui: UiConfig,
     pub logging: LoggingConfig,
+    pub workspace: WorkspaceConfig,
     pub recent_projects: Vec<String>,
     pub last_project: Option<String>,
     pub telemetry: bool,
@@ -218,6 +250,7 @@ impl Default for AppConfig {
             terminal: TerminalConfig::default(),
             ui: UiConfig::default(),
             logging: LoggingConfig::default(),
+            workspace: WorkspaceConfig::default(),
             recent_projects: Vec::new(),
             last_project: None,
             telemetry: false,
@@ -440,6 +473,44 @@ impl AppConfig {
                 self.logging.level
             )));
         }
+
+        let workspace = &self.workspace;
+        if workspace.max_context_files == 0 || workspace.max_context_files > 50 {
+            return Err(IhError::Config(
+                "workspace.max_context_files doit être entre 1 et 50".into(),
+            ));
+        }
+        if workspace.max_context_bytes_per_file < 1024
+            || workspace.max_context_bytes_per_file > 1024 * 1024
+        {
+            return Err(IhError::Config(
+                "workspace.max_context_bytes_per_file doit être entre 1 Kio et 1 Mio".into(),
+            ));
+        }
+        if workspace.max_context_bytes < workspace.max_context_bytes_per_file
+            || workspace.max_context_bytes > 8 * 1024 * 1024
+        {
+            return Err(IhError::Config(
+                "workspace.max_context_bytes doit être ≥ par fichier et ≤ 8 Mio".into(),
+            ));
+        }
+        if workspace.max_editor_bytes < 4096 || workspace.max_editor_bytes > 8 * 1024 * 1024 {
+            return Err(IhError::Config(
+                "workspace.max_editor_bytes doit être entre 4 Kio et 8 Mio".into(),
+            ));
+        }
+        for pattern in &workspace.exclusions {
+            if pattern.trim().is_empty() || pattern.len() > 64 {
+                return Err(IhError::Config(
+                    "motif d'exclusion invalide (1 à 64 caractères)".into(),
+                ));
+            }
+            if pattern.contains("..") || pattern.starts_with('/') {
+                return Err(IhError::Config(format!(
+                    "motif d'exclusion non autorisé : {pattern}"
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -578,6 +649,41 @@ mod tests {
         let mut config = AppConfig::default();
         config.provider_mut("openai").unwrap().base_url = "http://api.openai.com/v1".into();
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn configuration_workspace_par_defaut_valide() {
+        let config = AppConfig::default();
+        config.validate().unwrap();
+        assert_eq!(config.workspace.max_context_files, 12);
+        assert!(config.workspace.restore_tabs);
+        assert!(config.workspace.exclusions.is_empty());
+    }
+
+    #[test]
+    fn configuration_workspace_hors_bornes_refusee() {
+        let base = AppConfig::default();
+
+        let mut config = base.clone();
+        config.workspace.max_context_files = 0;
+        assert!(config.validate().is_err());
+
+        let mut config = base.clone();
+        config.workspace.max_context_files = 500;
+        assert!(config.validate().is_err());
+
+        let mut config = base.clone();
+        config.workspace.max_context_bytes = 1024;
+        config.workspace.max_context_bytes_per_file = 65536;
+        assert!(config.validate().is_err(), "total < par fichier");
+
+        let mut config = base.clone();
+        config.workspace.exclusions = vec!["../secret".into()];
+        assert!(config.validate().is_err(), "motif avec .. refusé");
+
+        let mut config = base;
+        config.workspace.exclusions = vec!["node_modules".into(), "*.pem".into()];
+        config.validate().unwrap();
     }
 
     #[test]
