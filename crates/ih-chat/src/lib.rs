@@ -41,6 +41,9 @@ pub struct ChatTurn {
     pub max_tokens: Option<u32>,
     /// Nombre de messages antérieurs réinjectés (borné à [`MAX_HISTORY`]).
     pub history_limit: usize,
+    /// Bloc de contexte projet déjà assemblé (fichiers réellement lus).
+    /// Injecté dans le message système, jamais dans un message utilisateur.
+    pub context: Option<String>,
 }
 
 impl ChatTurn {
@@ -59,6 +62,7 @@ impl ChatTurn {
             temperature: None,
             max_tokens: None,
             history_limit: 40,
+            context: None,
         }
     }
 
@@ -154,7 +158,7 @@ pub async fn run_turn(
     let request = ChatRequest {
         model: turn.model.clone(),
         messages,
-        system: turn.system.clone(),
+        system: merge_system(&turn.system, &turn.context),
         temperature: turn.temperature,
         max_tokens: turn.max_tokens,
     };
@@ -235,6 +239,18 @@ pub async fn run_turn(
         finish_reason,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+/// Concatène le message système et le contexte projet, sans perdre l'un ou l'autre.
+fn merge_system(system: &Option<String>, context: &Option<String>) -> Option<String> {
+    match (system.as_deref(), context.as_deref()) {
+        (Some(sys), Some(ctx)) if !sys.trim().is_empty() && !ctx.trim().is_empty() => {
+            Some(format!("{sys}\n\n{ctx}"))
+        }
+        (Some(sys), _) if !sys.trim().is_empty() => Some(sys.to_string()),
+        (_, Some(ctx)) if !ctx.trim().is_empty() => Some(ctx.to_string()),
+        _ => None,
+    }
 }
 
 /// Titre court dérivé du premier message (une seule ligne, 60 caractères max).
@@ -634,6 +650,51 @@ mod tests {
             thread.title,
             "Ajoute un système de chat à IH avec streaming."
         );
+    }
+
+    #[tokio::test]
+    async fn contexte_projet_injecte_dans_le_message_systeme() {
+        let (store, _project, thread_id) = fixture();
+        let provider = FakeProvider::new(&["ok"]);
+        let mut sink = |_: &str| {};
+        let mut turn = ChatTurn::new(thread_id.clone(), "fake", "fake-1", "analyse ce fichier");
+        turn.system = Some("Tu es un assistant de développement.".into());
+        turn.context = Some(
+            "Contexte projet (fichiers réellement lus) :\n--- src/main.rs ---\nfn main() {}".into(),
+        );
+        run_turn(&provider, &store, &turn, cancel_channel().1, &mut sink)
+            .await
+            .unwrap();
+
+        let request = provider.last_request();
+        let system = request.system.expect("message système");
+        assert!(
+            system.contains("assistant de développement"),
+            "system: {system}"
+        );
+        assert!(system.contains("src/main.rs"), "contexte absent: {system}");
+        // Le contexte ne pollue pas le message utilisateur.
+        assert_eq!(
+            request.messages.last().unwrap().content,
+            "analyse ce fichier"
+        );
+    }
+
+    #[tokio::test]
+    async fn sans_contexte_le_comportement_est_inchange() {
+        let (store, _project, thread_id) = fixture();
+        let provider = FakeProvider::new(&["ok"]);
+        let mut sink = |_: &str| {};
+        run_turn(
+            &provider,
+            &store,
+            &ChatTurn::new(thread_id, "fake", "fake-1", "salut"),
+            cancel_channel().1,
+            &mut sink,
+        )
+        .await
+        .unwrap();
+        assert!(provider.last_request().system.is_none());
     }
 
     #[test]

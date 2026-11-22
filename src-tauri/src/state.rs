@@ -17,6 +17,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use tauri::{AppHandle, Emitter};
 
+/// Modification préparée mais non appliquée (diff en attente de décision).
+pub struct PendingDiff {
+    pub project_id: String,
+    pub path: String,
+    pub before_sha256: String,
+    pub content: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct UpdateStatus {
     pub state: String,
@@ -41,6 +50,8 @@ pub struct AppState {
     pub platform: PlatformInfo,
     pub update_status: Mutex<UpdateStatus>,
     pub staged_update: Mutex<Option<ih_update::StagedUpdate>>,
+    /// Modifications préparées, en attente d'acceptation ou de rejet.
+    pub pending_diffs: Mutex<HashMap<String, PendingDiff>>,
     pub app_handle: AppHandle,
     /// Garde le writer non bloquant en vie : sans lui, les dernières lignes
     /// de journal ne sont jamais écrites.
@@ -81,6 +92,7 @@ impl AppState {
                 ..Default::default()
             }),
             staged_update: Mutex::new(None),
+            pending_diffs: Mutex::new(HashMap::new()),
             app_handle,
             log_guard,
         })

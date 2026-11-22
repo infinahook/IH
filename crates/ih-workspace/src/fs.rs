@@ -25,6 +25,10 @@ use walkdir::{DirEntry, WalkDir};
 
 use crate::MAX_TEXT_FILE_BYTES;
 
+fn short_hash(hash: &str) -> &str {
+    hash.get(0..12).unwrap_or(hash)
+}
+
 /// Dossiers techniques exclus de l'exploration et de la recherche.
 const IGNORED_DIRS: [&str; 3] = [".git", "target", "node_modules"];
 
@@ -73,6 +77,41 @@ pub struct SearchHit {
     pub preview: String,
 }
 
+/// Métadonnées d'un fichier, utilisées pour détecter les modifications
+/// externes et éviter les écrasements silencieux.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileMeta {
+    pub path: String,
+    pub size: u64,
+    /// Horodatage de modification (millisecondes depuis l'époque), si disponible.
+    pub modified_ms: Option<u64>,
+    /// SHA-256 hexadécimal du contenu.
+    pub sha256: String,
+    pub is_binary: bool,
+}
+
+/// Résultat d'une écriture vérifiée.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WriteOutcome {
+    pub bytes: u64,
+    pub sha256: String,
+    /// Chemin de la sauvegarde créée avant écrasement, si demandée.
+    pub backup: Option<String>,
+}
+
+/// Vrai si les premiers octets contiennent un zéro (fichier binaire).
+pub fn looks_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(8192).any(|byte| *byte == 0)
+}
+
+/// SHA-256 hexadécimal d'un flux d'octets.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
+
 impl ProjectFs {
     /// Ouvre un projet : la racine est canonicalisée une fois pour toutes.
     pub fn new(root: &Path) -> IhResult<Self> {
@@ -93,6 +132,108 @@ impl ProjectFs {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Métadonnées complètes d'un fichier du projet (taille, hash, binarité).
+    pub fn metadata(&self, rel_path: &str) -> IhResult<FileMeta> {
+        let path = self.resolve(rel_path)?;
+        let metadata = sysfs::metadata(&path)?;
+        if !metadata.is_file() {
+            return Err(IhError::Invalid(format!(
+                "ce n'est pas un fichier : {rel_path}"
+            )));
+        }
+        let mut file = sysfs::File::open(&path)?;
+        let mut hasher = <sha2::Sha256 as sha2::Digest>::new();
+        let mut head = Vec::with_capacity(8192);
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let read = file.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            if head.len() < 8192 {
+                let take = (8192 - head.len()).min(read);
+                head.extend_from_slice(&buffer[..take]);
+            }
+            sha2::Digest::update(&mut hasher, &buffer[..read]);
+        }
+        let modified_ms = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as u64);
+        Ok(FileMeta {
+            path: normalize_rel(Path::new(rel_path)),
+            size: metadata.len(),
+            modified_ms,
+            sha256: hex::encode(sha2::Digest::finalize(hasher)),
+            is_binary: looks_binary(&head),
+        })
+    }
+
+    /// Écriture vérifiée : refuse d'écraser un fichier modifié depuis la
+    /// lecture, et sauvegarde l'ancien contenu si `backup_dir` est fourni.
+    pub fn write_checked(
+        &self,
+        rel_path: &str,
+        content: &str,
+        expected_sha256: Option<&str>,
+        backup_dir: Option<&Path>,
+    ) -> IhResult<WriteOutcome> {
+        let target = self.resolve(rel_path)?;
+        let existing = if target.is_file() {
+            Some(self.metadata(rel_path)?)
+        } else {
+            None
+        };
+
+        if let (Some(expected), Some(current)) = (expected_sha256, existing.as_ref()) {
+            if !expected.eq_ignore_ascii_case(&current.sha256) {
+                return Err(IhError::Conflict(format!(
+                    "le fichier {rel_path} a changé sur le disque depuis sa lecture \
+                     (attendu {}, trouvé {})",
+                    short_hash(expected),
+                    short_hash(&current.sha256)
+                )));
+            }
+        }
+
+        let mut backup = None;
+        if let (Some(dir), Some(current)) = (backup_dir, existing.as_ref()) {
+            sysfs::create_dir_all(dir)?;
+            let name = Path::new(rel_path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "fichier".into());
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            let safe: String = name
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
+            let backup_path = dir.join(format!(
+                "{safe}.{stamp}.{}.bak",
+                short_hash(&current.sha256)
+            ));
+            sysfs::copy(&target, &backup_path)?;
+            backup = Some(backup_path.display().to_string());
+        }
+
+        let bytes = self.write_text(rel_path, content)?;
+        Ok(WriteOutcome {
+            bytes,
+            sha256: sha256_hex(content.as_bytes()),
+            backup,
+        })
     }
 
     /// Arborescence bornée, sans `.git`, `target` ni `node_modules`.
@@ -414,6 +555,80 @@ fn preview(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn temp_project() -> (std::path::PathBuf, ProjectFs) {
+        let dir = std::env::temp_dir().join(format!("ih-fs-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fs = ProjectFs::new(&dir).unwrap();
+        (dir, fs)
+    }
+
+    #[test]
+    fn metadata_hash_taille_et_binarite() {
+        let (dir, fs) = temp_project();
+        fs.write_text("note.txt", "bonjour").unwrap();
+        let meta = fs.metadata("note.txt").unwrap();
+        assert_eq!(meta.size, 7);
+        assert!(!meta.is_binary);
+        assert_eq!(meta.sha256.len(), 64);
+        assert_eq!(meta.sha256, sha256_hex(b"bonjour"));
+
+        std::fs::write(dir.join("bin.dat"), [0u8, 1, 2, 3]).unwrap();
+        assert!(fs.metadata("bin.dat").unwrap().is_binary);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_checked_refuse_un_ecrasement_si_le_fichier_a_change() {
+        let (dir, fs) = temp_project();
+        fs.write_text("lib.rs", "fn main() {}\n").unwrap();
+        let before = fs.metadata("lib.rs").unwrap();
+
+        // Contenu modifié entre-temps sur le disque.
+        std::fs::write(dir.join("lib.rs"), "fn main() { /* autre */ }\n").unwrap();
+        let error = fs
+            .write_checked(
+                "lib.rs",
+                "nouveau",
+                Some(&before.sha256),
+                Some(&dir.join("bak")),
+            )
+            .unwrap_err();
+        assert!(matches!(error, IhError::Conflict(_)));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("lib.rs")).unwrap(),
+            "fn main() { /* autre */ }\n",
+            "le fichier ne doit pas être écrasé"
+        );
+
+        // Avec l'empreinte courante, l'écriture passe et une sauvegarde est créée.
+        let current = fs.metadata("lib.rs").unwrap();
+        let outcome = fs
+            .write_checked(
+                "lib.rs",
+                "fini\n",
+                Some(&current.sha256),
+                Some(&dir.join("bak")),
+            )
+            .unwrap();
+        assert_eq!(outcome.bytes, 5);
+        assert!(outcome.backup.is_some());
+        assert_eq!(fs.read_text("lib.rs", 1024).unwrap().content, "fini\n");
+        let backup = outcome.backup.unwrap();
+        assert!(std::path::Path::new(&backup).is_file());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_checked_cree_un_fichier_absent_sans_sauvegarde() {
+        let (dir, fs) = temp_project();
+        let outcome = fs
+            .write_checked("neuf.rs", "x\n", None, Some(&dir.join("bak")))
+            .unwrap();
+        assert!(outcome.backup.is_none());
+        assert!(dir.join("neuf.rs").is_file());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     use std::sync::atomic::{AtomicU32, Ordering};
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);

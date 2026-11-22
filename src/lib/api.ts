@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { LineDiff } from "./diff";
 import type { Locale } from "./i18n";
 
 // ---------------------------------------------------------------- erreurs
@@ -504,6 +505,85 @@ export interface WorkflowRun {
   finished_at: string | null;
 }
 
+// -------------------------------------------------------------- workspace
+
+/** Limites et exclusions du contexte projet, telles que le noyau les applique. */
+export interface ContextSettings {
+  max_files: number;
+  max_bytes_per_file: number;
+  max_total_bytes: number;
+  exclusions: string[];
+  /**
+   * Limite de l'éditeur. Le contrat actuel ne l'expose pas toujours ; quand
+   * elle est absente, l'interface retombe sur une borne prudente et sur le
+   * drapeau `truncated` de `file_read`.
+   */
+  max_editor_bytes?: number;
+}
+
+/** Métadonnées disque d'un fichier du projet (empreinte, binaire, taille). */
+export interface WorkspaceMeta {
+  path: string;
+  size: number;
+  modified_ms: number | null;
+  sha256: string;
+  is_binary: boolean;
+}
+
+/** Résultat d'une écriture vérifiée. */
+export interface WorkspaceWriteOutcome {
+  bytes: number;
+  sha256: string;
+  backup: string | null;
+}
+
+/** Candidat de la liste de mentions `@` (`files_match`). */
+export interface FileMatch {
+  path: string;
+  score: number;
+  is_dir: boolean;
+  excluded: boolean;
+}
+
+export interface PreparedContextFile {
+  path: string;
+  content: string;
+  bytes: number;
+  truncated: boolean;
+  sensitive: boolean;
+}
+
+export interface SkippedContextFile {
+  path: string;
+  reason: string;
+}
+
+/** Aperçu exact de ce que `chat_send` joindra au prochain message. */
+export interface PreparedContext {
+  files: PreparedContextFile[];
+  skipped: SkippedContextFile[];
+  total_bytes: number;
+  prompt_block: string;
+}
+
+/** Diff préparé côté noyau, en attente d'acceptation ou de rejet. */
+export interface DiffPreview {
+  id: string;
+  path: string;
+  before_sha256: string | null;
+  additions: number;
+  deletions: number;
+  diff: LineDiff;
+}
+
+/** Modification préparée mais non appliquée. */
+export interface PendingDiff {
+  id: string;
+  project_id: string;
+  path: string;
+  created_at: string;
+}
+
 // ------------------------------------------------------------ mises à jour
 
 export interface UpdateStatus {
@@ -685,6 +765,8 @@ export const api = {
       prompt: string,
       system: string | null = null,
       historyLimit: number | null = null,
+      contextPaths: string[] = [],
+      allowSensitiveContext = false,
     ) =>
       call<ChatAccepted>("chat_send", {
         projectId,
@@ -694,6 +776,9 @@ export const api = {
         prompt,
         system,
         historyLimit,
+        // Le noyau lit lui-même les fichiers : seuls les chemins transitent ici.
+        contextPaths,
+        allowSensitiveContext,
       }),
     cancel: (requestId: string) => call<boolean>("chat_cancel", { requestId }),
     active: () => call<number>("chat_active"),
@@ -729,6 +814,37 @@ export const api = {
       call<WorkflowRun>("workflow_run_now", { id: workflowId }),
     runs: (workflowId: string, limit = 20) =>
       call<WorkflowRun[]>("workflow_runs", { id: workflowId, limit }),
+  },
+
+  // espace de travail : fichiers, contexte, diff et disposition
+  workspace: {
+    contextSettings: () => call<ContextSettings>("context_settings"),
+    meta: (projectId: string, path: string) =>
+      call<WorkspaceMeta>("workspace_meta", { projectId, path }),
+    save: (
+      projectId: string,
+      path: string,
+      content: string,
+      expectedSha256: string | null = null,
+    ) =>
+      call<WorkspaceWriteOutcome>("workspace_save", {
+        projectId,
+        path,
+        content,
+        expectedSha256,
+      }),
+    match: (projectId: string, query: string, limit = 20) =>
+      call<FileMatch[]>("files_match", { projectId, query, limit }),
+    prepareContext: (projectId: string, paths: string[], allowSensitive = false) =>
+      call<PreparedContext>("context_prepare", { projectId, paths, allowSensitive }),
+    diffPrepare: (projectId: string, path: string, content: string) =>
+      call<DiffPreview>("diff_prepare", { projectId, path, content }),
+    diffPending: () => call<PendingDiff[]>("diff_pending"),
+    diffAccept: (diffId: string) =>
+      call<WorkspaceWriteOutcome>("diff_accept", { id: diffId }),
+    diffReject: (diffId: string) => call<void>("diff_reject", { id: diffId }),
+    layoutGet: () => call<string | null>("layout_get"),
+    layoutSave: (layout: string) => call<void>("layout_save", { layout }),
   },
 
   // mises à jour

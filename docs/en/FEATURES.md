@@ -6,7 +6,7 @@ This is the **honest** reference. Three statuses:
 - ⚠️ **partial**: genuinely works, but part of the need is uncovered — stated explicitly.
 - ❌ **missing**: not implemented. No UI button pretends otherwise.
 
-Last verified: 218 Rust tests + 49 frontend tests, all green.
+Last verified: 256 Rust tests + 92 frontend tests, all green.
 
 | # | Feature | Status | Detail |
 |---|---|---|---|
@@ -18,7 +18,7 @@ Last verified: 218 Rust tests + 49 frontend tests, all green.
 | 6 | Skills: install and updates | ⚠️ | Install from a folder with strict manifest validation, SHA-256 digest, integrity verification, enable, uninstall. **Update from a remote registry: missing** |
 | 7 | MCP plugins | ⚠️ | stdio servers, `initialize`, `tools/list`, `tools/call`, one-shot approval gating, no zombies. **No resources/prompts/sampling, no HTTP/SSE transport** |
 | 8 | Project management | ✅ | Folder picker, persistence, recent projects, list removal **without ever deleting the folder** |
-| 9 | Code editor | ⚠️ | File tree, confined read/write, line numbers, search, Ctrl+S, dirty state. **No syntax highlighting or multi-cursor** |
+| 9 | Code editor | ✅ | CodeMirror 6: Rust/TS/JS/Python/JSON/TOML/Markdown/YAML/CSS/HTML highlighting, line numbers, Ctrl+F, Ctrl+S, tabs, write-conflict detection |
 | 10 | Built-in Linux terminal | ⚠️ | Real PTY (`portable-pty`), input, resize, close, ANSI/OSC filtering. **No full VT emulation** (cursor, alternate screen, IME) |
 | 11 | Git and worktrees | ⚠️ | Porcelain status, diff (staged/unstaged), stage/unstage, commit, branches, log, worktrees. **Local operations only**: no fetch/push/pull/merge/rebase |
 | 12 | Autonomous agents and teams | ⚠️ | Task graph, lead/worker/reviewer roles, dependencies, bounded scheduling, real step execution. **No self-restarting autonomous loop**: the plan is created then executed under user control |
@@ -45,23 +45,37 @@ Last verified: 218 Rust tests + 49 frontend tests, all green.
 - Network errors shown with their code + Retry button.
 - Indicators: generation in progress, tokens consumed, latency.
 
+## 0.2.1 milestone delivered — Workspace, context and diff
+
+- **Three resizable zones** (conversation, workspace, bottom panel), layout
+  persisted in the database and tabs restored on restart.
+- **Explorer + editor**: tree, file search, tabs with dirty state, CodeMirror 6
+  editor across 11 languages.
+- **Rust-assembled project context** (`crates/ih-context`): `@` mentions, fuzzy
+  search, default exclusions, secret detection, size limits, exact preview
+  before sending.
+- **Diff**: bounded line-by-line computation, preview, accept with digest check
+  and backup, reject without writing.
+- Validated in the real binary: `@` mention → chip + preview, `+1 −0` diff,
+  reject (disk untouched), accept (file written), tab restoration.
+
 ## Explicitly missing
 
-1. **Project context in chat** (adding files, `@file` mentions, attachments):
-   planned for 0.2.1.
-2. **Resizable panel workspace** and syntax-highlighted editor: planned for 0.2.1.
-3. **Agent Mode** inside the conversation (running a CLI from chat, before/after
+1. **Binary attachments** (images, PDF) in the chat: absent.
+2. **Agent Mode** inside the conversation (running a CLI from chat, before/after
    diff, accept/reject): planned for 0.2.2.
-4. **Visual Team Mode** (Lead/Worker/Reviewer): planned for 0.2.3.
-5. **CLI agent sessions fed back into chat threads**.
-6. **Remote skills registry** with update verification.
-7. **Non-stdio MCP** (HTTP/SSE, resources, prompts, sampling).
-8. **Remote Git** (`push`, `pull`, `fetch`) and conflict resolution.
-9. **Active background automation scheduler**.
-10. **Audit page** exposed through IPC (storage exists).
-11. **LICENSE file**: license not chosen yet.
-12. **Physical Arch machine**: CI validates build and tests inside an
+3. **Visual Team Mode** (Lead/Worker/Reviewer): planned for 0.2.3.
+4. **CLI agent sessions fed back into chat threads**.
+5. **Remote skills registry** with update verification.
+6. **Non-stdio MCP** (HTTP/SSE, resources, prompts, sampling).
+7. **Remote Git** (`push`, `pull`, `fetch`) and conflict resolution.
+8. **Active background automation scheduler**.
+9. **Audit page** exposed through IPC (storage exists).
+10. **LICENSE file**: license not chosen yet.
+11. **Physical Arch machine**: CI validates build and tests inside an
     `archlinux:latest` container.
+12. **Very large file fallback**: above 2 MiB (configurable limit) the file is
+    not opened.
 
 ## Automated tests
 
@@ -73,14 +87,15 @@ Last verified: 218 Rust tests + 49 frontend tests, all green.
 | `ih-providers` | 15 | 4 providers, SSE/NDJSON, 401 errors, timeout, missing key |
 | `ih-agents` | 13 | adapters, success/failure, cancel, timeout, limit, bounded output |
 | `ih-extensions` | 27 | manifests, digest, install, path jail, MCP stdio, silent server |
-| `ih-workspace` | 22 | Git (status, commit, worktrees), path jail, zombie-free PTY |
 | `ih-orchestrator` | 23 | cycles, readiness, teams, scheduler, memory budget |
 | `ih-update` | 39 | Ed25519 signature, digest, download, staging, rollback |
 | `ih-i18n` | 5 | FR/EN parity, fallback, substitution |
-| `ih-chat` | 10 | streaming, cancellation, bounded history, errors, title, search + **real Ollama e2e** |
-| **Rust total** | **218** | |
-| Frontend (`vitest`) | 49 | i18n, formatting, ANSI, Git, file tree, chat stream reducer, errors |
-| **Total** | **267** | |
+| `ih-chat` | 11 | streaming, cancellation, bounded history, injected context, errors, title, search + **real Ollama e2e** |
+| `ih-context` | 23 | exclusions, secrets, truncation, budget, path jail, fuzzy mentions |
+| `ih-workspace` | 33 | Git, path jail, PTY, **LCS diff**, metadata, checked write |
+| **Rust total** | **256** | |
+| Frontend (`vitest`) | 92 | i18n, formatting, ANSI, Git, file tree, chat, **layout, mentions, tabs, diff** |
+| **Total** | **348** | |
 
 ## Manual verifications performed
 

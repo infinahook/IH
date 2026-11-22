@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 218 tests Rust + 49 tests frontend, tous verts.
+Dernière vérification : 256 tests Rust + 92 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -20,7 +20,7 @@ Dernière vérification : 218 tests Rust + 49 tests frontend, tous verts.
 | 6 | Skills : installation et mises à jour | ⚠️ | Installation depuis un dossier avec validation stricte du manifeste, empreinte SHA-256, vérification d'intégrité, activation, désinstallation. **Mise à jour depuis un registre distant : absente** |
 | 7 | Plugins MCP | ⚠️ | Serveurs stdio, `initialize`, `tools/list`, `tools/call`, appels soumis à approbation à usage unique, pas de zombie. **Pas de resources/prompts/sampling, pas de transport HTTP/SSE** |
 | 8 | Gestion des projets | ✅ | Ouverture par sélecteur de dossier, persistance, projets récents, retrait de liste **sans jamais supprimer le dossier** |
-| 9 | Éditeur de code | ⚠️ | Arbre de fichiers, lecture/écriture confinée, numéros de ligne, recherche, Ctrl+S, détection de modification. **Pas de coloration syntaxique ni de multi-curseurs** |
+| 9 | Éditeur de code | ✅ | CodeMirror 6 : coloration Rust/TS/JS/Python/JSON/TOML/Markdown/YAML/CSS/HTML, numéros de ligne, Ctrl+F, Ctrl+S, onglets, détection de conflit d'écriture |
 | 10 | Terminal Linux intégré | ⚠️ | PTY réel (`portable-pty`), saisie, redimensionnement, fermeture, filtrage ANSI/OSC. **Pas d'émulation VT complète** (curseur, écran alterné, IME) |
 | 11 | Git et worktrees | ⚠️ | Statut porcelain, diff (indexé/non indexé), index/désindex, commit, branches, log, worktrees (création/suppression). **Opérations locales uniquement** : pas de fetch/push/pull/merge/rebase |
 | 12 | Agents autonomes et équipes | ⚠️ | Graphe de tâches, rôles lead/worker/reviewer, dépendances, ordonnancement borné, exécution réelle des étapes. **Pas de boucle autonome auto-relancée** : le plan est créé puis exécuté sous contrôle utilisateur |
@@ -48,24 +48,37 @@ Dernière vérification : 218 tests Rust + 49 tests frontend, tous verts.
 - Erreurs réseau affichées avec leur code + bouton Réessayer.
 - Indicateurs : génération en cours, jetons consommés, latence.
 
+## Jalon 0.2.1 livré — Workspace, contexte et diff
+
+- **Disposition à trois zones** redimensionnables (conversation, workspace,
+  panneau inférieur), disposition persistée en base et onglets restaurés.
+- **Explorateur + éditeur** : arborescence, recherche de fichiers, onglets avec
+  état modifié, éditeur CodeMirror 6 sur 11 langages.
+- **Contexte projet assemblé en Rust** (`crates/ih-context`) : mentions `@`,
+  recherche floue, exclusions par défaut, détection de secrets, limites de
+  taille, aperçu exact avant envoi.
+- **Diff** : calcul ligne à ligne borné, aperçu, acceptation avec contrôle
+  d'empreinte et sauvegarde, rejet sans écriture.
+- Validation dans le binaire réel : mention `@` → chip + aperçu, diff `+1 −0`,
+  rejet (disque intact), acceptation (fichier écrit), restauration d'onglet.
+
 ## Ce qui est explicitement absent
 
-1. **Contexte projet dans le chat** (ajout de fichiers, mentions `@fichier`,
-   pièces jointes) : prévu pour 0.2.1.
-2. **Workspace à panneaux redimensionnables** et éditeur avec coloration
-   syntaxique : prévu pour 0.2.1.
-3. **Agent Mode** dans la conversation (exécution d'un CLI depuis le chat,
+1. **Pièces jointes binaires** (images, PDF) dans le chat : absentes.
+2. **Agent Mode** dans la conversation (exécution d'un CLI depuis le chat,
    diff avant/après, acceptation) : prévu pour 0.2.2.
-4. **Team Mode** visuel (Lead/Worker/Reviewer) : prévu pour 0.2.3.
-5. **Sessions d'agents CLI réinjectées dans les threads de conversation**.
-6. **Registre de skills distant** avec vérification de mise à jour.
-7. **MCP hors stdio** (HTTP/SSE, ressources, prompts, sampling).
-8. **Git distant** (`push`, `pull`, `fetch`) et résolution de conflits.
-9. **Planificateur d'automatisations** actif en arrière-plan.
-10. **Page d'audit** exposée par l'IPC (le stockage existe en base).
-11. **Fichier LICENSE** : licence pas encore choisie.
-12. **Arch sur machine physique** : la CI valide la compilation et les tests
+3. **Team Mode** visuel (Lead/Worker/Reviewer) : prévu pour 0.2.3.
+4. **Sessions d'agents CLI réinjectées dans les threads de conversation**.
+5. **Registre de skills distant** avec vérification de mise à jour.
+6. **MCP hors stdio** (HTTP/SSE, ressources, prompts, sampling).
+7. **Git distant** (`push`, `pull`, `fetch`) et résolution de conflits.
+8. **Planificateur d'automatisations** actif en arrière-plan.
+9. **Page d'audit** exposée par l'IPC (le stockage existe en base).
+10. **Fichier LICENSE** : licence pas encore choisie.
+11. **Arch sur machine physique** : la CI valide la compilation et les tests
     dans un conteneur `archlinux:latest`.
+12. **Repli de l'éditeur sur très gros fichiers** : au-delà de 2 Mio (limite
+    configurable), le fichier n'est pas ouvert.
 
 ## Tests automatisés
 
@@ -81,10 +94,12 @@ Dernière vérification : 218 tests Rust + 49 tests frontend, tous verts.
 | `ih-orchestrator` | 23 | cycles, disponibilité, équipes, ordonnanceur, budget mémoire |
 | `ih-update` | 39 | signature Ed25519, digest, téléchargement, staging, rollback |
 | `ih-i18n` | 5 | parité FR/EN, repli, substitution |
-| `ih-chat` | 10 | streaming, annulation, historique borné, erreurs, titre, recherche + **e2e Ollama réel** |
-| **Rust total** | **218** | |
-| Frontend (`vitest`) | 49 | i18n, formatage, ANSI, Git, arborescence, réduction du flux de chat, erreurs |
-| **Total** | **267** | |
+| `ih-chat` | 11 | streaming, annulation, historique borné, contexte injecté, erreurs, titre, recherche + **e2e Ollama réel** |
+| `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
+| `ih-workspace` | 33 | Git, prison de chemins, PTY, **diff LCS**, métadonnées, écriture vérifiée |
+| **Rust total** | **256** | |
+| Frontend (`vitest`) | 92 | i18n, formatage, ANSI, Git, arborescence, chat, **layout, mentions, onglets, diff** |
+| **Total** | **348** | |
 
 ## Vérifications manuelles effectuées
 

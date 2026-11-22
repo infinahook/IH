@@ -2844,3 +2844,969 @@ select.input {
   margin-top: 10px;
   background: var(--panel);
 }
+
+/* ============================================================ workspace 0.2.1 */
+
+.workspace-shell {
+  height: calc(100vh - 236px);
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.workspace-main {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.workspace-chat {
+  flex: 0 0 auto;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+}
+
+.workspace-chat > .chat-layout {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+}
+
+.workspace-chat.compact > .chat-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace-chat.compact .chat-threads {
+  display: none;
+}
+
+.workspace-chat .chat-threads {
+  position: static;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-chat .chat-thread-list {
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.workspace-chat .chat-conversation {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-chat .chat-message-area {
+  min-height: 0;
+}
+
+.workspace-chat .chat-message-list {
+  max-height: none;
+}
+
+/* ------------------------------------------------------------- séparateurs */
+
+.resizer {
+  flex: 0 0 7px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  touch-action: none;
+  outline: none;
+}
+
+.resizer-vertical {
+  cursor: col-resize;
+  width: 7px;
+}
+
+.resizer-horizontal {
+  cursor: row-resize;
+  height: 7px;
+  width: 100%;
+  flex: 0 0 7px;
+}
+
+.resizer-grip {
+  display: block;
+  border-radius: 99px;
+  background: var(--border);
+  transition: background 100ms ease;
+}
+
+.resizer-vertical .resizer-grip {
+  width: 2px;
+  height: 44px;
+}
+
+.resizer-horizontal .resizer-grip {
+  height: 2px;
+  width: 54px;
+}
+
+.resizer:hover .resizer-grip,
+.resizer:focus-visible .resizer-grip {
+  background: var(--accent);
+}
+
+.resizer:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+  border-radius: 3px;
+}
+
+.resizer.disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+body.resizing-column,
+body.resizing-column * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.resizing-row,
+body.resizing-row * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+/* ------------------------------------------------------------- explorateur */
+
+.workspace-explorer {
+  flex: 0 0 auto;
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 9px 10px;
+  overflow: hidden;
+}
+
+.workspace-explorer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+
+.workspace-explorer-title {
+  min-width: 0;
+}
+
+.workspace-explorer-title h2 {
+  margin: 0 0 2px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+
+.workspace-explorer-title .small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-explorer-search {
+  margin-bottom: 6px;
+}
+
+.workspace-explorer-body .empty-state {
+  padding: 14px 6px;
+}
+
+.workspace-explorer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-tree {
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.workspace-match-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.workspace-match-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 4px 5px;
+  min-width: 0;
+}
+
+.workspace-match-row:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.workspace-match-row.active {
+  background: var(--accent-panel);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+.workspace-match-row span.mono {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ----------------------------------------------------------------- éditeur */
+
+.workspace-editor {
+  flex: 1 1 auto;
+  min-width: 300px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 7px 9px 8px;
+}
+
+.workspace-editor-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  min-height: 32px;
+}
+
+.workspace-tabs-empty {
+  align-self: center;
+  padding: 0 4px;
+}
+
+.file-tab {
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  background: transparent;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+  max-width: 220px;
+}
+
+.file-tab.active {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.file-tab-button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 6px 4px 6px 8px;
+  font-size: 11.5px;
+  min-width: 0;
+}
+
+.file-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tab-dirty {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex-shrink: 0;
+}
+
+.file-tab-close {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 4px 5px;
+  border-radius: 4px;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+.file-tab-close:hover {
+  background: var(--panel-hover);
+  color: var(--danger);
+}
+
+.workspace-editor-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-top: 6px;
+}
+
+.workspace-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  padding-bottom: 6px;
+}
+
+.workspace-editor-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46%;
+}
+
+.workspace-editor-actions {
+  margin-left: auto;
+  margin-top: 0;
+  flex-wrap: wrap;
+}
+
+.workspace-notice-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.workspace-notice-row .notice {
+  flex: 1;
+  margin: 4px 0 6px;
+}
+
+.workspace-editor-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--code-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-editor-body .empty-state {
+  margin: auto;
+}
+
+.cm-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.cm-host .cm-editor {
+  height: 100%;
+}
+
+.cm-host .cm-scroller {
+  font-size: 12px;
+}
+
+/* -------------------------------------------------------------------- diff */
+
+.diff-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.diff-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.diff-panel-heading h2 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.diff-panel-heading .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40vw;
+}
+
+.diff-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+}
+
+.diff-hunk-block + .diff-hunk-block {
+  border-top: 1px solid var(--border);
+}
+
+.diff-hunk-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 5px 9px;
+  background: var(--info-bg);
+  color: var(--info);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-size: 11px;
+}
+
+.diff-row {
+  display: grid;
+  grid-template-columns: 3.4em 3.4em 1.4em minmax(0, 1fr);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.diff-row-add {
+  background: var(--success-bg);
+}
+
+.diff-row-remove {
+  background: var(--danger-bg);
+}
+
+.diff-row-context {
+  background: transparent;
+}
+
+.diff-line-number {
+  text-align: right;
+  padding: 0 6px;
+  color: var(--code-gutter-text);
+  border-right: 1px solid var(--border);
+  user-select: none;
+}
+
+.diff-sign {
+  text-align: center;
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.diff-row-add .diff-sign {
+  color: var(--success);
+}
+
+.diff-row-remove .diff-sign {
+  color: var(--danger);
+}
+
+.diff-text {
+  padding: 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--code-text);
+}
+
+/* ---------------------------------------------------------- panneau bas */
+
+.workspace-bottom[hidden] {
+  display: none;
+}
+
+.workspace-bottom {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 6px 9px 8px;
+}
+
+.workspace-bottom-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.workspace-bottom-head .tabs {
+  margin-bottom: 0;
+  border-bottom: 0;
+}
+
+.workspace-bottom-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+}
+
+.workspace-tab-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-top: 6px;
+}
+
+.workspace-tab-panel[hidden] {
+  display: none;
+}
+
+.workspace-panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 2px 0 6px;
+  flex: 0 0 auto;
+}
+
+.workspace-terminal {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.workspace-terminal-frame {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+.workspace-terminal-idle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  padding: 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 9px;
+  background: var(--panel-2);
+}
+
+.workspace-git-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.workspace-git-columns .section-title {
+  margin-top: 4px;
+}
+
+.workspace-git-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.workspace-git-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-2);
+  min-width: 0;
+}
+
+.workspace-git-list li .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pending-diffs .section-title {
+  margin-top: 10px;
+}
+
+.pending-diff-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pending-diff-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  padding: 4px 7px;
+  flex-wrap: wrap;
+}
+
+.pending-diff-path {
+  flex: 1;
+  min-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-problems {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.workspace-problems-summary p {
+  margin: 3px 0;
+}
+
+.workspace-counters {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 16px;
+}
+
+.workspace-counters li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.workspace-logs {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-logs .section-title {
+  margin: 4px 0;
+}
+
+.workspace-log-tail {
+  margin: 0;
+  padding: 8px;
+  max-height: 180px;
+  overflow: auto;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--code-text);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------- contexte */
+
+.context-bar {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
+  padding: 8px 0 0;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.context-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.context-bar-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.context-bar .small.muted {
+  margin: 0;
+}
+
+.context-chips {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-panel);
+  color: var(--text);
+  border-radius: 99px;
+  padding: 1px 3px 1px 7px;
+  max-width: 100%;
+}
+
+.context-chip .mono {
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-sensitive-flag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.context-preview {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-2);
+  padding: 6px 8px;
+}
+
+.context-preview p {
+  margin: 2px 0;
+}
+
+.context-preview-list {
+  list-style: none;
+  padding: 0;
+  margin: 3px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 130px;
+  overflow-y: auto;
+}
+
+.context-preview-list li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.context-preview-list li .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-skipped {
+  border-top: 1px dashed var(--warning-border);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.context-skipped .mono {
+  color: var(--warning);
+}
+
+/* --------------------------------------------------------------- mentions */
+
+.chat-composer {
+  position: relative;
+}
+
+.mention-pop {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 5px);
+  max-height: 260px;
+  overflow-y: auto;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.mention-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 5px 4px;
+}
+
+.mention-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 5px 7px;
+}
+
+.mention-option .mono {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-option:hover {
+  background: var(--panel-hover);
+}
+
+.mention-option.active {
+  background: var(--accent-panel);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+@media (max-width: 1180px) {
+  .workspace-chat > .chat-layout {
+    grid-template-columns: 196px minmax(0, 1fr);
+  }
+
+  .workspace-git-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-height: 760px) {
+  .workspace-shell {
+    height: calc(100vh - 210px);
+    min-height: 460px;
+  }
+}
+
+/* --- 0.2.1 : dans la colonne de conversation, le compositeur (chips +
+   aperçu du contexte) peut grandir sans écraser la liste des messages ; il
+   défile au-delà de 58 % de la hauteur de la colonne. --- */
+.chat-conversation {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-message-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-message-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chat-composer {
+  flex: 0 0 auto;
+  /* Pas d'overflow ici : la liste de mentions `@` est positionnée au-dessus
+     du compositeur et serait rognée. Ce sont l'aperçu de contexte et la zone
+     de saisie qui sont bornés individuellement. */
+  overflow: visible;
+}
+
+.context-preview {
+  max-height: 170px;
+  overflow-y: auto;
+}
+
+.chat-composer textarea {
+  max-height: 120px;
+  overflow-y: auto;
+}

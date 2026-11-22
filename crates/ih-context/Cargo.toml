@@ -1,0 +1,16 @@
+[package]
+name = "ih-context"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Assemblage du contexte projet IH (fichiers, exclusions, limites)"
+
+[dependencies]
+ih-core = { path = "../ih-core" }
+ih-workspace = { path = "../ih-workspace" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+regex.workspace = true

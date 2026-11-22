@@ -15,6 +15,8 @@ Ubuntu/Debian and Arch Linux.
 
 ![AI conversation streaming](docs/screenshots/chat-stream.png)
 
+![Workspace: conversation, explorer, editor](docs/screenshots/workspace.png)
+
 ## What IH does
 
 | Area | Status |
@@ -22,6 +24,9 @@ Ubuntu/Debian and Arch Linux.
 | CLI agent supervision (launch, live output, cancel, timeout, concurrency limit) | ✅ |
 | AI providers: OpenAI-compatible, Anthropic, Google, Ollama (models, health, streaming) | ✅ |
 | **AI conversation**: live streaming, cancellation, history, provider/model selection | ✅ |
+| **Workspace**: explorer, tabs, CodeMirror editor, resizable persisted panels | ✅ |
+| **Project context**: `@` mentions, Rust-side assembly, secret exclusions | ✅ |
+| **Diff**: preview, accept/reject, backup and conflict detection | ✅ |
 | Model manager (discovery, default model, enable/disable) | ✅ |
 | Projects, confined file editing, search | ✅ |
 | Git: status, diff, stage, commit, branches, log, worktrees | ✅ |
@@ -105,9 +110,9 @@ Checks run locally and in CI:
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace        # 208 tests
+cargo test --workspace        # 256 tests
 npm run typecheck
-npm test                      # 36 tests
+npm test                      # 92 tests
 npm run build
 ```
 
@@ -119,6 +124,7 @@ npm run build
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | boundaries, crates, flows, resource policy |
 | [docs/SECURITY.md](docs/SECURITY.md) | implemented controls and accepted limits |
 | [docs/UPDATES.md](docs/UPDATES.md) | signing, manifest, install, rollback |
+| [docs/en/WORKSPACE.md](docs/en/WORKSPACE.md) | workspace, context and diff guide |
 | [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md) | per-distribution build and packaging |
 | [docs/I18N.md](docs/I18N.md) | FR/EN catalogs and parity |
 | [README.md](README.md) | documentation française |

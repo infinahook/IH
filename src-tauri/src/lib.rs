@@ -40,6 +40,18 @@ pub fn run() {
             commands::core::file_read,
             commands::core::file_write,
             commands::core::file_search,
+            // workspace, contexte et diff
+            commands::files::context_settings,
+            commands::files::workspace_meta,
+            commands::files::workspace_save,
+            commands::files::files_match,
+            commands::files::context_prepare,
+            commands::files::diff_prepare,
+            commands::files::diff_pending,
+            commands::files::diff_accept,
+            commands::files::diff_reject,
+            commands::files::layout_get,
+            commands::files::layout_save,
             // diagnostic
             commands::core::log_tail,
             commands::core::diagnostics_report,

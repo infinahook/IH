@@ -4,6 +4,7 @@ pub mod ai;
 pub mod chat;
 pub mod core;
 pub mod extensions;
+pub mod files;
 pub mod ops;
 pub mod workspace;
 

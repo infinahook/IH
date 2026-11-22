@@ -16,6 +16,8 @@ Linux.
 
 ![Conversation IA en streaming](docs/screenshots/chat-stream.png)
 
+![Workspace : conversation, explorateur, éditeur](docs/screenshots/workspace.png)
+
 ## Ce que fait IH
 
 | Domaine | État |
@@ -23,6 +25,9 @@ Linux.
 | Supervision d'agents CLI (démarrage, flux temps réel, annulation, timeout, limite de parallélisme) | ✅ |
 | Fournisseurs IA : OpenAI-compatible, Anthropic, Google, Ollama (modèles, santé, streaming) | ✅ |
 | **Conversation IA** : streaming temps réel, annulation, historique, sélection provider/modèle | ✅ |
+| **Workspace** : explorateur, onglets, éditeur CodeMirror, panneaux redimensionnables persistés | ✅ |
+| **Contexte projet** : mentions `@`, assemblage Rust, exclusions des secrets | ✅ |
+| **Diff** : aperçu, acceptation/rejet, sauvegarde et détection de conflit | ✅ |
 | Gestionnaire de modèles (découverte, modèle par défaut, activation) | ✅ |
 | Projets, édition de fichiers confinée, recherche | ✅ |
 | Git : statut, diff, index, commit, branches, log, worktrees | ✅ |
@@ -108,9 +113,9 @@ Vérifications exécutées en CI et localement :
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace        # 208 tests
+cargo test --workspace        # 256 tests
 npm run typecheck
-npm test                      # 36 tests
+npm test                      # 92 tests
 npm run build
 ```
 
@@ -122,6 +127,7 @@ npm run build
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | frontières, crates, flux, politique de ressources |
 | [docs/SECURITY.md](docs/SECURITY.md) | contrôles implémentés et limites assumées |
 | [docs/UPDATES.md](docs/UPDATES.md) | signature, manifeste, installation, rollback |
+| [docs/WORKSPACE.md](docs/WORKSPACE.md) | guide du workspace, du contexte et du diff |
 | [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md) | compilation et paquets par distribution |
 | [docs/I18N.md](docs/I18N.md) | catalogues FR/EN et parité |
 | [README.en.md](README.en.md) | English documentation |
