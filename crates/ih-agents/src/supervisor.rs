@@ -30,6 +30,7 @@ pub struct StartRequest {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SessionSnapshot {
     pub session_id: String,
+    pub pid: Option<u32>,
     pub agent_id: String,
     pub state: AgentState,
     pub exit_code: Option<i32>,
@@ -37,6 +38,7 @@ pub struct SessionSnapshot {
 }
 
 struct Running {
+    pid: Option<u32>,
     state: Mutex<AgentState>,
     child: Mutex<Option<std::process::Child>>,
     cancelled: Arc<AtomicBool>,
@@ -97,6 +99,7 @@ impl AgentSupervisor {
                 .map_err(|_| IhError::Internal("historique empoisonné".into()))?;
             return Ok(finished.get(session_id).map(|f| SessionSnapshot {
                 session_id: session_id.to_string(),
+                pid: None,
                 agent_id: f.agent_id.clone(),
                 state: f.state,
                 exit_code: f.exit_code,
@@ -113,6 +116,7 @@ impl AgentSupervisor {
             .map_err(|_| IhError::Internal("code de sortie empoisonné".into()))?;
         Ok(Some(SessionSnapshot {
             session_id: session_id.to_string(),
+            pid: running.pid,
             agent_id: running.agent_id.clone(),
             state,
             exit_code,
@@ -202,6 +206,7 @@ impl AgentSupervisor {
         let cancelled = Arc::new(AtomicBool::new(false));
         let bytes = Arc::new(AtomicU64::new(0));
         let running = Arc::new(Running {
+            pid: Some(pid),
             state: Mutex::new(AgentState::Running),
             child: Mutex::new(Some(child)),
             cancelled: cancelled.clone(),
@@ -306,6 +311,13 @@ impl AgentSupervisor {
 
             // Termine le groupe de processus (enfants compris) dans tous les cas.
             terminate(pid);
+            // Récolte le processus enfant : sans `wait`, il resterait zombie
+            // jusqu'à la fermeture d'IH.
+            if let Ok(mut guard) = watchdog_running.child.lock() {
+                if let Some(child) = guard.as_mut() {
+                    let _ = child.wait();
+                }
+            }
 
             if let Ok(mut guard) = watchdog_running.state.lock() {
                 *guard = final_state;
@@ -588,11 +600,20 @@ mod tests {
             })
             .unwrap();
         std::thread::sleep(Duration::from_millis(200));
+        let pid = supervisor.snapshot(&id).ok().flatten().and_then(|s| s.pid);
         supervisor.cancel(&id).unwrap();
         assert_eq!(
             supervisor.wait(&id, Duration::from_secs(5)).unwrap(),
             AgentState::Cancelled
         );
+        // Le processus doit être mort ET récolté (aucun zombie).
+        if let Some(pid) = pid {
+            std::thread::sleep(Duration::from_millis(200));
+            assert!(
+                !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+                "le processus {pid} doit être récolté"
+            );
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 

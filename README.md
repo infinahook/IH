@@ -18,6 +18,8 @@ Linux.
 
 ![Workspace : conversation, explorateur, éditeur](docs/screenshots/workspace.png)
 
+![Mode Agent : approbation ponctuelle](docs/screenshots/agent-approval.png)
+
 ## Ce que fait IH
 
 | Domaine | État |
@@ -28,6 +30,7 @@ Linux.
 | **Workspace** : explorateur, onglets, éditeur CodeMirror, panneaux redimensionnables persistés | ✅ |
 | **Contexte projet** : mentions `@`, assemblage Rust, exclusions des secrets | ✅ |
 | **Diff** : aperçu, acceptation/rejet, sauvegarde et détection de conflit | ✅ |
+| **Mode Agent** : CLI détecté, approbation ponctuelle, isolation par worktree, événements, diffs | ✅ (agent contrôlé) |
 | Gestionnaire de modèles (découverte, modèle par défaut, activation) | ✅ |
 | Projets, édition de fichiers confinée, recherche | ✅ |
 | Git : statut, diff, index, commit, branches, log, worktrees | ✅ |
@@ -113,9 +116,9 @@ Vérifications exécutées en CI et localement :
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace        # 256 tests
+cargo test --workspace        # 262 tests
 npm run typecheck
-npm test                      # 92 tests
+npm test                      # 122 tests
 npm run build
 ```
 
@@ -128,6 +131,7 @@ npm run build
 | [docs/SECURITY.md](docs/SECURITY.md) | contrôles implémentés et limites assumées |
 | [docs/UPDATES.md](docs/UPDATES.md) | signature, manifeste, installation, rollback |
 | [docs/WORKSPACE.md](docs/WORKSPACE.md) | guide du workspace, du contexte et du diff |
+| [docs/AGENT_MODE.md](docs/AGENT_MODE.md) | guide du mode Agent, adaptateurs et limites |
 | [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md) | compilation et paquets par distribution |
 | [docs/I18N.md](docs/I18N.md) | catalogues FR/EN et parité |
 | [README.en.md](README.en.md) | English documentation |
@@ -143,3 +147,5 @@ tierces conservent leurs licences respectives.
 IH s'inspire de [PandaCode](https://github.com/aicodeking/pandacode) comme
 référence de produit. Aucun code, aucune icône et aucune marque de PandaCode
 n'est inclus dans ce dépôt. Voir [docs/UPSTREAM.md](docs/UPSTREAM.md).
+
+<!-- trace agent -->

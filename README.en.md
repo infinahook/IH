@@ -17,6 +17,8 @@ Ubuntu/Debian and Arch Linux.
 
 ![Workspace: conversation, explorer, editor](docs/screenshots/workspace.png)
 
+![Agent mode: one-shot approval](docs/screenshots/agent-approval.png)
+
 ## What IH does
 
 | Area | Status |
@@ -27,6 +29,7 @@ Ubuntu/Debian and Arch Linux.
 | **Workspace**: explorer, tabs, CodeMirror editor, resizable persisted panels | ✅ |
 | **Project context**: `@` mentions, Rust-side assembly, secret exclusions | ✅ |
 | **Diff**: preview, accept/reject, backup and conflict detection | ✅ |
+| **Agent mode**: detected CLI, one-shot approval, worktree isolation, events, diffs | ✅ (controlled agent) |
 | Model manager (discovery, default model, enable/disable) | ✅ |
 | Projects, confined file editing, search | ✅ |
 | Git: status, diff, stage, commit, branches, log, worktrees | ✅ |
@@ -110,9 +113,9 @@ Checks run locally and in CI:
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace        # 256 tests
+cargo test --workspace        # 262 tests
 npm run typecheck
-npm test                      # 92 tests
+npm test                      # 122 tests
 npm run build
 ```
 
@@ -125,6 +128,7 @@ npm run build
 | [docs/SECURITY.md](docs/SECURITY.md) | implemented controls and accepted limits |
 | [docs/UPDATES.md](docs/UPDATES.md) | signing, manifest, install, rollback |
 | [docs/en/WORKSPACE.md](docs/en/WORKSPACE.md) | workspace, context and diff guide |
+| [docs/AGENT_MODE.md](docs/AGENT_MODE.md) | agent mode guide, adapters and limits |
 | [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md) | per-distribution build and packaging |
 | [docs/I18N.md](docs/I18N.md) | FR/EN catalogs and parity |
 | [README.md](README.md) | documentation française |

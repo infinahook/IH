@@ -32,8 +32,8 @@ mod util;
 
 pub use migrate::SCHEMA_VERSION;
 pub use model::{
-    AuditEntry, InstalledExtension, MemoryEntry, Message, NewAuditEntry, NewMemoryEntry,
-    NewMessage, NewSession, NewTask, NewWorkflowRun, Project, SessionRow, Task, Thread, Workflow,
-    WorkflowRun,
+    AgentEventRow, AgentSessionDetail, AuditEntry, InstalledExtension, MemoryEntry, Message,
+    NewAgentEvent, NewAuditEntry, NewMemoryEntry, NewMessage, NewSession, NewTask, NewWorkflowRun,
+    Project, SessionRow, Task, Thread, Workflow, WorkflowRun,
 };
 pub use store::Store;

@@ -155,12 +155,51 @@ pub fn diff_prepare(
             crate::state::PendingDiff {
                 project_id,
                 path,
-                before_sha256: current.sha256,
+                before_sha256: Some(current.sha256),
                 content,
+                delete: false,
+                origin: "editor".into(),
                 created_at: chrono::Utc::now(),
             },
         );
     Ok(preview)
+}
+
+/// Aperçu ligne à ligne d'un diff en attente (éditeur ou agent).
+#[tauri::command]
+pub fn diff_view(state: State<'_, AppState>, id: String) -> IhResult<DiffPreview> {
+    let pending = state
+        .pending_diffs
+        .lock()
+        .map_err(|_| IhError::Internal("registre de diff verrouillé".into()))?
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| IhError::NotFound(format!("modification {id}")))?;
+
+    let root = project_path(&state, &pending.project_id)?;
+    let fs = ProjectFs::new(&root)?;
+    let max = state.config_snapshot()?.workspace.max_editor_bytes;
+    let before = if pending.delete || pending.before_sha256.is_none() {
+        String::new()
+    } else {
+        fs.read_text(&pending.path, max)
+            .map(|content| content.content)
+            .unwrap_or_default()
+    };
+    let after = if pending.delete {
+        String::new()
+    } else {
+        pending.content.clone()
+    };
+    let diff = diff_lines(&before, &after);
+    Ok(DiffPreview {
+        id,
+        path: pending.path,
+        additions: diff.additions,
+        deletions: diff.deletions,
+        diff,
+        before_sha256: pending.before_sha256,
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -168,6 +207,8 @@ pub struct PendingDiffView {
     pub id: String,
     pub project_id: String,
     pub path: String,
+    pub origin: String,
+    pub delete: bool,
     pub created_at: String,
 }
 
@@ -183,6 +224,8 @@ pub fn diff_pending(state: State<'_, AppState>) -> IhResult<Vec<PendingDiffView>
             id: id.clone(),
             project_id: pending.project_id.clone(),
             path: pending.path.clone(),
+            origin: pending.origin.clone(),
+            delete: pending.delete,
             created_at: pending.created_at.to_rfc3339(),
         })
         .collect();
@@ -215,11 +258,39 @@ pub fn diff_accept(state: State<'_, AppState>, id: String) -> IhResult<WriteOutc
     let root = project_path(&state, &pending.project_id)?;
     let fs = ProjectFs::new(&root)?;
     let backup_root = state.paths.backups_dir().join("diffs");
+
+    if pending.delete {
+        // Suppression préparée par un agent : sauvegarde puis retrait.
+        let meta = fs.metadata(&pending.path)?;
+        if let Some(expected) = pending.before_sha256.as_deref() {
+            if !expected.eq_ignore_ascii_case(&meta.sha256) {
+                return Err(IhError::Conflict(format!(
+                    "le fichier {} a changé sur le disque depuis la préparation",
+                    pending.path
+                )));
+            }
+        }
+        let backup_dir = state.paths.backups_dir().join("deleted");
+        std::fs::create_dir_all(&backup_dir)?;
+        let name = std::path::Path::new(&pending.path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "fichier".into());
+        let backup = backup_dir.join(format!("{name}.{}", chrono::Utc::now().timestamp_millis()));
+        std::fs::copy(root.join(&pending.path), &backup)?;
+        std::fs::remove_file(root.join(&pending.path))?;
+        return Ok(WriteOutcome {
+            bytes: 0,
+            sha256: String::new(),
+            backup: Some(backup.display().to_string()),
+        });
+    }
+
     // `write_checked` refuse si le fichier a changé depuis la préparation.
     let outcome = fs.write_checked(
         &pending.path,
         &pending.content,
-        Some(&pending.before_sha256),
+        pending.before_sha256.as_deref(),
         Some(&backup_root),
     )?;
     Ok(outcome)

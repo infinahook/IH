@@ -50,6 +50,7 @@ pub fn run() {
             commands::files::diff_pending,
             commands::files::diff_accept,
             commands::files::diff_reject,
+            commands::files::diff_view,
             commands::files::layout_get,
             commands::files::layout_save,
             // diagnostic
@@ -91,6 +92,15 @@ pub fn run() {
             commands::chat::chat_active,
             commands::chat::thread_rename,
             commands::chat::threads_search,
+            // mode agent
+            commands::agent::agent_adapters,
+            commands::agent::agent_session_request_approval,
+            commands::agent::agent_session_start,
+            commands::agent::agent_session_cancel,
+            commands::agent::agent_session_list,
+            commands::agent::agent_session_detail,
+            commands::agent::agent_session_events,
+            commands::agent::agent_session_refuse,
             // skills & MCP
             commands::extensions::skills_list,
             commands::extensions::skill_install,

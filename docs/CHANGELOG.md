@@ -35,6 +35,51 @@
 - La zone de saisie défilait avec les messages : la liste défile désormais dans
   son propre conteneur et le compositeur reste ancré en bas.
 
+## 0.2.2 — Agent Mode · AI Coding Execution
+
+### Ajouté
+- **Mode Agent** dans la conversation : sélection d'un CLI détecté, tâche en
+  langage naturel, approbation ponctuelle, exécution isolée, revue des diffs.
+- **Isolation par worktree git** (`crates/ih-agent-mode`) : l'agent travaille
+  dans un worktree détaché ; le projet n'est pas modifié pendant la session.
+  Le mode refuse de démarrer hors dépôt git.
+- **Détection d'adaptateurs** : nom, chemin, version (sondée prudemment, jamais
+  pour un adaptateur personnalisé), capacités contractuelles, diagnostic.
+- **Sessions persistées** (migration SQLite v3) : identifiant, projet,
+  adaptateur, tâche, répertoire, état, résumé, fichiers, événements bornés
+  (4 000 max) ; rechargement après redémarrage.
+- **Événements typés** `ih://agent-event` : started, output, state, completed,
+  cancelled, error — liés au `session_id`, diffusés en temps réel.
+- **Approbation liée à une empreinte** (agent + commande + répertoire + tâche) :
+  usage unique, expiration, refus explicite ; toute modification de la commande
+  invalide l'approbation.
+- **Revue des modifications** : les changements de l'agent deviennent des diffs
+  en attente, avec aperçu ligne à ligne (`diff_view`), acceptation vérifiée par
+  empreinte et rejet sans écriture ; suppression de fichier prise en charge.
+- **Annulation réelle** : groupe de processus tué et enfant récolté (plus de
+  zombie), session marquée `cancelled`.
+
+### Corrigé pendant la validation réelle
+- Le sondage `--version` d'un adaptateur personnalisé exécutait un script dans
+  le répertoire du projet (effets de bord) : il est désormais limité aux CLI
+  connus, dans un répertoire neutre.
+- Les processus annulés restaient zombies : le superviseur récolte maintenant
+  l'enfant.
+- `diff_view` manquait pour prévisualiser un diff produit par un agent.
+
+### Tests
+- Rust : **262 tests** (dont `ih-agent-mode` 5, `ih-store` 16 avec migration v3).
+- Frontend : **122 tests** (30 nouveaux : réducteur d'événements, approbations,
+  sélection d'adaptateur, bornes, fusion historique/live).
+- Validation dans le binaire réel avec un **agent contrôlé** (script local) :
+  approbation affichée (commande exacte, répertoire, empreinte, risque),
+  exécution, 2 fichiers modifiés détectés, aperçu de diff, acceptation d'un
+  fichier (écrit sur disque) et rejet de l'autre (disque intact), persistance
+  après redémarrage, annulation (état `cancelled`, processus récolté).
+- **Aucun CLI d'agent réel n'est installé sur la machine de validation** : les
+  adaptateurs Claude Code / Codex / Gemini CLI / OpenCode n'ont donc pas pu être
+  exécutés. Les tests réels ont été faits avec un agent contrôlé.
+
 ## 0.2.1 — Workspace · Project Context · Editor
 
 ### Ajouté

@@ -378,6 +378,21 @@ impl GitRepo {
         Ok(())
     }
 
+    /// Crée un worktree détaché sur `HEAD` : utilisé pour isoler une session
+    /// d'agent sans créer de branche dans le dépôt de l'utilisateur.
+    pub fn add_detached_worktree(&self, target: &Path) -> IhResult<()> {
+        let target_str = target
+            .to_str()
+            .ok_or_else(|| IhError::Invalid("chemin de worktree non UTF-8".into()))?;
+        if target_str.starts_with('-') {
+            return Err(IhError::Invalid(
+                "chemin de worktree invalide (préfixe '-')".into(),
+            ));
+        }
+        self.checked(&["worktree", "add", "--detach", "--", target_str, "HEAD"])?;
+        Ok(())
+    }
+
     /// Retire un arbre de travail (avec `--force` si demandé).
     pub fn remove_worktree(&self, target: &Path, force: bool) -> IhResult<()> {
         let target = target
