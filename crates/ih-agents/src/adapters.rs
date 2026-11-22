@@ -102,10 +102,26 @@ impl AgentAdapter {
                 args.push("-p".into());
                 args.push(prompt.to_string());
             }
-            // `opencode run "<prompt>"`.
+            // `opencode run --format json --archived "<prompt>"` : le JSON est
+            // normalisé par `normalize` ; `--archived` garde les sessions IH
+            // hors de la liste de sessions de l'utilisateur.
             AgentKind::Opencode => {
                 if !args.iter().any(|a| a == "run") {
                     args.push("run".into());
+                }
+                if !args.iter().any(|a| a == "--format") {
+                    args.push("--format".into());
+                    args.push("json".into());
+                }
+                if !args.iter().any(|a| a == "--archived") {
+                    args.push("--archived".into());
+                }
+                // OBLIGATOIRE : sans serveur privé, OpenCode se connecte au
+                // service d'arrière-plan qui résout le projet depuis SON
+                // contexte, ignorant le répertoire de travail d'IH (vérifié
+                // v2.3.2 : les fichiers sortaient du worktree).
+                if !args.iter().any(|a| a == "--standalone") {
+                    args.push("--standalone".into());
                 }
                 args.push(prompt.to_string());
             }
@@ -185,7 +201,18 @@ mod tests {
         let (_, args) = adapter(AgentKind::GeminiCli, vec![]).build_command("p");
         assert_eq!(args, vec!["-p", "p"]);
         let (_, args) = adapter(AgentKind::Opencode, vec![]).build_command("p");
-        assert_eq!(args, vec!["run", "p"]);
+        assert_eq!(
+            args,
+            vec!["run", "--format", "json", "--archived", "--standalone", "p"],
+            "OpenCode reçoit son format JSON et reste hors des sessions utilisateur"
+        );
+        // Les arguments déjà fournis ne sont pas dupliqués.
+        let (_, args) =
+            adapter(AgentKind::Opencode, vec!["run", "--format", "json"]).build_command("p");
+        assert_eq!(
+            args,
+            vec!["run", "--format", "json", "--archived", "--standalone", "p"]
+        );
     }
 
     #[test]

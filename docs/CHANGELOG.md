@@ -35,6 +35,44 @@
 - La zone de saisie défilait avec les messages : la liste défile désormais dans
   son propre conteneur et le compositeur reste ancré en bas.
 
+## 0.2.3 — Validation réelle OpenCode (jalon « 0.2.2.1 »)
+
+Version interne `0.2.3` : semver n'accepte pas quatre nombres, mais le jalon
+correspond à « IH 0.2.2.1 ».
+
+### Validé avec le vrai CLI OpenCode v2.3.2
+- Détection : `/home/infina/.opencode/bin/opencode`, version **v2.3.2**,
+  diagnostic « exécutable trouvé », sélectionnable dans Agent Mode.
+- Protocole réel : `opencode run --format json` produit du NDJSON
+  (`step_start`, `tool_use`, `text`, `step_finish`) — capture réelle, parseur
+  ajouté et testé sur ces trames.
+- Exécution via IH : commande exacte
+  `opencode run --format json --archived --standalone <tâche>`, sessions
+  exécutées (23 et 19 étapes), événements normalisés (`[write] <chemin>`,
+  `[read] <chemin>`, texte de l'assistant), fin de session détectée.
+
+### Corrigé à cause de la validation réelle
+- **Fuite hors worktree** : sans `--standalone`, OpenCode se connectait au
+  service d'arrière-plan qui résolvait le projet depuis **son** contexte ; les
+  fichiers étaient écrits dans le dépôt IH. `--standalone` est désormais
+  obligatoire.
+- **`$PWD` ignoré par le noyau** : même avec `--standalone`, OpenCode résolvait
+  son projet via `$PWD` (hérité du répertoire de lancement d'IH) et non via le
+  répertoire courant réel. Le superviseur transmet maintenant `PWD`/`OLDPWD`
+  égaux au répertoire de travail de l'agent (test dédié).
+- **Détection en lancement graphique** : les lanceurs GNOME n'héritent pas des
+  `export PATH` de `~/.bashrc` ; `~/.opencode/bin` était donc invisible. IH
+  complète son `PATH` avec celui du shell de connexion au démarrage.
+- Normalisation des événements JSON d'OpenCode (les autres CLI restent inchangés).
+
+### Non validé (honnêtement)
+- **Revue de diff et acceptation/rejet avec OpenCode** : les deux exécutions
+  réelles ont eu lieu avant la correction `$PWD` ; la troisième tentative n'a
+  pas démarré (automatisation d'interface). Le chemin diff→acceptation est testé
+  avec un agent contrôlé, pas avec OpenCode.
+- **Annulation d'une session OpenCode** : non testée.
+- Les adaptateurs Claude Code / Codex / Gemini restent non exécutés.
+
 ## 0.2.2 — Agent Mode · AI Coding Execution
 
 ### Ajouté

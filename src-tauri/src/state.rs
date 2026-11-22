@@ -70,6 +70,12 @@ pub struct AppState {
 impl AppState {
     pub fn init(app_handle: AppHandle, paths: AppPaths) -> IhResult<Self> {
         paths.ensure()?;
+        // Les lanceurs graphiques n'héritent pas du PATH de ~/.bashrc : sans
+        // cela, un CLI installé dans ~/.opencode/bin serait « introuvable ».
+        let added = ih_core::platform::augment_path_from_login_shell();
+        if !added.is_empty() {
+            tracing::info!(dirs = ?added, "PATH complété depuis le shell de connexion");
+        }
         let config = AppConfig::load_or_create(&paths.config_file())?;
         let log_guard = crate::logging::init(&paths, &config.logging.level)?;
         let store = Arc::new(Store::open(&paths.db_path())?);

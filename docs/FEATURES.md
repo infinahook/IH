@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 262 tests Rust + 122 tests frontend, tous verts.
+Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -115,9 +115,9 @@ Dernière vérification : 262 tests Rust + 122 tests frontend, tous verts.
 | `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
 | `ih-workspace` | 33 | Git, prison de chemins, PTY, **diff LCS**, métadonnées, écriture vérifiée |
 | `ih-agent-mode` | 5 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
-| **Rust total** | **262** | |
+| **Rust total** | **270** | |
 | Frontend (`vitest`) | 122 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, **agent** |
-| **Total** | **384** | |
+| **Total** | **392** | |
 
 ## Vérifications manuelles effectuées
 

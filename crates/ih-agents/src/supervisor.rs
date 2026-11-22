@@ -162,6 +162,11 @@ impl AgentSupervisor {
         command
             .args(&args)
             .current_dir(&request.project_dir)
+            // Certains CLI (OpenCode v2.3.2 vérifié) résolvent leur projet via
+            // `$PWD` et ignorent le répertoire courant réel : sans cela, ils
+            // écrivent dans le répertoire d'où IH a été lancé.
+            .env("PWD", &request.project_dir)
+            .env("OLDPWD", &request.project_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -227,6 +232,7 @@ impl AgentSupervisor {
         self.emit_state(&session_id, AgentState::Running);
 
         let max_output = self.policy.max_output_bytes_per_session;
+        let agent_kind = request.agent.kind.clone();
         let sink = self.sink.clone();
         let seq_out = Arc::new(AtomicU64::new(0));
         let seq_err = seq_out.clone();
@@ -245,6 +251,7 @@ impl AgentSupervisor {
                 bytes_out,
                 sink,
                 seq_out,
+                Some(agent_kind),
             )
         });
         let sink_err = self.sink.clone();
@@ -258,6 +265,7 @@ impl AgentSupervisor {
                 bytes_err,
                 sink_err,
                 seq_err,
+                None,
             )
         });
 
@@ -426,6 +434,9 @@ impl AgentSupervisor {
 }
 
 /// Lit un flux ligne à ligne et émet des événements bornés.
+// Boucle de lecture interne : les paramètres sont stables et explicites,
+// les regrouper dans une structure n'apporterait rien.
+#[allow(clippy::too_many_arguments)]
 fn pump<R: Read>(
     reader: BufReader<R>,
     stream: OutputStream,
@@ -434,11 +445,21 @@ fn pump<R: Read>(
     counter: Arc<AtomicU64>,
     sink: EventSink,
     seq: Arc<AtomicU64>,
+    kind: Option<ih_core::config::AgentKind>,
 ) {
     let mut truncated_notified = false;
     for line in reader.lines() {
         let Ok(line) = line else { break };
-        let chunk = format!("{line}\n");
+        // La sortie structurée (OpenCode JSON) est convertie en lignes
+        // lisibles ; les autres adaptateurs passent inchangés.
+        let rendered = match &kind {
+            Some(kind) => crate::normalize::normalize_line(kind, &line),
+            None => vec![line.clone()],
+        };
+        if rendered.is_empty() {
+            continue;
+        }
+        let chunk = format!("{}\n", rendered.join("\n"));
         let len = chunk.len() as u64;
         let previous = counter.fetch_add(len, Ordering::SeqCst);
         if previous + len > max_bytes {
@@ -614,6 +635,35 @@ mod tests {
                 "le processus {pid} doit être récolté"
             );
         }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn le_processus_recoit_pwd_egal_a_son_repertoire_de_travail() {
+        let dir = temp_dir();
+        let out = dir.join("pwd.txt");
+        let prog = script(
+            &dir,
+            "pwd.sh",
+            &format!("#!/bin/sh\nprintf '%s' \"$PWD\" > {}\n", out.display()),
+        );
+        let (sink, _events) = collector();
+        let supervisor = AgentSupervisor::new(ResourcePolicy::default(), sink).unwrap();
+        let id = supervisor
+            .start(StartRequest {
+                agent: adapter_for(&prog),
+                project_dir: dir.clone(),
+                prompt: "x".to_string(),
+                session_id: None,
+            })
+            .unwrap();
+        let _ = supervisor.wait(&id, Duration::from_secs(5));
+        let observed = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(
+            std::path::Path::new(&observed),
+            dir.canonicalize().unwrap(),
+            "le processus doit voir PWD = son répertoire de travail"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

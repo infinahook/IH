@@ -47,11 +47,31 @@ accord explicite.
 | Claude Code | `claude -p "<tâche>"` | CLI `claude` dans le PATH |
 | Codex | `codex exec "<tâche>"` | CLI `codex` |
 | Gemini CLI | `gemini -p "<tâche>"` | CLI `gemini` |
-| OpenCode | `opencode run "<tâche>"` | CLI `opencode` |
+| OpenCode | `opencode run --format json --archived --standalone "<tâche>"` | CLI `opencode` ≥ 2.x |
 | Personnalisé | `args` contenant `{prompt}`, sinon tâche ajoutée | exécutable de votre choix |
 
 IH affiche le nom, la version (via `--version`), le chemin et le diagnostic de
 chaque adaptateur, et ne propose que ceux réellement présents.
+
+### Détection malgré un PATH de lanceur graphique
+
+Les lanceurs GNOME n'héritent pas des `export PATH=…` de `~/.bashrc`. Un CLI
+installé dans `~/.opencode/bin` ou `~/.local/bin` serait donc invisible. Au
+démarrage, IH lit le `PATH` du shell de connexion (avec un délai borné) et
+complète le sien : les CLI usuels sont détectés même lancés depuis le menu.
+
+### OpenCode : deux réglages obligatoires
+
+- `--standalone` : sans serveur privé, OpenCode se connecte au service
+  d'arrière-plan qui résout le projet depuis **son** contexte — les fichiers
+  étaient écrits **hors du worktree** (constaté en v2.3.2).
+- `PWD=/OLDPWD=` répertoire de travail : OpenCode résout son projet via `$PWD`
+  et non via le répertoire courant réel. IH transmet donc ces variables à
+  chaque processus d'agent.
+
+Les événements JSON d'OpenCode (`step_start`, `tool_use`, `text`,
+`step_finish`) sont normalisés en lignes lisibles (`[read] chemin`,
+`[shell] commande`, texte de l'assistant).
 
 ## Sécurité et limites
 
@@ -62,6 +82,12 @@ chaque adaptateur, et ne propose que ceux réellement présents.
   refusée.
 - Sortie bornée, timeout, annulation qui tue le groupe de processus.
 - Aucun secret transmis à l'agent.
+
+**OpenCode** : ses propres permissions ne remplacent jamais l'approbation IH.
+Sans TTY, OpenCode ne peut pas demander de confirmation : il exécute ses outils.
+L'isolation IH (worktree + `--standalone` + `PWD`) garantit que les fichiers
+restent dans la copie, mais une commande shell lancée par l'agent s'exécute avec
+vos droits — configurez les permissions d'OpenCode en conséquence.
 
 **Ce qu'IH ne peut pas garantir**
 - L'agent s'exécute avec **vos droits**. S'il écrit hors de son répertoire de

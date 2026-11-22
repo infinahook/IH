@@ -184,6 +184,75 @@ fn recommend_agents(ram_mb: u64) -> u8 {
     }
 }
 
+/// PATH du shell de connexion de l'utilisateur.
+///
+/// Les lanceurs graphiques n'héritent pas des `export PATH=…` de `~/.bashrc` :
+/// sans cela, un CLI installé dans `~/.opencode/bin` ou `~/.local/bin` est
+/// invisible pour IH. On interroge le shell avec un marqueur (la sortie du
+/// profil peut contenir autre chose) et un délai borné.
+pub fn login_shell_path() -> Option<String> {
+    use std::process::{Command, Stdio};
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
+    let mut child = Command::new(shell)
+        .args(["-lic", "printf '__IH_PATH__%s__IH_PATH_END__' \"$PATH\""])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed() > std::time::Duration::from_secs(3) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            Err(_) => return None,
+        }
+    }
+    let output = child.wait_with_output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    extract_marked_path(&text)
+}
+
+/// Extrait le chemin entre les marqueurs (testable sans lancer de shell).
+pub fn extract_marked_path(text: &str) -> Option<String> {
+    let start = text.find("__IH_PATH__")? + "__IH_PATH__".len();
+    let end = text[start..].find("__IH_PATH_END__")? + start;
+    let path = text[start..end].trim();
+    (!path.is_empty()).then(|| path.to_string())
+}
+
+/// Complète `PATH` avec celui du shell de connexion ; renvoie les répertoires
+/// ajoutés (vide si rien n'a changé ou si le shell n'a pas répondu).
+pub fn augment_path_from_login_shell() -> Vec<String> {
+    let Some(login_path) = login_shell_path() else {
+        return Vec::new();
+    };
+    let current = std::env::var("PATH").unwrap_or_default();
+    let known: std::collections::BTreeSet<&str> = current.split(':').collect();
+    let mut added = Vec::new();
+    let mut merged: Vec<String> = current
+        .split(':')
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect();
+    for dir in login_path.split(':').filter(|d| !d.is_empty()) {
+        if !known.contains(dir) && !added.iter().any(|d: &String| d == dir) {
+            added.push(dir.to_string());
+            merged.push(dir.to_string());
+        }
+    }
+    if !added.is_empty() {
+        std::env::set_var("PATH", merged.join(":"));
+    }
+    added
+}
+
 /// Cherche un exécutable dans `PATH` sans dépendance externe.
 pub fn find_in_path(program: &str) -> Option<PathBuf> {
     if program.contains('/') {
@@ -235,6 +304,17 @@ mod tests {
         assert_eq!(recommend_agents(4_000), 1);
         assert_eq!(recommend_agents(16_000), 2);
         assert_eq!(recommend_agents(32_000), 3);
+    }
+
+    #[test]
+    fn extraction_du_path_marque() {
+        let text = "bannière de shell\n__IH_PATH__/usr/bin:/home/x/.opencode/bin__IH_PATH_END__\n";
+        assert_eq!(
+            extract_marked_path(text).as_deref(),
+            Some("/usr/bin:/home/x/.opencode/bin")
+        );
+        assert_eq!(extract_marked_path("sans marqueur"), None);
+        assert_eq!(extract_marked_path("__IH_PATH____IH_PATH_END__"), None);
     }
 
     #[test]

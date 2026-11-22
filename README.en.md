@@ -113,7 +113,7 @@ Checks run locally and in CI:
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace        # 262 tests
+cargo test --workspace        # 270 tests
 npm run typecheck
 npm test                      # 122 tests
 npm run build
