@@ -82,6 +82,37 @@ pub struct SessionRow {
     pub ended_at: Option<DateTime<Utc>>,
 }
 
+/// Événement d'une session d'agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentEventRow {
+    pub id: i64,
+    pub session_id: SessionId,
+    pub seq: u32,
+    pub kind: String,
+    pub payload: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Événement à enregistrer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NewAgentEvent {
+    pub session_id: SessionId,
+    pub seq: u32,
+    pub kind: String,
+    pub payload: serde_json::Value,
+}
+
+/// Session d'agent avec ses métadonnées d'exécution.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSessionDetail {
+    pub session: SessionRow,
+    pub adapter: Option<String>,
+    pub task: Option<String>,
+    pub workdir: Option<String>,
+    pub summary: Option<String>,
+    pub files: Vec<String>,
+}
+
 /// Tâche à créer dans l'orchestrateur.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NewTask {

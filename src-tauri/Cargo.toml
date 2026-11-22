@@ -27,6 +27,7 @@ ih-providers = { path = "../crates/ih-providers" }
 ih-chat = { path = "../crates/ih-chat" }
 ih-context = { path = "../crates/ih-context" }
 ih-agents = { path = "../crates/ih-agents" }
+ih-agent-mode = { path = "../crates/ih-agent-mode" }
 ih-extensions = { path = "../crates/ih-extensions" }
 ih-workspace = { path = "../crates/ih-workspace" }
 ih-orchestrator = { path = "../crates/ih-orchestrator" }

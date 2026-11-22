@@ -1,0 +1,519 @@
+//! Mode Agent d'IH : isolation par worktree, détection d'adaptateurs et
+//! collecte des modifications d'une session.
+//!
+//! # Principe d'isolation
+//!
+//! Un CLI d'agent modifie les fichiers qu'il veut, sans protocole
+//! d'approbation standard. IH ne prétend donc pas intercepter chaque écriture :
+//! il exécute l'agent dans un **worktree git détaché** (`git worktree add
+//! --detach`). Le projet de l'utilisateur n'est pas modifié pendant la session.
+//! À la fin, IH calcule les changements entre le worktree et le projet, et
+//! l'application de ces changements passe par le système de diff de la 0.2.1
+//! (acceptation explicite, contrôle d'empreinte, sauvegarde).
+//!
+//! # Limites assumées
+//!
+//! - Projet **git** requis : hors dépôt git, aucune session n'est lancée.
+//! - L'isolation est celle du système de fichiers : un agent qui écrit hors de
+//!   son répertoire de travail (chemin absolu, `/tmp`, réseau) n'est pas
+//!   empêché. Le CLI conserve ses propres garde-fous.
+//! - Aucun secret n'est injecté dans l'environnement de l'agent.
+
+use ih_agents::AgentAdapter;
+use ih_core::config::{AgentConfig, AgentKind};
+use ih_core::{IhError, IhResult};
+use ih_workspace::diff::diff_lines;
+use ih_workspace::git::GitRepo;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+/// Taille maximale d'un fichier lu pour préparer un diff.
+pub const MAX_CHANGE_BYTES: usize = 512 * 1024;
+/// Nombre maximal de fichiers suivis par session.
+pub const MAX_CHANGED_FILES: usize = 200;
+/// Délai maximal d'exécution de `--version`.
+const VERSION_TIMEOUT: Duration = Duration::from_secs(3);
+
+// ---------------------------------------------------------------- adaptateurs
+
+/// État d'un adaptateur, exposé à l'interface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdapterReport {
+    pub id: String,
+    pub label: String,
+    pub kind: AgentKind,
+    pub program: String,
+    pub detected: bool,
+    pub path: Option<String>,
+    pub version: Option<String>,
+    /// Capacités réellement garanties par le contrat d'IH.
+    pub capabilities: Vec<String>,
+    pub diagnostic: String,
+}
+
+/// Détecte les adaptateurs configurés et tente de lire leur version.
+pub fn detect_adapters(configs: &[AgentConfig]) -> Vec<AdapterReport> {
+    configs
+        .iter()
+        .map(|config| {
+            let adapter = AgentAdapter::from_config(config);
+            let path = adapter.detection();
+            // Un adaptateur personnalisé peut être un script : exécuter
+            // `--version` y produirait des effets de bord. On ne sonde que les
+            // CLI connus, toujours dans un répertoire neutre.
+            let version = if config.kind == AgentKind::Custom {
+                None
+            } else {
+                path.as_deref().and_then(probe_version)
+            };
+            let detected = path.is_some();
+            AdapterReport {
+                id: config.id.clone(),
+                label: config.label.clone(),
+                kind: config.kind.clone(),
+                program: config.program.clone(),
+                detected,
+                path: path.map(|p| p.display().to_string()),
+                version,
+                capabilities: capabilities_for(&config.kind),
+                diagnostic: if detected {
+                    "exécutable trouvé".into()
+                } else {
+                    format!("« {} » introuvable dans le PATH", config.program)
+                },
+            }
+        })
+        .collect()
+}
+
+/// Capacités garanties par le contrat d'IH pour chaque famille d'adaptateur.
+fn capabilities_for(kind: &AgentKind) -> Vec<String> {
+    let mut caps = vec![
+        "prompt-non-interactif".to_string(),
+        "sortie-flux".to_string(),
+        "repertoire-travail".to_string(),
+        "annulation".to_string(),
+        "timeout".to_string(),
+    ];
+    if matches!(kind, AgentKind::Custom) {
+        caps.push("arguments-personnalises".to_string());
+    }
+    caps
+}
+
+/// Lit la première ligne de `<program> --version`, bornée et sous délai.
+pub fn probe_version(program: &Path) -> Option<String> {
+    // Répertoire neutre : un CLI qui écrirait pendant `--version` ne doit pas
+    // toucher au projet ni au répertoire courant d'IH.
+    let neutral = std::env::temp_dir().join("ih-version-probe");
+    let _ = std::fs::create_dir_all(&neutral);
+    let mut child = Command::new(program)
+        .arg("--version")
+        .current_dir(&neutral)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return None;
+                }
+                break;
+            }
+            Ok(None) if started.elapsed() > VERSION_TIMEOUT => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) => return None,
+        }
+    }
+
+    let output = child.wait_with_output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    Some(line.chars().take(120).collect())
+}
+
+// ------------------------------------------------------------------- sandbox
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sandbox {
+    project_root: PathBuf,
+    workdir: PathBuf,
+}
+
+impl Sandbox {
+    pub fn workdir(&self) -> &Path {
+        &self.workdir
+    }
+
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
+    }
+}
+
+/// Crée un worktree détaché isolé pour une session.
+///
+/// `base_dir` est créé si nécessaire ; le worktree est placé dans
+/// `<base_dir>/<tag>`. Le projet doit être un dépôt git.
+pub fn create_sandbox(project_root: &Path, base_dir: &Path, tag: &str) -> IhResult<Sandbox> {
+    if tag.trim().is_empty() || tag.contains('/') || tag.contains("..") {
+        return Err(IhError::Invalid(format!(
+            "étiquette de session invalide : {tag}"
+        )));
+    }
+    let repo = GitRepo::discover(project_root).map_err(|_| {
+        IhError::Unsupported(
+            "mode Agent : le projet doit être un dépôt git (isolation par worktree)".into(),
+        )
+    })?;
+    std::fs::create_dir_all(base_dir)?;
+    let workdir = base_dir.join(tag);
+    if workdir.exists() {
+        return Err(IhError::Conflict(format!(
+            "le répertoire de session existe déjà : {}",
+            workdir.display()
+        )));
+    }
+    repo.add_detached_worktree(&workdir)?;
+    Ok(Sandbox {
+        project_root: repo.root().to_path_buf(),
+        workdir,
+    })
+}
+
+/// Supprime le worktree et le répertoire de session.
+pub fn remove_sandbox(sandbox: &Sandbox) -> IhResult<()> {
+    if let Ok(repo) = GitRepo::discover(&sandbox.project_root) {
+        let _ = repo.remove_worktree(&sandbox.workdir, true);
+    }
+    if sandbox.workdir.exists() {
+        std::fs::remove_dir_all(&sandbox.workdir)?;
+    }
+    Ok(())
+}
+
+/// Liste les fichiers modifiés, ajoutés ou supprimés dans le sandbox.
+pub fn changed_files(sandbox: &Sandbox) -> IhResult<Vec<String>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&sandbox.workdir)
+        .args(["status", "--porcelain=v1", "-z"])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| IhError::Internal(format!("git status indisponible : {e}")))?;
+    if !output.status.success() {
+        return Err(IhError::Internal(format!(
+            "git status a échoué : {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let mut entries = raw.split('\0').filter(|s| !s.is_empty()).peekable();
+    let mut files = Vec::new();
+    while let Some(entry) = entries.next() {
+        if entry.len() < 4 {
+            continue;
+        }
+        let status = &entry[..2];
+        let path = entry[3..].to_string();
+        // Renommage : l'ancien chemin suit dans l'entrée suivante.
+        if status.starts_with('R') || status.starts_with('C') {
+            let _ancien = entries.next();
+        }
+        if !files.contains(&path) {
+            files.push(path);
+        }
+        if files.len() >= MAX_CHANGED_FILES {
+            break;
+        }
+    }
+    Ok(files)
+}
+
+/// Modification d'un fichier entre le projet et le sandbox.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileChange {
+    pub path: String,
+    /// Contenu dans le projet (`None` si le fichier est nouveau).
+    pub before: Option<String>,
+    /// Contenu produit par l'agent (`None` si le fichier a été supprimé).
+    pub after: Option<String>,
+    pub additions: usize,
+    pub deletions: usize,
+    pub binary: bool,
+    pub too_large: bool,
+}
+
+/// Construit les changements fichier par fichier, bornés en taille.
+pub fn collect_changes(sandbox: &Sandbox, max_bytes: usize) -> IhResult<Vec<FileChange>> {
+    let limit = max_bytes.clamp(1024, MAX_CHANGE_BYTES);
+    let mut changes = Vec::new();
+    for path in changed_files(sandbox)? {
+        if path.contains("..") || Path::new(&path).is_absolute() {
+            continue;
+        }
+        let before_path = sandbox.project_root.join(&path);
+        let after_path = sandbox.workdir.join(&path);
+
+        let (before, before_binary, before_large) = read_optional(&before_path, limit)?;
+        let (after, after_binary, after_large) = read_optional(&after_path, limit)?;
+        let binary = before_binary || after_binary;
+        let too_large = before_large || after_large;
+
+        let (additions, deletions) = if binary || too_large {
+            (0, 0)
+        } else {
+            let diff = diff_lines(
+                before.as_deref().unwrap_or(""),
+                after.as_deref().unwrap_or(""),
+            );
+            (diff.additions, diff.deletions)
+        };
+
+        changes.push(FileChange {
+            path,
+            before,
+            after,
+            additions,
+            deletions,
+            binary,
+            too_large,
+        });
+    }
+    Ok(changes)
+}
+
+fn read_optional(path: &Path, limit: usize) -> IhResult<(Option<String>, bool, bool)> {
+    if !path.exists() {
+        return Ok((None, false, false));
+    }
+    let meta = std::fs::metadata(path)?;
+    if !meta.is_file() {
+        return Ok((None, false, false));
+    }
+    if meta.len() as usize > limit {
+        return Ok((None, false, true));
+    }
+    let bytes = std::fs::read(path)?;
+    if ih_workspace::fs::looks_binary(&bytes) {
+        return Ok((None, true, false));
+    }
+    Ok((
+        Some(String::from_utf8_lossy(&bytes).into_owned()),
+        false,
+        false,
+    ))
+}
+
+// ---------------------------------------------------------------- approbation
+
+/// Empreinte de l'action autorisée : toute modification de la commande, du
+/// répertoire ou de la tâche change l'empreinte et invalide l'approbation.
+pub fn action_fingerprint(agent_id: &str, command: &str, workdir: &Path, prompt: &str) -> String {
+    let payload = format!(
+        "agent={agent_id}\ncommand={command}\nworkdir={}\nprompt={prompt}",
+        workdir.display()
+    );
+    ih_workspace::fs::sha256_hex(payload.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ih-am-{tag}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {args:?} : {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).to_string()
+    }
+
+    fn git_project(tag: &str) -> PathBuf {
+        let dir = temp_dir(tag);
+        git(&dir, &["init", "-q"]);
+        git(&dir, &["config", "user.email", "test@ih"]);
+        git(&dir, &["config", "user.name", "IH Test"]);
+        std::fs::write(dir.join("README.md"), "# projet\n").unwrap();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/main.rs"), "fn main() {}\n").unwrap();
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "initial"]);
+        dir
+    }
+
+    fn fake_agent(dir: &Path, name: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        let staging = dir.join(format!(".{name}.tmp"));
+        std::fs::write(&staging, body).unwrap();
+        std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::rename(&staging, &path).unwrap();
+        path
+    }
+
+    #[test]
+    fn sandbox_isole_du_projet() {
+        let project = git_project("sandbox");
+        let base = temp_dir("wt");
+        let sandbox = create_sandbox(&project, &base, "sess-1").unwrap();
+        assert!(sandbox.workdir().is_dir());
+        assert_eq!(changed_files(&sandbox).unwrap(), Vec::<String>::new());
+
+        std::fs::write(
+            sandbox.workdir().join("src/main.rs"),
+            "fn main() { /* agent */ }\n",
+        )
+        .unwrap();
+        let changes = changed_files(&sandbox).unwrap();
+        assert_eq!(changes, vec!["src/main.rs".to_string()]);
+
+        // Le projet n'a pas bougé.
+        assert_eq!(
+            std::fs::read_to_string(project.join("src/main.rs")).unwrap(),
+            "fn main() {}\n"
+        );
+        remove_sandbox(&sandbox).unwrap();
+        assert!(!sandbox.workdir().exists());
+        std::fs::remove_dir_all(&project).ok();
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn collecte_ajout_modification_suppression() {
+        let project = git_project("collecte");
+        let base = temp_dir("wt2");
+        let sandbox = create_sandbox(&project, &base, "sess-2").unwrap();
+
+        // modification
+        std::fs::write(
+            sandbox.workdir().join("src/main.rs"),
+            "fn main() {\n    println!(\"x\");\n}\n",
+        )
+        .unwrap();
+        // ajout
+        std::fs::write(sandbox.workdir().join("src/lib.rs"), "pub fn f() {}\n").unwrap();
+        // suppression
+        std::fs::remove_file(sandbox.workdir().join("README.md")).unwrap();
+
+        let changes = collect_changes(&sandbox, MAX_CHANGE_BYTES).unwrap();
+        let main = changes.iter().find(|c| c.path == "src/main.rs").unwrap();
+        assert!(main.before.is_some() && main.after.is_some());
+        assert!(main.additions >= 1 && main.deletions >= 1);
+
+        let lib = changes.iter().find(|c| c.path == "src/lib.rs").unwrap();
+        assert!(lib.before.is_none(), "nouveau fichier");
+        assert_eq!(lib.after.as_deref(), Some("pub fn f() {}\n"));
+
+        let readme = changes.iter().find(|c| c.path == "README.md").unwrap();
+        assert!(readme.after.is_none(), "fichier supprimé");
+
+        remove_sandbox(&sandbox).unwrap();
+        std::fs::remove_dir_all(&project).ok();
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn hors_depot_git_refuse() {
+        let dir = temp_dir("nogit");
+        let base = temp_dir("wt3");
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let error = create_sandbox(&dir, &base, "s1").unwrap_err();
+        assert!(matches!(error, IhError::Unsupported(_)));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn detection_et_version_des_adaptateurs() {
+        let dir = temp_dir("adapter");
+        let script = fake_agent(&dir, "fake-agent", "#!/bin/sh\necho \"fake-agent 1.2.3\"\n");
+        let configs = vec![
+            // CLI connu : la version est sondée (dans un répertoire neutre).
+            AgentConfig {
+                id: "fake".into(),
+                kind: AgentKind::ClaudeCode,
+                label: "Faux".into(),
+                program: script.display().to_string(),
+                enabled: true,
+                ..Default::default()
+            },
+            // Adaptateur personnalisé : jamais exécuté pour `--version`.
+            AgentConfig {
+                id: "perso".into(),
+                kind: AgentKind::Custom,
+                label: "Perso".into(),
+                program: script.display().to_string(),
+                enabled: true,
+                ..Default::default()
+            },
+            AgentConfig {
+                id: "absent".into(),
+                kind: AgentKind::Custom,
+                label: "Absent".into(),
+                program: "agent-inexistant-ih".into(),
+                enabled: true,
+                ..Default::default()
+            },
+        ];
+        let reports = detect_adapters(&configs);
+        assert!(reports[0].detected);
+        assert_eq!(reports[0].version.as_deref(), Some("fake-agent 1.2.3"));
+        assert!(reports[0].capabilities.contains(&"annulation".to_string()));
+        assert!(reports[1].detected);
+        assert!(
+            reports[1].version.is_none(),
+            "un adaptateur personnalisé ne doit pas être exécuté pour --version"
+        );
+        assert!(!reports[2].detected);
+        assert!(reports[2].version.is_none());
+        assert!(reports[2].diagnostic.contains("introuvable"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn empreinte_change_avec_la_commande_ou_la_tache() {
+        let dir = PathBuf::from("/tmp/ih-action");
+        let a = action_fingerprint("claude-code", "claude -p x", &dir, "tâche");
+        let b = action_fingerprint("claude-code", "claude -p y", &dir, "tâche");
+        let c = action_fingerprint("claude-code", "claude -p x", &dir, "autre tâche");
+        let d = action_fingerprint(
+            "claude-code",
+            "claude -p x",
+            &PathBuf::from("/tmp/autre"),
+            "tâche",
+        );
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+        assert_eq!(a.len(), 64);
+        assert_eq!(
+            a,
+            action_fingerprint("claude-code", "claude -p x", &dir, "tâche")
+        );
+    }
+}

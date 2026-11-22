@@ -581,6 +581,64 @@ export interface PendingDiff {
   id: string;
   project_id: string;
   path: string;
+  /** `editor` ou `agent:<session_id>` : origine réelle de la modification. */
+  origin: string;
+  /** Vrai si l'acceptation supprime le fichier. */
+  delete: boolean;
+  created_at: string;
+}
+
+// ------------------------------------------------------------- mode agent
+
+/** Adaptateur d'agent tel que `agent_adapters` le rapporte. */
+export interface AgentAdapterReport {
+  id: string;
+  label: string;
+  kind: string;
+  program: string;
+  detected: boolean;
+  path: string | null;
+  version: string | null;
+  capabilities: string[];
+  diagnostic: string;
+}
+
+/** Demande d'approbation d'un lancement de session (`agent_session_request_approval`). */
+export interface AgentApprovalView {
+  approval_id: string;
+  agent_id: string;
+  label: string;
+  command: string;
+  workdir: string;
+  risk: RiskLevel;
+  fingerprint: string;
+  detail: string;
+}
+
+/** Accusé de réception de `agent_session_start`. */
+export interface AgentSessionStarted {
+  session_id: string;
+  workdir: string;
+  agent_id: string;
+}
+
+/** Session d'agent persistée avec ses métadonnées d'exécution. */
+export interface AgentSessionDetail {
+  session: SessionRow;
+  adapter: string | null;
+  task: string | null;
+  workdir: string | null;
+  summary: string | null;
+  files: string[];
+}
+
+/** Événement persisté d'une session (`agent_session_events`). */
+export interface AgentEventRow {
+  id: number;
+  session_id: string;
+  seq: number;
+  kind: string;
+  payload: unknown;
   created_at: string;
 }
 
@@ -677,6 +735,43 @@ export const api = {
       call<SessionSnapshot | null>("agent_state", { sessionId }),
     sessions: (projectId: string) =>
       call<SessionRow[]>("agent_sessions", id(projectId)),
+  },
+
+  // mode agent (0.2.2) : adaptateurs, sessions isolées, approbations
+  agent: {
+    adapters: () => call<AgentAdapterReport[]>("agent_adapters"),
+    requestApproval: (projectId: string, agentId: string, task: string) =>
+      call<AgentApprovalView>("agent_session_request_approval", {
+        projectId,
+        agentId,
+        task,
+      }),
+    start: (
+      projectId: string,
+      threadId: string | null,
+      agentId: string,
+      task: string,
+      approvalId: string,
+      timeoutSecs: number | null = null,
+    ) =>
+      call<AgentSessionStarted>("agent_session_start", {
+        projectId,
+        threadId,
+        agentId,
+        task,
+        approvalId,
+        timeoutSecs,
+      }),
+    cancel: (sessionId: string) =>
+      call<void>("agent_session_cancel", { sessionId }),
+    refuse: (approvalId: string) =>
+      call<ApprovalRequest>("agent_session_refuse", { approvalId }),
+    sessions: (projectId: string, limit: number | null = null) =>
+      call<AgentSessionDetail[]>("agent_session_list", { projectId, limit }),
+    detail: (sessionId: string) =>
+      call<AgentSessionDetail>("agent_session_detail", { sessionId }),
+    events: (sessionId: string, limit: number | null = null) =>
+      call<AgentEventRow[]>("agent_session_events", { sessionId, limit }),
   },
 
   // fournisseurs
@@ -840,6 +935,7 @@ export const api = {
     diffPrepare: (projectId: string, path: string, content: string) =>
       call<DiffPreview>("diff_prepare", { projectId, path, content }),
     diffPending: () => call<PendingDiff[]>("diff_pending"),
+    diffView: (id: string) => call<DiffPreview>("diff_view", { id }),
     diffAccept: (diffId: string) =>
       call<WorkspaceWriteOutcome>("diff_accept", { id: diffId }),
     diffReject: (diffId: string) => call<void>("diff_reject", { id: diffId }),

@@ -10,6 +10,7 @@ import {
   Activity,
   AtSign,
   Ban,
+  Bot,
   FileCode2,
   MessageSquare,
   MessagesSquare,
@@ -54,6 +55,7 @@ import {
   type ChatErrorEvent,
   type ChatStreamAction,
 } from "../lib/chat";
+import { agentPhaseLabelKey } from "../lib/agent";
 import { errorIsFixable } from "../lib/errors";
 import { useTauriEvent } from "../lib/events";
 import { formatBytes, formatDate } from "../lib/format";
@@ -75,11 +77,14 @@ import {
   removeChip,
   type ContextChip,
 } from "../lib/mentions";
+import { useAgentSession } from "../lib/useAgentSession";
 import { useWorkspace } from "../lib/useWorkspace";
 import { useAction, useAsync, useDebouncedValue } from "../lib/hooks";
 import { useApp } from "../lib/store";
+import { AgentPanel } from "../components/AgentPanel";
 import { Badge, type BadgeTone } from "../components/Badge";
 import { BottomPanel } from "../components/BottomPanel";
+import { ChatModeSwitch, type ChatMode } from "../components/ChatModeSwitch";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState, LoadingRow, Spinner } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -162,6 +167,9 @@ function roleTone(role: string): BadgeTone {
 export function ChatPage() {
   const { t, locale, project, navigate } = useApp();
   const ws = useWorkspace(project?.id ?? null);
+  // Le mode Agent vit au-dessus du panneau : changer de mode ne perd pas la session.
+  const [chatMode, setChatMode] = useState<ChatMode>("chat");
+  const agentSession = useAgentSession(project?.id ?? null);
   const projectIdRef = useRef<string | null>(project?.id ?? null);
   projectIdRef.current = project?.id ?? null;
 
@@ -978,6 +986,7 @@ export function ChatPage() {
       return;
     }
     setSearch("");
+    setChatMode("chat");
     threads.setData((current) =>
       sortThreadsByUpdated([
         ...(current ?? []).filter((entry) => entry.id !== created.id),
@@ -1088,6 +1097,7 @@ export function ChatPage() {
     setPrepareBusy(false);
     setStopping(false);
     setActiveTurn(null);
+    setChatMode("chat");
     finalizingRef.current = null;
     pendingDeltasRef.current.clear();
     terminalRef.current.clear();
@@ -1472,7 +1482,10 @@ export function ChatPage() {
                     <button
                       type="button"
                       className="chat-thread-button"
-                      onClick={() => selectThread(thread.id, thread)}
+                      onClick={() => {
+                        setChatMode("chat");
+                        selectThread(thread.id, thread);
+                      }}
                       aria-current={selected ? "true" : undefined}
                     >
                       <span className="chat-thread-title">
@@ -1533,7 +1546,30 @@ export function ChatPage() {
           )}
         </section>
 
-        {providers.loading ? (
+        <div className="chat-conversation-column">
+          <div className="chat-mode-bar">
+            <ChatModeSwitch mode={chatMode} onChange={setChatMode} />
+            {chatMode === "chat" && agentSession.active ? (
+              <button
+                type="button"
+                className="ghost small agent-active-indicator"
+                onClick={() => setChatMode("agent")}
+                title={t("agent_mode.back_to_agent")}
+              >
+                <Bot size={13} aria-hidden="true" />
+                {t("agent_mode.active_indicator", {
+                  phase: t(agentPhaseLabelKey(agentSession.phase)),
+                })}
+              </button>
+            ) : null}
+            {chatMode === "agent" ? (
+              <span className="small muted chat-mode-hint">{t("agent_mode.mode_hint")}</span>
+            ) : null}
+          </div>
+
+          {chatMode === "agent" ? (
+            <AgentPanel projectId={project.id} controller={agentSession} workspace={ws} />
+          ) : providers.loading ? (
           <section className="card chat-conversation">
             <LoadingRow label={t("chat.providers_loading")} />
           </section>
@@ -2005,6 +2041,7 @@ export function ChatPage() {
             </div>
           </section>
         )}
+        </div>
             </div>
           </div>
 

@@ -13,16 +13,22 @@ use ih_security::approval::ApprovalRegistry;
 use ih_security::secrets::{KeyringSecretStore, SecretStore, SecretStoreStatus};
 use ih_store::Store;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 use tauri::{AppHandle, Emitter};
 
 /// Modification préparée mais non appliquée (diff en attente de décision).
+#[derive(Clone)]
 pub struct PendingDiff {
     pub project_id: String,
     pub path: String,
-    pub before_sha256: String,
+    /// `None` pour un fichier nouveau (aucune empreinte de référence).
+    pub before_sha256: Option<String>,
     pub content: String,
+    /// Vrai si l'acceptation doit supprimer le fichier.
+    pub delete: bool,
+    /// `editor` ou `agent:<session_id>` : indique d'où vient la modification.
+    pub origin: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -41,7 +47,7 @@ pub struct AppState {
     pub config: RwLock<AppConfig>,
     pub secrets: Arc<dyn SecretStore>,
     pub approvals: ApprovalRegistry,
-    pub supervisor: AgentSupervisor,
+    pub supervisor: Arc<AgentSupervisor>,
     pub pty: Mutex<HashMap<String, PtyEntry>>,
     pub mcp: Mutex<HashMap<String, McpClient>>,
     /// Tours de chat en cours, annulables par identifiant de requête.
@@ -51,7 +57,9 @@ pub struct AppState {
     pub update_status: Mutex<UpdateStatus>,
     pub staged_update: Mutex<Option<ih_update::StagedUpdate>>,
     /// Modifications préparées, en attente d'acceptation ou de rejet.
-    pub pending_diffs: Mutex<HashMap<String, PendingDiff>>,
+    pub pending_diffs: Arc<Mutex<HashMap<String, PendingDiff>>>,
+    /// Sessions dont les événements doivent être persistés (`ih://agent-event`).
+    pub agent_sessions: Arc<Mutex<HashSet<String>>>,
     pub app_handle: AppHandle,
     /// Garde le writer non bloquant en vie : sans lui, les dernières lignes
     /// de journal ne sont jamais écrites.
@@ -68,12 +76,76 @@ impl AppState {
         let locale = ih_i18n::Locale::parse(&config.locale).unwrap_or_default();
         let policy: ResourcePolicy = config.resources.clone();
 
+        // Sessions d'agent actives : leurs événements sont persistés et
+        // diffusés sous une forme typée (`ih://agent-event`).
+        let agent_sessions: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
         let sink_app = app_handle.clone();
+        let sink_store = store.clone();
+        let sink_sessions = agent_sessions.clone();
+        let sink_seqs: Arc<Mutex<HashMap<String, u32>>> = Arc::new(Mutex::new(HashMap::new()));
         let sink: EventSink = Arc::new(move |event: CoreEvent| {
             let _ = sink_app.emit(event.name(), &event);
+            let session_id = match &event {
+                CoreEvent::AgentOutput { session_id, .. }
+                | CoreEvent::AgentState { session_id, .. } => session_id.clone(),
+                _ => return,
+            };
+            let is_agent = sink_sessions
+                .lock()
+                .map(|set| set.contains(&session_id))
+                .unwrap_or(false);
+            if !is_agent {
+                return;
+            }
+            let (kind, payload) = match &event {
+                CoreEvent::AgentOutput { stream, data, .. } => (
+                    "output",
+                    serde_json::json!({
+                        "stream": match stream {
+                            ih_core::events::OutputStream::Stdout => "stdout",
+                            ih_core::events::OutputStream::Stderr => "stderr",
+                        },
+                        "data": data.chars().take(4096).collect::<String>(),
+                    }),
+                ),
+                CoreEvent::AgentState { state, .. } => {
+                    ("state", serde_json::json!({ "state": state }))
+                }
+                _ => return,
+            };
+            let seq = {
+                let mut seqs = match sink_seqs.lock() {
+                    Ok(guard) => guard,
+                    Err(_) => return,
+                };
+                let entry = seqs.entry(session_id.clone()).or_insert(0);
+                let value = *entry;
+                *entry = entry.saturating_add(1);
+                value
+            };
+            // Rétention bornée : on n'écrit pas indéfiniment dans la base.
+            if seq < 4000 {
+                if let Ok(sid) = ih_core::SessionId::parse(session_id.clone()) {
+                    let _ = sink_store.append_agent_event(&ih_store::NewAgentEvent {
+                        session_id: sid,
+                        seq,
+                        kind: kind.to_string(),
+                        payload: payload.clone(),
+                    });
+                }
+            }
+            let _ = sink_app.emit(
+                "ih://agent-event",
+                serde_json::json!({
+                    "session_id": session_id,
+                    "seq": seq,
+                    "kind": kind,
+                    "payload": payload,
+                }),
+            );
         });
 
-        let supervisor = AgentSupervisor::new(policy, sink)?;
+        let supervisor = Arc::new(AgentSupervisor::new(policy, sink)?);
 
         Ok(Self {
             paths,
@@ -92,7 +164,8 @@ impl AppState {
                 ..Default::default()
             }),
             staged_update: Mutex::new(None),
-            pending_diffs: Mutex::new(HashMap::new()),
+            pending_diffs: Arc::new(Mutex::new(HashMap::new())),
+            agent_sessions,
             app_handle,
             log_guard,
         })

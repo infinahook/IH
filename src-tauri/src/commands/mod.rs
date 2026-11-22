@@ -1,5 +1,6 @@
 //! Commandes IPC exposées à l'interface React.
 
+pub mod agent;
 pub mod ai;
 pub mod chat;
 pub mod core;

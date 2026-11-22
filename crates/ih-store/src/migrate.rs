@@ -21,7 +21,7 @@ use rusqlite::Connection;
 use crate::util::db_err;
 
 /// Version de schéma attendue par ce crate.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// v1 — schéma initial.
 ///
@@ -183,6 +183,31 @@ CREATE INDEX IF NOT EXISTS idx_audit_created_at
     ON audit (created_at DESC);
 "#;
 
+/// v3 — sessions d'agent : métadonnées d'exécution et flux d'événements.
+///
+/// `sessions` reçoit la tâche, le répertoire de travail isolé, l'adaptateur,
+/// le résumé final et la liste JSON des fichiers touchés. `agent_events`
+/// conserve les événements bornés d'une session pour la reprise après
+/// redémarrage.
+pub(crate) const V3: &str = r#"
+ALTER TABLE sessions ADD COLUMN adapter TEXT;
+ALTER TABLE sessions ADD COLUMN task TEXT;
+ALTER TABLE sessions ADD COLUMN workdir TEXT;
+ALTER TABLE sessions ADD COLUMN summary TEXT;
+ALTER TABLE sessions ADD COLUMN files TEXT;
+
+CREATE TABLE agent_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    seq        INTEGER NOT NULL,
+    kind       TEXT NOT NULL,
+    payload    TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_agent_events_session ON agent_events (session_id, seq);
+"#;
+
 /// Applique les migrations manquantes et renvoie la version courante.
 pub(crate) fn migrate(conn: &mut Connection) -> IhResult<()> {
     let current: i64 = conn
@@ -225,6 +250,19 @@ pub(crate) fn migrate(conn: &mut Connection) -> IhResult<()> {
         tx.commit()
             .map_err(|err| db_err("validation de la migration v2", err))?;
         tracing::info!(version = 2, "migration du schéma ih-store appliquée");
+    }
+
+    if current < 3 {
+        let tx = conn
+            .transaction()
+            .map_err(|err| db_err("début de la migration v3", err))?;
+        tx.execute_batch(V3)
+            .map_err(|err| db_err("application de la migration v3", err))?;
+        tx.pragma_update(None, "user_version", 3_i64)
+            .map_err(|err| db_err("écriture de user_version = 3", err))?;
+        tx.commit()
+            .map_err(|err| db_err("validation de la migration v3", err))?;
+        tracing::info!(version = 3, "migration du schéma ih-store appliquée");
     }
 
     Ok(())

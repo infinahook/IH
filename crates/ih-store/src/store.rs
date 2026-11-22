@@ -18,9 +18,9 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::migrate;
 use crate::model::{
-    AuditEntry, InstalledExtension, MemoryEntry, Message, NewAuditEntry, NewMemoryEntry,
-    NewMessage, NewSession, NewTask, NewWorkflowRun, Project, SessionRow, Task, Thread, Workflow,
-    WorkflowRun,
+    AgentEventRow, AgentSessionDetail, AuditEntry, InstalledExtension, MemoryEntry, Message,
+    NewAgentEvent, NewAuditEntry, NewMemoryEntry, NewMessage, NewSession, NewTask, NewWorkflowRun,
+    Project, SessionRow, Task, Thread, Workflow, WorkflowRun,
 };
 use crate::util::{
     agent_state_str, db_err, decode_json, decode_opt_json, encode_json, get_agent_state, get_id,
@@ -514,6 +514,181 @@ impl Store {
             .map_err(|err| db_err(format!("lecture des sessions de {project_id}"), err))?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|err| db_err(format!("lecture des sessions de {project_id}"), err))
+    }
+
+    /// Récupère une session par identifiant.
+    pub fn get_session(&self, id: &SessionId) -> IhResult<Option<SessionRow>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, project_id, agent_id, thread_id, state, exit_code, created_at, ended_at
+                 FROM sessions WHERE id = ?1",
+            )
+            .map_err(|err| db_err(format!("préparation de la lecture de {id}"), err))?;
+        let mut rows = stmt
+            .query_map(params![id.as_str()], session_from_row)
+            .map_err(|err| db_err(format!("lecture de la session {id}"), err))?;
+        match rows.next() {
+            Some(row) => {
+                Ok(Some(row.map_err(|err| {
+                    db_err(format!("lecture de la session {id}"), err)
+                })?))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Enregistre l'adaptateur, la tâche et le répertoire isolé d'une session.
+    pub fn update_session_meta(
+        &self,
+        id: &SessionId,
+        adapter: Option<&str>,
+        task: Option<&str>,
+        workdir: Option<&str>,
+    ) -> IhResult<()> {
+        let conn = self.lock()?;
+        let updated = conn
+            .execute(
+                "UPDATE sessions
+                 SET adapter = COALESCE(?2, adapter),
+                     task = COALESCE(?3, task),
+                     workdir = COALESCE(?4, workdir)
+                 WHERE id = ?1",
+                params![id.as_str(), adapter, task, workdir],
+            )
+            .map_err(|err| db_err(format!("mise à jour des métadonnées de {id}"), err))?;
+        if updated == 0 {
+            return Err(IhError::NotFound(format!("session {id}")));
+        }
+        Ok(())
+    }
+
+    /// Termine une session : état, code de sortie, résumé et fichiers touchés.
+    pub fn complete_session(
+        &self,
+        id: &SessionId,
+        state: AgentState,
+        exit_code: Option<i32>,
+        summary: Option<&str>,
+        files: &[String],
+    ) -> IhResult<()> {
+        let files_json = encode_json("fichiers modifiés", files)?;
+        let conn = self.lock()?;
+        let updated = conn
+            .execute(
+                "UPDATE sessions
+                 SET state = ?2, exit_code = ?3, ended_at = ?4, summary = ?5, files = ?6
+                 WHERE id = ?1",
+                params![
+                    id.as_str(),
+                    agent_state_str(state),
+                    exit_code,
+                    Utc::now(),
+                    summary,
+                    files_json
+                ],
+            )
+            .map_err(|err| db_err(format!("fin de la session {id}"), err))?;
+        if updated == 0 {
+            return Err(IhError::NotFound(format!("session {id}")));
+        }
+        Ok(())
+    }
+
+    /// Session complète avec ses métadonnées, pour l'interface.
+    pub fn get_session_detail(&self, id: &SessionId) -> IhResult<Option<AgentSessionDetail>> {
+        let Some(session) = self.get_session(id)? else {
+            return Ok(None);
+        };
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare("SELECT adapter, task, workdir, summary, files FROM sessions WHERE id = ?1")
+            .map_err(|err| db_err(format!("préparation de la session {id}"), err))?;
+        let detail = stmt
+            .query_row(params![id.as_str()], |row| {
+                let adapter: Option<String> = row.get(0)?;
+                let task: Option<String> = row.get(1)?;
+                let workdir: Option<String> = row.get(2)?;
+                let summary: Option<String> = row.get(3)?;
+                let files: Option<String> = row.get(4)?;
+                Ok((adapter, task, workdir, summary, files))
+            })
+            .map_err(|err| db_err(format!("lecture des métadonnées de {id}"), err))?;
+        let files: Vec<String> = match detail.4 {
+            Some(raw) => serde_json::from_str(&raw).unwrap_or_default(),
+            None => Vec::new(),
+        };
+        Ok(Some(AgentSessionDetail {
+            session,
+            adapter: detail.0,
+            task: detail.1,
+            workdir: detail.2,
+            summary: detail.3,
+            files,
+        }))
+    }
+
+    /// Ajoute un événement de session (numéro de séquence fourni par l'appelant).
+    pub fn append_agent_event(&self, new: &NewAgentEvent) -> IhResult<AgentEventRow> {
+        if new.kind.trim().is_empty() {
+            return Err(IhError::Invalid("type d'événement vide".into()));
+        }
+        let payload = encode_json("événement d'agent", &new.payload)?;
+        let now = Utc::now();
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO agent_events (session_id, seq, kind, payload, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                new.session_id.as_str(),
+                i64::from(new.seq),
+                new.kind,
+                payload,
+                now
+            ],
+        )
+        .map_err(|err| db_err(format!("ajout d'un événement à {}", new.session_id), err))?;
+        let id = conn.last_insert_rowid();
+        Ok(AgentEventRow {
+            id,
+            session_id: new.session_id.clone(),
+            seq: new.seq,
+            kind: new.kind.clone(),
+            payload: new.payload.clone(),
+            created_at: now,
+        })
+    }
+
+    /// Événements d'une session, dans l'ordre, bornés par `limit`.
+    pub fn list_agent_events(
+        &self,
+        session_id: &SessionId,
+        limit: u32,
+    ) -> IhResult<Vec<AgentEventRow>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, session_id, seq, kind, payload, created_at
+                 FROM agent_events WHERE session_id = ?1
+                 ORDER BY seq ASC LIMIT ?2",
+            )
+            .map_err(|err| db_err("préparation de la liste d'événements", err))?;
+        let rows = stmt
+            .query_map(params![session_id.as_str(), i64::from(limit)], |row| {
+                let raw: String = row.get(4)?;
+                Ok(AgentEventRow {
+                    id: row.get(0)?,
+                    session_id: SessionId::parse(row.get::<_, String>(1)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    seq: row.get::<_, i64>(2)? as u32,
+                    kind: row.get(3)?,
+                    payload: serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null),
+                    created_at: row.get(5)?,
+                })
+            })
+            .map_err(|err| db_err(format!("lecture des événements de {session_id}"), err))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| db_err(format!("lecture des événements de {session_id}"), err))
     }
 
     // ---------------------------------------------------------------------

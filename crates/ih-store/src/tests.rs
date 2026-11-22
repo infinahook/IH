@@ -148,7 +148,7 @@ fn ouverture_en_memoire_sans_chemin() {
 }
 
 #[test]
-fn migration_v1_vers_v2_preserve_les_donnees() {
+fn migration_v1_vers_courante_preserve_les_donnees() {
     let db = TempDb::new();
     let path = db.path();
     if let Some(parent) = path.parent() {
@@ -168,8 +168,71 @@ fn migration_v1_vers_v2_preserve_les_donnees() {
     }
 
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 2);
+    // Les migrations v2 et v3 s'enchaînent sur une base v1.
+    assert_eq!(store.schema_version().unwrap(), crate::SCHEMA_VERSION);
     assert_eq!(store.get_setting("legacy").unwrap().as_deref(), Some("v1"));
+}
+
+#[test]
+fn sessions_agent_et_evenements_persistes() {
+    let store = Store::open_in_memory().unwrap();
+    let project = crate::Project {
+        id: ih_core::ProjectId::new(),
+        path: "/tmp/ih-agent-test".into(),
+        name: "agent".into(),
+        created_at: chrono::Utc::now(),
+        last_opened_at: chrono::Utc::now(),
+        trusted: true,
+    };
+    store.upsert_project(&project).unwrap();
+    let session = store
+        .create_session(&crate::NewSession {
+            project_id: project.id.clone(),
+            agent_id: "claude-code".into(),
+            thread_id: None,
+            prompt: "analyse le dépôt".into(),
+        })
+        .unwrap();
+
+    store
+        .update_session_meta(
+            &session.id,
+            Some("claude-code"),
+            Some("analyse le dépôt"),
+            Some("/tmp/wt-1"),
+        )
+        .unwrap();
+    for seq in 0..3 {
+        store
+            .append_agent_event(&crate::NewAgentEvent {
+                session_id: session.id.clone(),
+                seq,
+                kind: "output".into(),
+                payload: serde_json::json!({ "line": format!("ligne {seq}") }),
+            })
+            .unwrap();
+    }
+    store
+        .complete_session(
+            &session.id,
+            ih_core::events::AgentState::Completed,
+            Some(0),
+            Some("terminé"),
+            &["src/main.rs".to_string()],
+        )
+        .unwrap();
+
+    let detail = store.get_session_detail(&session.id).unwrap().unwrap();
+    assert_eq!(detail.adapter.as_deref(), Some("claude-code"));
+    assert_eq!(detail.workdir.as_deref(), Some("/tmp/wt-1"));
+    assert_eq!(detail.summary.as_deref(), Some("terminé"));
+    assert_eq!(detail.files, vec!["src/main.rs".to_string()]);
+    assert_eq!(detail.session.state, ih_core::events::AgentState::Completed);
+
+    let events = store.list_agent_events(&session.id, 10).unwrap();
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[2].seq, 2);
+    assert_eq!(events[0].payload["line"], "ligne 0");
 }
 
 // -------------------------------------------------------------------------

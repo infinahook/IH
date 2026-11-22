@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 256 tests Rust + 92 tests frontend, tous verts.
+Dernière vérification : 262 tests Rust + 122 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -62,6 +62,23 @@ Dernière vérification : 256 tests Rust + 92 tests frontend, tous verts.
 - Validation dans le binaire réel : mention `@` → chip + aperçu, diff `+1 −0`,
   rejet (disque intact), acceptation (fichier écrit), restauration d'onglet.
 
+## Jalon 0.2.2 livré — Agent Mode
+
+- **Mode Agent** : sélection d'un adaptateur réellement détecté, tâche libre,
+  approbation ponctuelle liée à une empreinte, exécution isolée, événements en
+  temps réel, annulation, revue des modifications.
+- **Isolation** : worktree git détaché ; le projet n'est jamais modifié pendant
+  la session. Hors dépôt git, le mode refuse de démarrer.
+- **Sessions persistées** (migration v3) avec événements bornés et reprise après
+  redémarrage.
+- **Diffs** : chaque fichier touché devient un diff en attente, prévisualisable
+  ligne à ligne, accepté (contrôle d'empreinte + sauvegarde) ou rejeté (aucune
+  écriture). Suppression de fichier prise en charge.
+- **Annulation** : groupe de processus tué, enfant récolté, session `cancelled`.
+- **Aucun CLI d'agent réel n'étant installé sur la machine de validation**, les
+  intégrations Claude Code / Codex / Gemini CLI / OpenCode sont implémentées
+  mais **non exécutées** ; la validation réelle a utilisé un agent contrôlé.
+
 ## Ce qui est explicitement absent
 
 1. **Pièces jointes binaires** (images, PDF) dans le chat : absentes.
@@ -85,7 +102,7 @@ Dernière vérification : 256 tests Rust + 92 tests frontend, tous verts.
 | Suite | Nombre | Portée |
 |---|---|---|
 | `ih-core` | 30 | configuration, erreurs, événements, ressources, chemins, redaction, plateforme |
-| `ih-store` | 15 | migrations, CRUD, cascade, pagination, concurrence, recherche |
+| `ih-store` | 16 | migrations (v3 incluse), CRUD, cascade, pagination, concurrence, recherche |
 | `ih-security` | 19 | approbations, expiration/rejeu, classification de risque, trousseau |
 | `ih-providers` | 15 | 4 fournisseurs, SSE/NDJSON, erreurs 401, timeout, clé absente |
 | `ih-agents` | 13 | adaptateurs, succès/échec, annulation, timeout, limite, sortie bornée |
@@ -97,9 +114,10 @@ Dernière vérification : 256 tests Rust + 92 tests frontend, tous verts.
 | `ih-chat` | 11 | streaming, annulation, historique borné, contexte injecté, erreurs, titre, recherche + **e2e Ollama réel** |
 | `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
 | `ih-workspace` | 33 | Git, prison de chemins, PTY, **diff LCS**, métadonnées, écriture vérifiée |
-| **Rust total** | **256** | |
-| Frontend (`vitest`) | 92 | i18n, formatage, ANSI, Git, arborescence, chat, **layout, mentions, onglets, diff** |
-| **Total** | **348** | |
+| `ih-agent-mode` | 5 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
+| **Rust total** | **262** | |
+| Frontend (`vitest`) | 122 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, **agent** |
+| **Total** | **384** | |
 
 ## Vérifications manuelles effectuées
 
