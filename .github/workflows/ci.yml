@@ -25,7 +25,7 @@ jobs:
             libjavascriptcoregtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev \
             patchelf libssl-dev build-essential curl file
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -74,7 +74,7 @@ jobs:
             libjavascriptcoregtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev \
             patchelf libssl-dev build-essential curl file
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm

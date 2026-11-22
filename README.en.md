@@ -6,10 +6,12 @@ terminal and a multi-agent task orchestrator — in one window, on Zorin OS,
 Ubuntu/Debian and Arch Linux.
 
 > **Honest status.** This repository is not a mock-up: the Rust core is real and
-> tested (207 tests) and all 16 UI sections call real commands. It is not
+> tested (208 tests) and all 16 UI sections call real commands. It is not
 > finished either — the exact list of what works, what is partial and what is
 > missing lives in **[docs/en/FEATURES.md](docs/en/FEATURES.md)**. Read it before
 > evaluating IH.
+
+![IH overview](docs/screenshots/overview.png)
 
 ## What IH does
 
@@ -100,7 +102,7 @@ Checks run locally and in CI:
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace        # 207 tests
+cargo test --workspace        # 208 tests
 npm run typecheck
 npm test                      # 36 tests
 npm run build

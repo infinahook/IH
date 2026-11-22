@@ -7,10 +7,12 @@ multi-agents — dans une seule fenêtre, sur Zorin OS, Ubuntu/Debian et Arch
 Linux.
 
 > **Honnêteté sur l'état du projet.** Ce dépôt n'est pas une maquette : le
-> noyau Rust est réel, testé (207 tests) et les 16 sections de l'interface
+> noyau Rust est réel, testé (208 tests) et les 16 sections de l'interface
 > appellent de vraies commandes. Pour autant, tout n'est pas terminé — la liste
 > exacte de ce qui fonctionne, de ce qui est partiel et de ce qui manque est
 > dans **[docs/FEATURES.md](docs/FEATURES.md)**. Lisez-la avant d'évaluer IH.
+
+![Vue d'ensemble d'IH](docs/screenshots/overview.png)
 
 ## Ce que fait IH
 
@@ -103,7 +105,7 @@ Vérifications exécutées en CI et localement :
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace        # 207 tests
+cargo test --workspace        # 208 tests
 npm run typecheck
 npm test                      # 36 tests
 npm run build

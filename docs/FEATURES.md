@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 207 tests Rust + 36 tests frontend, tous verts.
+Dernière vérification : 208 tests Rust + 36 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -64,13 +64,13 @@ Dernière vérification : 207 tests Rust + 36 tests frontend, tous verts.
 | `ih-providers` | 15 | 4 fournisseurs, SSE/NDJSON, erreurs 401, timeout, clé absente |
 | `ih-agents` | 13 | adaptateurs, succès/échec, annulation, timeout, limite, sortie bornée |
 | `ih-extensions` | 27 | manifestes, empreinte, installation, prison, MCP stdio, serveur muet |
-| `ih-workspace` | 21 | Git (statut, commit, worktrees), prison de chemins, PTY sans zombie |
+| `ih-workspace` | 22 | Git (statut, commit, worktrees), prison de chemins, PTY sans zombie |
 | `ih-orchestrator` | 23 | cycles, disponibilité, équipes, ordonnanceur, budget mémoire |
 | `ih-update` | 39 | signature Ed25519, digest, téléchargement, staging, rollback |
 | `ih-i18n` | 5 | parité FR/EN, repli, substitution |
-| **Rust total** | **207** | |
+| **Rust total** | **208** | |
 | Frontend (`vitest`) | 36 | i18n, formatage, ANSI, Git, arborescence |
-| **Total** | **243** | |
+| **Total** | **244** | |
 
 ## Vérifications manuelles effectuées
 

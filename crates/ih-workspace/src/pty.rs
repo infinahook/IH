@@ -338,13 +338,57 @@ mod tests {
         (receiver, handle)
     }
 
-    /// Retire le prompt éventuellement collé devant la sortie d'une commande
-    /// (`$ hello`, `bash-5.2$ hello`, `# hello`).
-    fn without_prompt(line: &str) -> &str {
-        let line = line.trim_end_matches('\r');
-        let line = line.rsplit("$ ").next().unwrap_or(line);
-        let line = line.rsplit("# ").next().unwrap_or(line);
-        line
+    /// Supprime les séquences d'échappement ANSI (CSI et OSC).
+    ///
+    /// Un PTY réel émet des séquences de contrôle — par exemple le bracketed
+    /// paste `ESC[?2004h` — que le shell n'affiche jamais textuellement.
+    fn strip_ansi(input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        let mut chars = input.chars().peekable();
+        while let Some(current) = chars.next() {
+            if current != '\u{1b}' {
+                out.push(current);
+                continue;
+            }
+            match chars.peek() {
+                Some('[') => {
+                    chars.next();
+                    // CSI : paramètres puis octet final dans 0x40..=0x7E.
+                    for next in chars.by_ref() {
+                        if ('\u{40}'..='\u{7e}').contains(&next) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    chars.next();
+                    // OSC : jusqu'à BEL ou ESC \.
+                    while let Some(next) = chars.next() {
+                        if next == '\u{7}' {
+                            break;
+                        }
+                        if next == '\u{1b}' && chars.peek() == Some(&'\\') {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// Normalise une ligne de PTY : retire ANSI, CR et le prompt éventuel
+    /// (`$ hello`, `bash-5.3# hello`).
+    fn without_prompt(line: &str) -> String {
+        let cleaned = strip_ansi(line);
+        let cleaned = cleaned.trim_matches(|c: char| c == '\r' || c.is_whitespace());
+        let cleaned = cleaned.rsplit("$ ").next().unwrap_or(cleaned);
+        let cleaned = cleaned.rsplit("# ").next().unwrap_or(cleaned);
+        cleaned
+            .trim_matches(|c: char| c == '\r' || c.is_whitespace())
+            .to_string()
     }
 
     fn wait_for_line(receiver: &Receiver<Vec<u8>>, expected: &str, timeout: Duration) -> String {
@@ -363,6 +407,19 @@ mod tests {
             }
         }
         output
+    }
+
+    #[test]
+    fn normalisation_de_la_sortie_reelle_d_un_pty() {
+        // Sorties réellement capturées dans la CI Arch et Ubuntu.
+        let arch = "echo hello\r\n\u{1b}[?2004hsh-5.3# echo hello\r\n\u{1b}[?2004l\rhello\r\n\u{1b}[?2004hsh-5.3# ";
+        let bash = "printf 'bash_ok\\n'\r\n\u{1b}[?2004hbash-5.3# printf 'bash_ok\\n'\r\n\u{1b}[?2004l\rbash_ok\r\ncwd=/tmp/x\r\nenv=valeur-ok\r\n";
+        for (raw, expected) in [(arch, "hello"), (bash, "bash_ok"), (bash, "env=valeur-ok")] {
+            assert!(
+                raw.lines().any(|line| without_prompt(line) == expected),
+                "sortie: {raw:?}"
+            );
+        }
     }
 
     #[test]

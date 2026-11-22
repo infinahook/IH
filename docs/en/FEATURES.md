@@ -6,7 +6,7 @@ This is the **honest** reference. Three statuses:
 - ⚠️ **partial**: genuinely works, but part of the need is uncovered — stated explicitly.
 - ❌ **missing**: not implemented. No UI button pretends otherwise.
 
-Last verified: 207 Rust tests + 36 frontend tests, all green.
+Last verified: 208 Rust tests + 36 frontend tests, all green.
 
 | # | Feature | Status | Detail |
 |---|---|---|---|
@@ -60,13 +60,13 @@ Last verified: 207 Rust tests + 36 frontend tests, all green.
 | `ih-providers` | 15 | 4 providers, SSE/NDJSON, 401 errors, timeout, missing key |
 | `ih-agents` | 13 | adapters, success/failure, cancel, timeout, limit, bounded output |
 | `ih-extensions` | 27 | manifests, digest, install, path jail, MCP stdio, silent server |
-| `ih-workspace` | 21 | Git (status, commit, worktrees), path jail, zombie-free PTY |
+| `ih-workspace` | 22 | Git (status, commit, worktrees), path jail, zombie-free PTY |
 | `ih-orchestrator` | 23 | cycles, readiness, teams, scheduler, memory budget |
 | `ih-update` | 39 | Ed25519 signature, digest, download, staging, rollback |
 | `ih-i18n` | 5 | FR/EN parity, fallback, substitution |
-| **Rust total** | **207** | |
+| **Rust total** | **208** | |
 | Frontend (`vitest`) | 36 | i18n, formatting, ANSI, Git, file tree |
-| **Total** | **243** | |
+| **Total** | **244** | |
 
 ## Manual verifications performed
 
