@@ -65,12 +65,14 @@ correspond à « IH 0.2.2.1 ».
   complète son `PATH` avec celui du shell de connexion au démarrage.
 - Normalisation des événements JSON d'OpenCode (les autres CLI restent inchangés).
 
+### Validé après correction (voir docs/VALIDATION_OPENCODE.md)
+- Revue de diff avec OpenCode : 2 fichiers détectés (`src/lib.rs`, `NOTES.md`),
+  aperçus `+2 −0` et `+3 −0`, **acception** de `src/lib.rs` (écrit sur disque)
+  et **rejet** de `NOTES.md` (absent du disque).
+
 ### Non validé (honnêtement)
-- **Revue de diff et acceptation/rejet avec OpenCode** : les deux exécutions
-  réelles ont eu lieu avant la correction `$PWD` ; la troisième tentative n'a
-  pas démarré (automatisation d'interface). Le chemin diff→acceptation est testé
-  avec un agent contrôlé, pas avec OpenCode.
-- **Annulation d'une session OpenCode** : non testée.
+- **Annulation d'une session OpenCode** : non testée ; le mécanisme est couvert
+  par les tests du superviseur avec un agent contrôlé.
 - Les adaptateurs Claude Code / Codex / Gemini restent non exécutés.
 
 ## 0.2.2 — Agent Mode · AI Coding Execution
