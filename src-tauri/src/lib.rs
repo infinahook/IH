@@ -73,6 +73,12 @@ pub fn run() {
             commands::ai::models_list,
             commands::ai::provider_set_default_model,
             commands::ai::provider_set_enabled,
+            // conversation
+            commands::chat::chat_send,
+            commands::chat::chat_cancel,
+            commands::chat::chat_active,
+            commands::chat::thread_rename,
+            commands::chat::threads_search,
             // skills & MCP
             commands::extensions::skills_list,
             commands::extensions::skill_install,

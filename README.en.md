@@ -13,12 +13,15 @@ Ubuntu/Debian and Arch Linux.
 
 ![IH overview](docs/screenshots/overview.png)
 
+![AI conversation streaming](docs/screenshots/chat-stream.png)
+
 ## What IH does
 
 | Area | Status |
 |---|---|
 | CLI agent supervision (launch, live output, cancel, timeout, concurrency limit) | ✅ |
 | AI providers: OpenAI-compatible, Anthropic, Google, Ollama (models, health, streaming) | ✅ |
+| **AI conversation**: live streaming, cancellation, history, provider/model selection | ✅ |
 | Model manager (discovery, default model, enable/disable) | ✅ |
 | Projects, confined file editing, search | ✅ |
 | Git: status, diff, stage, commit, branches, log, worktrees | ✅ |

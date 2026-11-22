@@ -24,6 +24,7 @@ ih-i18n = { path = "../crates/ih-i18n" }
 ih-store = { path = "../crates/ih-store" }
 ih-security = { path = "../crates/ih-security" }
 ih-providers = { path = "../crates/ih-providers" }
+ih-chat = { path = "../crates/ih-chat" }
 ih-agents = { path = "../crates/ih-agents" }
 ih-extensions = { path = "../crates/ih-extensions" }
 ih-workspace = { path = "../crates/ih-workspace" }

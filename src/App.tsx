@@ -6,6 +6,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { SECTIONS, type SectionId } from "./lib/navigation";
 import { AppProvider, useApp } from "./lib/store";
+import { ChatPage } from "./pages/ChatPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { AgentsPage } from "./pages/AgentsPage";
@@ -24,6 +25,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 
 const PAGES: Record<SectionId, ComponentType> = {
+  chat: ChatPage,
   overview: OverviewPage,
   projects: ProjectsPage,
   agents: AgentsPage,

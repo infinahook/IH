@@ -2,6 +2,7 @@
 
 use crate::commands::workspace::PtyEntry;
 use ih_agents::{AgentSupervisor, EventSink};
+use ih_chat::Canceller;
 use ih_core::config::AppConfig;
 use ih_core::events::CoreEvent;
 use ih_core::platform::PlatformInfo;
@@ -27,13 +28,15 @@ pub struct UpdateStatus {
 
 pub struct AppState {
     pub paths: AppPaths,
-    pub store: Store,
+    pub store: Arc<Store>,
     pub config: RwLock<AppConfig>,
     pub secrets: Arc<dyn SecretStore>,
     pub approvals: ApprovalRegistry,
     pub supervisor: AgentSupervisor,
     pub pty: Mutex<HashMap<String, PtyEntry>>,
     pub mcp: Mutex<HashMap<String, McpClient>>,
+    /// Tours de chat en cours, annulables par identifiant de requête.
+    pub chat: Arc<Mutex<HashMap<String, Canceller>>>,
     pub i18n: RwLock<I18n>,
     pub platform: PlatformInfo,
     pub update_status: Mutex<UpdateStatus>,
@@ -50,7 +53,7 @@ impl AppState {
         paths.ensure()?;
         let config = AppConfig::load_or_create(&paths.config_file())?;
         let log_guard = crate::logging::init(&paths, &config.logging.level)?;
-        let store = Store::open(&paths.db_path())?;
+        let store = Arc::new(Store::open(&paths.db_path())?);
         let locale = ih_i18n::Locale::parse(&config.locale).unwrap_or_default();
         let policy: ResourcePolicy = config.resources.clone();
 
@@ -71,6 +74,7 @@ impl AppState {
             supervisor,
             pty: Mutex::new(HashMap::new()),
             mcp: Mutex::new(HashMap::new()),
+            chat: Arc::new(Mutex::new(HashMap::new())),
             platform: PlatformInfo::detect(),
             update_status: Mutex::new(UpdateStatus {
                 state: "idle".into(),

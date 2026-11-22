@@ -6,14 +6,14 @@ This is the **honest** reference. Three statuses:
 - ⚠️ **partial**: genuinely works, but part of the need is uncovered — stated explicitly.
 - ❌ **missing**: not implemented. No UI button pretends otherwise.
 
-Last verified: 208 Rust tests + 36 frontend tests, all green.
+Last verified: 218 Rust tests + 49 frontend tests, all green.
 
 | # | Feature | Status | Detail |
 |---|---|---|---|
 | 1 | Complete IH core | ✅ | `ih-core`: validated TOML config, typed IDs, events, resource policy, platform detection, redaction |
 | 2 | Multi-agent manager | ✅ | Adapter registry, `PATH` detection, supervised sessions, kernel-enforced concurrency limit |
 | 3 | Claude Code, Codex, Gemini CLI, OpenCode | ✅ | Documented non-interactive arguments (`claude -p`, `codex exec`, `gemini -p`, `opencode run`), overridable via `args` with `{prompt}`. **Not tested against the real binaries** (absent from this machine): supervision is tested with a fake agent |
-| 4 | Cloud and local AI providers | ✅ | OpenAI-compatible (OpenAI, OpenRouter, custom), Anthropic, Google Gemini, Ollama; chat, SSE/NDJSON streaming, models, health. **No cloud chat screen** in the UI |
+| 4 | Cloud and local AI providers | ✅ | OpenAI-compatible (OpenAI, OpenRouter, custom), Anthropic, Gemini, Ollama; chat, SSE/NDJSON streaming, models, health. **Complete chat screen**: live streaming, cancellation, history, provider/model selection, retry |
 | 5 | Model manager | ✅ | Live API discovery, default model, per-provider enable/disable, capabilities only when the API exposes them |
 | 6 | Skills: install and updates | ⚠️ | Install from a folder with strict manifest validation, SHA-256 digest, integrity verification, enable, uninstall. **Update from a remote registry: missing** |
 | 7 | MCP plugins | ⚠️ | stdio servers, `initialize`, `tools/list`, `tools/call`, one-shot approval gating, no zombies. **No resources/prompts/sampling, no HTTP/SSE transport** |
@@ -33,22 +33,35 @@ Last verified: 208 Rust tests + 36 frontend tests, all green.
 | 21 | Update system | ⚠️ | Ed25519-signed manifest, strict verification, SHA-256, `.part` staging, mandatory approval, atomic AppImage replacement + backup/rollback, `deb`/`pacman` plan never executed by IH. **No delta updates, no percentage progress** |
 | 22 | DEB, AppImage, Arch install | ✅ | Tauri `deb` + `appimage` bundles, source-based Arch `PKGBUILD`, CI producing artifacts and building on Arch |
 
+## 0.2.0 milestone delivered — Conversation
+
+- Conversations persisted in SQLite: create, rename, delete, search by title
+  **and** message content.
+- Real fragment-by-fragment streaming, including through the actual Ollama
+  client (end-to-end test `crates/ih-chat/tests/ollama_e2e.rs`).
+- Effective cancellation: the stream is cut, partial text is kept and marked
+  `cancelled`.
+- Provider and model selection, API model discovery, remembered default model.
+- Network errors shown with their code + Retry button.
+- Indicators: generation in progress, tokens consumed, latency.
+
 ## Explicitly missing
 
-1. **Chat screen for cloud providers.** The core can chat and stream, but the UI
-   exposes no chat: interaction currently goes through agent CLIs.
-2. **Persistent multi-turn agent chat**: session output is not fed back into a
-   persistent thread.
-3. **Remote skills registry** with update verification.
-4. **Non-stdio MCP** (HTTP/SSE, resources, prompts, sampling).
-5. **Remote Git** (`push`, `pull`, `fetch`) and conflict resolution.
-6. **Active background automation scheduler**.
-7. **Syntax highlighting** in the editor.
-8. **Audit page**: audit storage exists in the database, but no IPC command
-   exposes it yet; the Security page says so instead of faking a list.
-9. **LICENSE file**: license not chosen yet.
-10. **Physical Arch test machine**: builds and tests run in an
-    `archlinux:latest` container in CI, not on a real Arch installation.
+1. **Project context in chat** (adding files, `@file` mentions, attachments):
+   planned for 0.2.1.
+2. **Resizable panel workspace** and syntax-highlighted editor: planned for 0.2.1.
+3. **Agent Mode** inside the conversation (running a CLI from chat, before/after
+   diff, accept/reject): planned for 0.2.2.
+4. **Visual Team Mode** (Lead/Worker/Reviewer): planned for 0.2.3.
+5. **CLI agent sessions fed back into chat threads**.
+6. **Remote skills registry** with update verification.
+7. **Non-stdio MCP** (HTTP/SSE, resources, prompts, sampling).
+8. **Remote Git** (`push`, `pull`, `fetch`) and conflict resolution.
+9. **Active background automation scheduler**.
+10. **Audit page** exposed through IPC (storage exists).
+11. **LICENSE file**: license not chosen yet.
+12. **Physical Arch machine**: CI validates build and tests inside an
+    `archlinux:latest` container.
 
 ## Automated tests
 
@@ -64,11 +77,20 @@ Last verified: 208 Rust tests + 36 frontend tests, all green.
 | `ih-orchestrator` | 23 | cycles, readiness, teams, scheduler, memory budget |
 | `ih-update` | 39 | Ed25519 signature, digest, download, staging, rollback |
 | `ih-i18n` | 5 | FR/EN parity, fallback, substitution |
-| **Rust total** | **208** | |
-| Frontend (`vitest`) | 36 | i18n, formatting, ANSI, Git, file tree |
-| **Total** | **244** | |
+| `ih-chat` | 10 | streaming, cancellation, bounded history, errors, title, search + **real Ollama e2e** |
+| **Rust total** | **218** | |
+| Frontend (`vitest`) | 49 | i18n, formatting, ANSI, Git, file tree, chat stream reducer, errors |
+| **Total** | **267** | |
 
 ## Manual verifications performed
+
+- **End-to-end chat in the real application** (Xvfb + local NDJSON Ollama
+  server): project opened, Ollama provider and model selected, message sent,
+  answer received **streaming fragment by fragment**, final text persisted with
+  tokens and latency, then **cancellation** verified ("Cancelled" badge,
+  1,359 ms, partial text kept in the database with `cancelled: true`).
+  Screenshots: [chat-stream.png](../screenshots/chat-stream.png),
+  [chat-cancelled.png](../screenshots/chat-cancelled.png).
 
 - `cargo clippy --workspace --all-targets -- -D warnings`: no warnings.
 - `cargo fmt --all -- --check`: clean.

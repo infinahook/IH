@@ -9,6 +9,7 @@ import {
   GitBranch,
   History,
   ListChecks,
+  MessagesSquare,
   Plug,
   Settings,
   ShieldCheck,
@@ -21,6 +22,7 @@ import { SECTIONS, type SectionId } from "../lib/navigation";
 import { useApp } from "../lib/store";
 
 const ICONS: Record<SectionId, LucideIcon> = {
+  chat: MessagesSquare,
   overview: Activity,
   projects: FolderOpen,
   agents: Bot,

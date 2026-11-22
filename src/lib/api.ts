@@ -459,6 +459,31 @@ export interface Message {
   created_at: string;
 }
 
+export interface ChatUsage {
+  input_tokens: number | null;
+  output_tokens: number | null;
+}
+
+/** Accusé de réception immédiat de `chat_send` : le flux arrive ensuite par événements. */
+export interface ChatAccepted {
+  request_id: string;
+  thread_id: string;
+  project_id: string;
+  provider_id: string;
+  model: string;
+}
+
+/** Résultat final d'un tour de conversation, y compris annulé. */
+export interface ChatOutcome {
+  user_message_id: string;
+  assistant_message_id: string;
+  text: string;
+  usage: ChatUsage;
+  cancelled: boolean;
+  finish_reason: string | null;
+  elapsed_ms: number;
+}
+
 export interface Workflow {
   id: string;
   project_id: string;
@@ -650,11 +675,39 @@ export const api = {
     preview: (projectId: string | null) => call<string>("memory_preview", { projectId }),
   },
 
+  // conversation : le flux réel arrive par les événements `ih://chat-*`
+  chat: {
+    send: (
+      projectId: string,
+      threadId: string | null,
+      providerId: string,
+      model: string,
+      prompt: string,
+      system: string | null = null,
+      historyLimit: number | null = null,
+    ) =>
+      call<ChatAccepted>("chat_send", {
+        projectId,
+        threadId,
+        providerId,
+        model,
+        prompt,
+        system,
+        historyLimit,
+      }),
+    cancel: (requestId: string) => call<boolean>("chat_cancel", { requestId }),
+    active: () => call<number>("chat_active"),
+  },
+
   // historique
   history: {
     threads: (projectId: string) => call<Thread[]>("threads_list", id(projectId)),
+    search: (projectId: string, query: string, limit = 50) =>
+      call<Thread[]>("threads_search", { projectId, query, limit }),
     createThread: (projectId: string, title: string) =>
       call<Thread>("thread_create", { projectId, title }),
+    renameThread: (threadId: string, title: string) =>
+      call<void>("thread_rename", { id: threadId, title }),
     messages: (threadId: string, limit: number, offset: number) =>
       call<Message[]>("messages_list", { threadId, limit, offset }),
     deleteThread: (threadId: string) =>

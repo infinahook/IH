@@ -1,4 +1,5 @@
 export type SectionId =
+  | "chat"
   | "overview"
   | "projects"
   | "agents"
@@ -21,8 +22,9 @@ export interface SectionDefinition {
   labelKey: string;
 }
 
-/** Les 16 sections réelles de l'application, dans l'ordre de la barre latérale. */
+/** Les 17 sections réelles de l'application, dans l'ordre de la barre latérale. */
 export const SECTIONS: readonly SectionDefinition[] = [
+  { id: "chat", labelKey: "nav.chat" },
   { id: "overview", labelKey: "nav.overview" },
   { id: "projects", labelKey: "nav.projects" },
   { id: "agents", labelKey: "nav.agents" },
@@ -41,4 +43,4 @@ export const SECTIONS: readonly SectionDefinition[] = [
   { id: "diagnostics", labelKey: "nav.diagnostics" },
 ];
 
-export const DEFAULT_SECTION: SectionId = "overview";
+export const DEFAULT_SECTION: SectionId = "chat";

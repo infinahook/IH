@@ -8,6 +8,20 @@ export interface DescribedError {
   fixable: boolean;
 }
 
+const FIXABLE_CODES: ReadonlySet<string> = new Set([
+  "config_invalid",
+  "invalid_input",
+  "denied",
+  "limit_reached",
+  "provider_error",
+  "network_error",
+]);
+
+/** Reproduit la classification `fixable` du noyau pour les erreurs arrivées par événement. */
+export function errorIsFixable(code: string): boolean {
+  return FIXABLE_CODES.has(code);
+}
+
 /**
  * Traduit une erreur IPC via `errors.<code>` ; le message brut du noyau reste
  * toujours visible. Un code inconnu est affiché tel quel.

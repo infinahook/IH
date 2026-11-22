@@ -14,12 +14,15 @@ Linux.
 
 ![Vue d'ensemble d'IH](docs/screenshots/overview.png)
 
+![Conversation IA en streaming](docs/screenshots/chat-stream.png)
+
 ## Ce que fait IH
 
 | Domaine | État |
 |---|---|
 | Supervision d'agents CLI (démarrage, flux temps réel, annulation, timeout, limite de parallélisme) | ✅ |
 | Fournisseurs IA : OpenAI-compatible, Anthropic, Google, Ollama (modèles, santé, streaming) | ✅ |
+| **Conversation IA** : streaming temps réel, annulation, historique, sélection provider/modèle | ✅ |
 | Gestionnaire de modèles (découverte, modèle par défaut, activation) | ✅ |
 | Projets, édition de fichiers confinée, recherche | ✅ |
 | Git : statut, diff, index, commit, branches, log, worktrees | ✅ |
