@@ -1,0 +1,10 @@
+# Artefacts de compilation
+/target
+
+# Sauvegardes d'éditeurs
+**/*.rs.bk
+*.orig
+*.rej
+
+# Fichiers système
+.DS_Store

@@ -1,0 +1,17 @@
+[package]
+name = "ih"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Application Rust pour Linux (Arch, Ubuntu)"
+repository = "https://github.com/infinahook/IH"
+authors = ["InfinaHook <359536360+infinahook@users.noreply.github.com>"]
+readme = "README.md"
+
+[dependencies]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
