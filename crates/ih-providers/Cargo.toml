@@ -1,0 +1,25 @@
+[package]
+name = "ih-providers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Clients IA d'IH : OpenAI compatible, Anthropic, Google Gemini, Ollama"
+
+[dependencies]
+ih-core = { path = "../ih-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+futures-util.workspace = true
+bytes.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+async-trait = "0.1"
+urlencoding = "2"
+
+[dev-dependencies]
+tokio = { workspace = true }

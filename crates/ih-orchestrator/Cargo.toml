@@ -1,0 +1,14 @@
+[package]
+name = "ih-orchestrator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Graphe de tâches, équipes et ordonnancement multi-agents IH"
+
+[dependencies]
+ih-core = { path = "../ih-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,117 @@
+//! Point d'entrée de la bibliothèque IH Desktop (Tauri).
+
+mod commands;
+mod logging;
+mod state;
+
+use ih_core::AppPaths;
+use state::AppState;
+use tauri::Manager;
+
+/// Démarre IH.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let paths = AppPaths::resolve()?;
+            let handle = app.handle().clone();
+            let state = AppState::init(handle, paths)?;
+            app.manage(state);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            // noyau
+            commands::core::app_health,
+            commands::core::platform_info,
+            commands::core::config_get,
+            commands::core::config_update,
+            commands::core::locale_set,
+            commands::core::paths_info,
+            commands::core::secret_store_status,
+            commands::core::classify_command_preview,
+            commands::core::approvals_pending,
+            commands::core::approval_resolve,
+            // projets & fichiers
+            commands::core::project_add,
+            commands::core::project_list,
+            commands::core::project_remove,
+            commands::core::file_tree,
+            commands::core::file_read,
+            commands::core::file_write,
+            commands::core::file_search,
+            // diagnostic
+            commands::core::log_tail,
+            commands::core::diagnostics_report,
+            commands::core::open_external,
+            commands::core::open_path,
+            // git & terminal
+            commands::workspace::git_status,
+            commands::workspace::git_diff,
+            commands::workspace::git_stage,
+            commands::workspace::git_unstage,
+            commands::workspace::git_commit,
+            commands::workspace::git_branches,
+            commands::workspace::git_log,
+            commands::workspace::git_worktrees,
+            commands::workspace::git_add_worktree,
+            commands::workspace::git_remove_worktree,
+            commands::workspace::terminal_open,
+            commands::workspace::terminal_write,
+            commands::workspace::terminal_resize,
+            commands::workspace::terminal_close,
+            // agents & fournisseurs
+            commands::ai::agents_list,
+            commands::ai::agent_start,
+            commands::ai::agent_cancel,
+            commands::ai::agent_state,
+            commands::ai::agent_sessions,
+            commands::ai::providers_list,
+            commands::ai::provider_set_secret,
+            commands::ai::provider_clear_secret,
+            commands::ai::provider_health,
+            commands::ai::models_list,
+            commands::ai::provider_set_default_model,
+            commands::ai::provider_set_enabled,
+            // skills & MCP
+            commands::extensions::skills_list,
+            commands::extensions::skill_install,
+            commands::extensions::skill_verify,
+            commands::extensions::skill_remove,
+            commands::extensions::skill_set_enabled,
+            commands::extensions::mcp_servers_list,
+            commands::extensions::mcp_server_add,
+            commands::extensions::mcp_server_remove,
+            commands::extensions::mcp_connect,
+            commands::extensions::mcp_call_tool,
+            commands::extensions::mcp_disconnect,
+            // tâches, mémoire, historique, automatisations, mises à jour
+            commands::ops::tasks_list,
+            commands::ops::task_create,
+            commands::ops::task_set_state,
+            commands::ops::plan_create,
+            commands::ops::memory_list,
+            commands::ops::memory_add,
+            commands::ops::memory_search,
+            commands::ops::memory_delete,
+            commands::ops::memory_preview,
+            commands::ops::threads_list,
+            commands::ops::thread_create,
+            commands::ops::messages_list,
+            commands::ops::thread_delete,
+            commands::ops::history_export,
+            commands::ops::workflows_list,
+            commands::ops::workflow_upsert,
+            commands::ops::workflow_run_now,
+            commands::ops::workflow_runs,
+            commands::ops::app_version,
+            commands::ops::update_check,
+            commands::ops::update_status,
+            commands::ops::update_download,
+            commands::ops::update_plan,
+            commands::ops::update_apply,
+            commands::ops::update_request_approval,
+        ])
+        .run(tauri::generate_context!())
+        .expect("erreur au lancement d'IH");
+}

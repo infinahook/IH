@@ -8,39 +8,91 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
-  ubuntu:
-    name: Ubuntu 24.04
+  check:
+    name: Vérifications (Ubuntu 24.04)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
-      - name: Installer la toolchain Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Dépendances système Tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev \
+            patchelf libssl-dev build-essential curl file
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Formatage
+      - name: Installer les dépendances frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Formatage Rust
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Tests
-        run: cargo test --all-targets
+      - name: Build frontend (nécessaire à `generate_context!`)
+        run: npm run build
 
-      - name: Build release
-        run: cargo build --release --locked
+      - name: Tests Rust
+        run: cargo test --workspace
 
-      - name: Publier le binaire
+      - name: Vérification de types frontend
+        run: npm run typecheck
+
+      - name: Tests frontend
+        run: npm test --silent
+
+  package:
+    name: Paquets Linux (DEB + AppImage)
+    runs-on: ubuntu-24.04
+    needs: check
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Dépendances système Tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev \
+            patchelf libssl-dev build-essential curl file
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Construire les paquets
+        run: npm run tauri build -- --bundles deb,appimage
+
+      - name: Publier les paquets
         uses: actions/upload-artifact@v6
         with:
-          name: ih-ubuntu-24.04
-          path: target/release/ih
+          name: ih-linux-packages
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
   arch:
@@ -48,19 +100,23 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
-      - name: Mettre à jour le système et installer la toolchain
-        run: pacman -Syu --noconfirm --needed base-devel rust git
+      - name: Mettre à jour et installer les dépendances
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel rust git nodejs npm \
+            webkit2gtk-4.1 gtk3 librsvg libsoup3 \
+            openssl pkgconf curl file
 
       - uses: actions/checkout@v5
 
-      - name: Formatage
-        run: cargo fmt --all -- --check
+      - name: Dépendances frontend
+        run: npm ci --no-audit --no-fund
 
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+      - name: Build frontend
+        run: npm run build
 
-      - name: Tests
-        run: cargo test --all-targets
+      - name: Tests Rust
+        run: cargo test --workspace
 
       - name: Build release
-        run: cargo build --release --locked
+        run: cargo build --release --locked --manifest-path src-tauri/Cargo.toml

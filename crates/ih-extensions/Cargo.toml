@@ -1,0 +1,21 @@
+[package]
+name = "ih-extensions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Extensions IH : installation vérifiée des skills et client MCP JSON-RPC 2.0 sur stdio"
+
+[dependencies]
+ih-core = { path = "../ih-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+hex.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+chrono.workspace = true
+uuid.workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "ih-workspace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Espace de travail IH : Git, fichiers de projet et terminal PTY"
+
+[dependencies]
+ih-core = { path = "../ih-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+portable-pty.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+regex.workspace = true

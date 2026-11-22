@@ -1,10 +1,9 @@
-# Artefacts de compilation
-/target
-
-# Sauvegardes d'éditeurs
-**/*.rs.bk
-*.orig
-*.rej
-
-# Fichiers système
+node_modules/
+dist/
+target/
+src-tauri/target/
+.env
+.env.*
+!.env.example
+*.log
 .DS_Store

@@ -1,0 +1,34 @@
+# Maintainer: IH contributors
+pkgname=ih
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Harness de développement IA pour Linux (agents, fournisseurs, MCP, Git, terminal)"
+arch=('x86_64')
+url="https://github.com/infinahook/IH"
+license=('custom')
+depends=('webkit2gtk-4.1' 'gtk3' 'librsvg' 'gcc-libs' 'glib2' 'openssl')
+makedepends=('rust' 'cargo' 'npm' 'git' 'base-devel')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/infinahook/IH/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$srcdir/IH-$pkgver"
+  npm ci --no-audit --no-fund
+}
+
+build() {
+  cd "$srcdir/IH-$pkgver"
+  export CARGO_TARGET_DIR="$srcdir/target"
+  # Le frontend doit être construit AVANT la compilation Rust :
+  # `generate_context!` embarque le contenu de `dist/`.
+  npm run build
+  cargo build --release --locked --manifest-path src-tauri/Cargo.toml
+}
+
+package() {
+  install -Dm755 "$srcdir/target/release/ih-desktop" "$pkgdir/usr/bin/ih"
+  install -Dm644 "$srcdir/IH-$pkgver/installers/arch/ih.desktop" \
+    "$pkgdir/usr/share/applications/ih.desktop"
+  install -Dm644 "$srcdir/IH-$pkgver/src-tauri/icons/128x128.png" \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/ih.png"
+}

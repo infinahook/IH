@@ -1,0 +1,16 @@
+[package]
+name = "ih-agents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Adaptateurs et supervision des agents CLI IH"
+
+[dependencies]
+ih-core = { path = "../ih-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+libc = "0.2"

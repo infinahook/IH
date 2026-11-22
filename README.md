@@ -1,74 +1,134 @@
-# IH
+# IH — Harness de développement IA pour Linux
 
-Application Rust pour Linux, testée sur **Arch Linux** et **Ubuntu**.
+IH est une application de bureau qui orchestre des agents de développement
+(Claude Code, Codex, Gemini CLI, OpenCode…), des fournisseurs IA cloud et
+locaux, des serveurs MCP, Git, un terminal et un orchestrateur de tâches
+multi-agents — dans une seule fenêtre, sur Zorin OS, Ubuntu/Debian et Arch
+Linux.
 
-[![CI](https://github.com/infinahook/IH/actions/workflows/ci.yml/badge.svg)](https://github.com/infinahook/IH/actions/workflows/ci.yml)
+> **Honnêteté sur l'état du projet.** Ce dépôt n'est pas une maquette : le
+> noyau Rust est réel, testé (207 tests) et les 16 sections de l'interface
+> appellent de vraies commandes. Pour autant, tout n'est pas terminé — la liste
+> exacte de ce qui fonctionne, de ce qui est partiel et de ce qui manque est
+> dans **[docs/FEATURES.md](docs/FEATURES.md)**. Lisez-la avant d'évaluer IH.
 
-## Prérequis
+## Ce que fait IH
 
-| Distribution | Installation de la toolchain |
+| Domaine | État |
 |---|---|
-| **Arch Linux** | `sudo pacman -S --needed base-devel rust` |
-| **Ubuntu / Debian** | `sudo apt install build-essential curl` puis [rustup](https://rustup.rs) : `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh -s -- -y` |
+| Supervision d'agents CLI (démarrage, flux temps réel, annulation, timeout, limite de parallélisme) | ✅ |
+| Fournisseurs IA : OpenAI-compatible, Anthropic, Google, Ollama (modèles, santé, streaming) | ✅ |
+| Gestionnaire de modèles (découverte, modèle par défaut, activation) | ✅ |
+| Projets, édition de fichiers confinée, recherche | ✅ |
+| Git : statut, diff, index, commit, branches, log, worktrees | ✅ |
+| Terminal Linux intégré (PTY réel) | ✅ (pas d'émulation VT complète) |
+| Skills : manifeste, installation, empreinte SHA-256, vérification | ✅ |
+| MCP : serveurs stdio, outils, appels soumis à approbation | ✅ (stdio uniquement) |
+| Tâches, équipes, graphe de dépendances, ordonnanceur | ✅ |
+| Mémoire persistante par projet + injection bornée dans les prompts | ✅ |
+| Approbations, classification du risque, secrets dans le trousseau | ✅ |
+| Automatisations planifiées | ⚠️ exécution manuelle seulement |
+| Historique des conversations et export | ✅ |
+| Interface FR/EN (800 clés, parité vérifiée) | ✅ |
+| Journalisation, diagnostic, rapport exportable | ✅ |
+| Mises à jour signées Ed25519 + SHA-256 | ✅ (rollback AppImage) |
+| DEB, AppImage, paquet Arch | ✅ (build CI) |
 
-> Sur Ubuntu, préfère **rustup** au paquet `rustc` des dépôts : celui de la 24.04 est nettement plus ancien que la toolchain stable.
+## Installation
 
-Version minimale supportée (MSRV) : **Rust 1.70**, édition 2021.
-
-## Compilation
-
-```bash
-git clone https://github.com/infinahook/IH.git
-cd IH
-cargo build --release
-```
-
-Le binaire est produit dans `target/release/ih`.
-
-### Installation locale
-
-```bash
-install -Dm755 target/release/ih ~/.local/bin/ih
-```
-
-Assure-toi que `~/.local/bin` est dans ton `PATH`.
-
-## Utilisation
+### Debian / Ubuntu / Zorin OS
 
 ```bash
-ih            # aide
-ih version    # version
-ih info       # informations de plateforme
+sudo apt install ./ih_0.1.0_amd64.deb
 ```
 
-Codes de retour : `0` succès, `2` argument invalide.
+### Arch Linux
+
+```bash
+cd installers/arch && makepkg -si
+```
+
+### AppImage
+
+```bash
+chmod +x IH_0.1.0_amd64.AppImage && ./IH_0.1.0_amd64.AppImage
+```
+
+Détails de compilation : [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md).
+
+## Premier lancement
+
+1. **Projets** → « Ouvrir un projet » : choisissez le dossier de votre dépôt.
+   IH n'écrit que dans ce dossier.
+2. **Modèles IA** → saisissez votre clé d'API pour un fournisseur cloud, ou
+   vérifiez qu'Ollama répond sur `http://127.0.0.1:11434`, puis
+   « Découvrir les modèles ».
+3. **Agents** → la liste indique quels CLI sont réellement présents dans votre
+   `PATH`. Installez-en un (`npm i -g @anthropic-ai/claude-code`, `codex`,
+   `@google/gemini-cli`, `opencode`) si la liste est vide.
+4. **Agents** → choisissez un agent, écrivez une instruction, démarrez : la
+   sortie s'affiche en flux. **Annuler** tue le groupe de processus.
+5. **Tâches** → « Créer un plan » structure un objectif en analyse, exécutions
+   parallèles bornées et relecture.
+
+## Sécurité en une phrase
+
+Toute commande shell, écriture hors périmètre, installation ou appel d'outil MCP
+exige une **approbation explicite à usage unique** ; les clés d'API ne vivent
+que dans le trousseau du système. Détails : [docs/SECURITY.md](docs/SECURITY.md).
+
+## Mises à jour
+
+IH vérifie un manifeste **signé Ed25519** et vérifie le **SHA-256** de
+l'artefact avant toute installation, qui reste soumise à votre confirmation.
+Outils de publication : `scripts/gen-update-key.sh`, `scripts/sign-release.sh`,
+`ih-update-verify`. Détails : [docs/UPDATES.md](docs/UPDATES.md).
+
+## Architecture
+
+Workspace Rust de 10 crates (`ih-core`, `ih-store`, `ih-security`,
+`ih-providers`, `ih-agents`, `ih-extensions`, `ih-workspace`,
+`ih-orchestrator`, `ih-update`, `ih-i18n`) + `src-tauri` + React/TypeScript.
+Voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Développement
 
 ```bash
-cargo fmt --all                       # formatage
-cargo clippy --all-targets -- -D warnings   # lint, sans avertissement toléré
-cargo test --all-targets              # tests
-cargo run -- info                     # exécution
+npm ci
+npm run tauri:dev
 ```
 
-## Intégration continue
+Vérifications exécutées en CI et localement :
 
-`.github/workflows/ci.yml` exécute `fmt`, `clippy`, `test` et un build release dans deux environnements :
-
-- `ubuntu-24.04` avec la toolchain stable installée par rustup
-- un conteneur `archlinux:latest` avec `rust` issu de `pacman`
-
-## Structure
-
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace        # 207 tests
+npm run typecheck
+npm test                      # 36 tests
+npm run build
 ```
-.
-├── Cargo.toml
-├── rust-toolchain.toml
-├── src/main.rs
-└── .github/workflows/ci.yml
-```
+
+## Documentation
+
+| Document | Contenu |
+|---|---|
+| [docs/FEATURES.md](docs/FEATURES.md) | état exact des fonctionnalités (fait / partiel / absent) |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | frontières, crates, flux, politique de ressources |
+| [docs/SECURITY.md](docs/SECURITY.md) | contrôles implémentés et limites assumées |
+| [docs/UPDATES.md](docs/UPDATES.md) | signature, manifeste, installation, rollback |
+| [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md) | compilation et paquets par distribution |
+| [docs/I18N.md](docs/I18N.md) | catalogues FR/EN et parité |
+| [README.en.md](README.en.md) | English documentation |
 
 ## Licence
 
-À définir.
+À définir avant toute redistribution : aucun fichier `LICENSE` n'est encore
+fourni, et le `PKGBUILD` déclare donc `license=('custom')`. Les dépendances
+tierces conservent leurs licences respectives.
+
+## Attribution
+
+IH s'inspire de [PandaCode](https://github.com/aicodeking/pandacode) comme
+référence de produit. Aucun code, aucune icône et aucune marque de PandaCode
+n'est inclus dans ce dépôt. Voir [docs/UPSTREAM.md](docs/UPSTREAM.md).

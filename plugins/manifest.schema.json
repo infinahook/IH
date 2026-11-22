@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Configuration de serveur MCP IH",
+  "description": "IH se connecte aux serveurs MCP par transport stdio. Cette configuration est stockée dans la colonne manifest de la table extensions (kind = plugin) et consommée par crates/ih-extensions/src/mcp.rs.",
+  "type": "object",
+  "required": ["command"],
+  "properties": {
+    "command": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Exécutable résolu dans le PATH (jamais interprété par un shell)."
+    },
+    "args": {
+      "type": "array",
+      "items": {"type": "string"},
+      "default": []
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": {"type": "string"},
+      "default": {},
+      "description": "Variables d'environnement ajoutées. Aucun secret ne doit y être écrit : utilisez le trousseau."
+    }
+  },
+  "additionalProperties": false
+}

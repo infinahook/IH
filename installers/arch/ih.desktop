@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=IH
+GenericName=AI Development Harness
+Comment=Harness de développement IA : agents, fournisseurs, MCP, Git, terminal
+Comment[en]=AI development harness: agents, providers, MCP, Git, terminal
+Exec=ih %U
+Icon=ih
+Terminal=false
+Categories=Development;IDE;
+Keywords=ai;agent;development;git;terminal;
+StartupWMClass=ih-desktop

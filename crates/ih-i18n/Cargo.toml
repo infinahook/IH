@@ -1,0 +1,11 @@
+[package]
+name = "ih-i18n"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Catalogues de traduction IH (FR/EN) partagés noyau et interface"
+
+[dependencies]
+serde_json.workspace = true

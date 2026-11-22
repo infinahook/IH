@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Capacités minimales : noyau + sélecteur de fichiers","local":true,"windows":["main"],"permissions":["core:default","dialog:default"]}}

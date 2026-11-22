@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Manifeste de skill IH",
+  "description": "Décrit un paquet de skill. Le manifeste doit être nommé skill.json ou manifest.json à la racine du paquet. Validé par crates/ih-extensions/src/skills.rs.",
+  "type": "object",
+  "required": ["id", "name", "version", "description", "author", "entry"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+      "description": "Identifiant kebab-case ; aucun '/', '..' ni majuscule."
+    },
+    "name": {"type": "string", "minLength": 1},
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
+      "description": "Version sémantique."
+    },
+    "description": {"type": "string"},
+    "author": {"type": "string", "minLength": 1},
+    "license": {"type": "string"},
+    "entry": {
+      "type": "string",
+      "description": "Fichier d'instructions Markdown à la racine du paquet ; refus de '..', des chemins absolus et des fichiers non .md."
+    },
+    "permissions": {
+      "type": "array",
+      "items": {"enum": ["fs.read", "fs.write", "shell", "network"]},
+      "description": "Déclaratif. Les alias historiques project-read/project-write sont normalisés en fs.read/fs.write."
+    }
+  },
+  "additionalProperties": false
+}
