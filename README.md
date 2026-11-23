@@ -31,6 +31,7 @@ Linux.
 | **Contexte projet** : mentions `@`, assemblage Rust, exclusions des secrets | ✅ |
 | **Diff** : aperçu, acceptation/rejet, sauvegarde et détection de conflit | ✅ |
 | **Mode Agent** : CLI détecté, approbation ponctuelle, isolation par worktree, événements, diffs | ✅ (agent contrôlé) |
+| **Fournisseurs personnalisés** : endpoints compatibles OpenAI/Anthropic/Google/Ollama, en-têtes, test de connexion | ✅ |
 | Gestionnaire de modèles (découverte, modèle par défaut, activation) | ✅ |
 | Projets, édition de fichiers confinée, recherche | ✅ |
 | Git : statut, diff, index, commit, branches, log, worktrees | ✅ |

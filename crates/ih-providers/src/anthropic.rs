@@ -1,9 +1,10 @@
 //! Fournisseur Anthropic (`POST /v1/messages`, SSE `content_block_delta`).
 
 use crate::common::{
-    build_client, check_stream_payload, ensure_success, health_from_models, network_error,
-    parse_provider_json, parse_stream_json, require_secret, send, validate_base_url,
-    validate_config, versioned_endpoint, DEFAULT_MAX_TOKENS,
+    apply_headers, build_client, check_stream_payload, custom_endpoint_url, ensure_success,
+    header_pairs, health_from_models, network_error, parse_provider_json, parse_stream_json,
+    require_secret, send, validate_base_url, validate_config, versioned_endpoint,
+    DEFAULT_MAX_TOKENS,
 };
 use crate::stream::{stream_sse, StreamState};
 use crate::{ChatRequest, ChatResponse, HealthReport, ModelEntry, Provider, Usage};
@@ -23,6 +24,9 @@ pub struct AnthropicProvider {
     secret: String,
     client: reqwest::Client,
     timeout_secs: u64,
+    headers: Vec<(String, String)>,
+    stream_enabled: bool,
+    custom_chat_url: Option<String>,
 }
 
 impl std::fmt::Debug for AnthropicProvider {
@@ -48,11 +52,19 @@ impl AnthropicProvider {
             secret,
             client: build_client(timeout_secs)?,
             timeout_secs,
+            headers: header_pairs(config),
+            stream_enabled: config.streaming,
+            custom_chat_url: config
+                .endpoint_path
+                .as_deref()
+                .map(|path| custom_endpoint_url(&config.base_url, path)),
         })
     }
 
     fn messages_url(&self) -> String {
-        versioned_endpoint(&self.base_url, "v1", "messages")
+        self.custom_chat_url
+            .clone()
+            .unwrap_or_else(|| versioned_endpoint(&self.base_url, "v1", "messages"))
     }
 
     fn models_url(&self) -> String {
@@ -70,9 +82,11 @@ impl AnthropicProvider {
         request: &ChatRequest,
         stream: bool,
     ) -> IhResult<reqwest::Response> {
-        let builder = self
-            .auth(self.client.post(self.messages_url()))
-            .json(&request_body(request, stream));
+        let builder = apply_headers(
+            self.auth(self.client.post(self.messages_url()))
+                .json(&request_body(request, stream)),
+            &self.headers,
+        );
         let response = send(builder, &self.id, self.timeout_secs).await?;
         ensure_success(response, &self.id).await
     }
@@ -201,7 +215,7 @@ impl Provider for AnthropicProvider {
     }
 
     async fn list_models(&self) -> IhResult<Vec<ModelEntry>> {
-        let builder = self.auth(self.client.get(self.models_url()));
+        let builder = apply_headers(self.auth(self.client.get(self.models_url())), &self.headers);
         let response = send(builder, &self.id, self.timeout_secs).await?;
         let response = ensure_success(response, &self.id).await?;
         let body = response
@@ -263,6 +277,11 @@ impl Provider for AnthropicProvider {
         request: ChatRequest,
         on_delta: &mut (dyn for<'a> FnMut(&'a str) + Send),
     ) -> IhResult<ChatResponse> {
+        if !self.stream_enabled {
+            let response = self.chat(request).await?;
+            on_delta(&response.text);
+            return Ok(response);
+        }
         let response = self.post_messages(&request, true).await?;
         let mut state = StreamState::new(&request.model);
         stream_sse(response, &self.id, self.timeout_secs, |data| {

@@ -11,6 +11,7 @@ import { OverviewPage } from "./pages/OverviewPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { AgentsPage } from "./pages/AgentsPage";
 import { ModelsPage } from "./pages/ModelsPage";
+import { ProvidersPage } from "./pages/ProvidersPage";
 import { SkillsPage } from "./pages/SkillsPage";
 import { PluginsPage } from "./pages/PluginsPage";
 import { TerminalPage } from "./pages/TerminalPage";
@@ -30,6 +31,7 @@ const PAGES: Record<SectionId, ComponentType> = {
   projects: ProjectsPage,
   agents: AgentsPage,
   models: ModelsPage,
+  providers: ProvidersPage,
   skills: SkillsPage,
   plugins: PluginsPage,
   terminal: TerminalPage,

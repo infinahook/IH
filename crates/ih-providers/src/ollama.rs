@@ -1,9 +1,9 @@
 //! Fournisseur Ollama local (`POST /api/chat` en NDJSON, sans clé).
 
 use crate::common::{
-    build_client, check_stream_payload, endpoint, ensure_success, health_from_models,
-    network_error, parse_provider_json, parse_stream_json, send, validate_base_url,
-    validate_config,
+    apply_headers, build_client, check_stream_payload, custom_endpoint_url, endpoint,
+    ensure_success, header_pairs, health_from_models, network_error, parse_provider_json,
+    parse_stream_json, send, validate_base_url, validate_config,
 };
 use crate::stream::{stream_lines, StreamState};
 use crate::{ChatRequest, ChatResponse, HealthReport, ModelEntry, Provider, Usage};
@@ -21,6 +21,9 @@ pub struct OllamaProvider {
     base_url: String,
     client: reqwest::Client,
     timeout_secs: u64,
+    headers: Vec<(String, String)>,
+    stream_enabled: bool,
+    custom_chat_url: Option<String>,
 }
 
 impl OllamaProvider {
@@ -33,11 +36,19 @@ impl OllamaProvider {
             base_url: config.base_url.trim().trim_end_matches('/').to_string(),
             client: build_client(timeout_secs)?,
             timeout_secs,
+            headers: header_pairs(config),
+            stream_enabled: config.streaming,
+            custom_chat_url: config
+                .endpoint_path
+                .as_deref()
+                .map(|path| custom_endpoint_url(&config.base_url, path)),
         })
     }
 
     fn chat_url(&self) -> String {
-        endpoint(&self.base_url, "api/chat")
+        self.custom_chat_url
+            .clone()
+            .unwrap_or_else(|| endpoint(&self.base_url, "api/chat"))
     }
 
     fn tags_url(&self) -> String {
@@ -45,10 +56,12 @@ impl OllamaProvider {
     }
 
     async fn post_chat(&self, request: &ChatRequest, stream: bool) -> IhResult<reqwest::Response> {
-        let builder = self
-            .client
-            .post(self.chat_url())
-            .json(&request_body(request, stream));
+        let builder = apply_headers(
+            self.client
+                .post(self.chat_url())
+                .json(&request_body(request, stream)),
+            &self.headers,
+        );
         let response = send(builder, &self.id, self.timeout_secs).await?;
         ensure_success(response, &self.id).await
     }
@@ -153,7 +166,7 @@ impl Provider for OllamaProvider {
     }
 
     async fn list_models(&self) -> IhResult<Vec<ModelEntry>> {
-        let builder = self.client.get(self.tags_url());
+        let builder = apply_headers(self.client.get(self.tags_url()), &self.headers);
         let response = send(builder, &self.id, self.timeout_secs).await?;
         let response = ensure_success(response, &self.id).await?;
         let body = response
@@ -223,6 +236,11 @@ impl Provider for OllamaProvider {
         request: ChatRequest,
         on_delta: &mut (dyn for<'a> FnMut(&'a str) + Send),
     ) -> IhResult<ChatResponse> {
+        if !self.stream_enabled {
+            let response = self.chat(request).await?;
+            on_delta(&response.text);
+            return Ok(response);
+        }
         let response = self.post_chat(&request, true).await?;
         let mut state = StreamState::new(&request.model);
         stream_lines(response, &self.id, self.timeout_secs, |line| {

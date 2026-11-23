@@ -81,6 +81,9 @@ pub(crate) fn build_client(timeout_secs: u64) -> IhResult<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(timeout)
         .user_agent(concat!("IH/", env!("CARGO_PKG_VERSION")))
+        // Aucune redirection suivie : une redirection pourrait envoyer la clé
+        // d'API vers un autre hôte. Le code 3xx est remonté comme erreur.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|error| IhError::Provider(format!("client HTTP impossible à créer : {error}")))
 }
@@ -104,6 +107,39 @@ pub(crate) fn versioned_endpoint(base: &str, version: &str, path: &str) -> Strin
     } else {
         endpoint(&format!("{base}{suffix}"), path)
     }
+}
+
+/// Ajoute les en-têtes HTTP configurés par l'utilisateur (jamais de secret :
+/// la validation de configuration interdit `authorization`/`host`).
+pub(crate) fn apply_headers(
+    mut builder: reqwest::RequestBuilder,
+    headers: &[(String, String)],
+) -> reqwest::RequestBuilder {
+    for (name, value) in headers {
+        builder = builder.header(name.as_str(), value.as_str());
+    }
+    builder
+}
+
+/// URL d'un endpoint personnalisé : origine de `base_url` + chemin absolu.
+pub(crate) fn custom_endpoint_url(base: &str, path: &str) -> String {
+    let (scheme, rest) = base.split_once("://").unwrap_or(("https", base));
+    let authority = rest.split('/').next().unwrap_or(rest);
+    let path = if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    };
+    format!("{scheme}://{authority}{path}")
+}
+
+/// En-têtes configurés, sous forme de paires.
+pub(crate) fn header_pairs(config: &ProviderConfig) -> Vec<(String, String)> {
+    config
+        .headers
+        .iter()
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
 }
 
 /// Envoie la requête en normalisant les erreurs réseau.

@@ -8,6 +8,7 @@ import {
   type ProviderView,
 } from "../lib/api";
 import { useAsync } from "../lib/hooks";
+import { sortProviders } from "../lib/providers";
 import { useApp } from "../lib/store";
 import { Badge } from "../components/Badge";
 import { EmptyState, LoadingRow, Spinner } from "../components/EmptyState";
@@ -59,6 +60,7 @@ export function ModelsPage() {
   };
 
   const secretAvailable = secretStatus?.state === "available";
+  const providerList = sortProviders(providers.data ?? []);
 
   const saveSecret = async (provider: ProviderView) => {
     const secret = (keyInputs[provider.id] ?? "").trim();
@@ -169,7 +171,7 @@ export function ModelsPage() {
         />
       ) : (
         <div className="provider-grid">
-          {(providers.data ?? []).map((provider) => {
+          {providerList.map((provider) => {
             const state = feedbackFor(provider.id);
             const local = provider.kind === "ollama";
             const requiresSecret = !local;
@@ -194,6 +196,16 @@ export function ModelsPage() {
                         {local ? t("models.local") : t("models.cloud")}
                       </Badge>
                       <Badge tone="neutral">{t(`models.kind_${provider.kind}`)}</Badge>
+                      <Badge tone={provider.custom ? "info" : "accent"}>
+                        {provider.custom
+                          ? t("providers.badge_custom")
+                          : t("providers.badge_integrated")}
+                      </Badge>
+                      <Badge tone={provider.enabled ? "success" : "danger"}>
+                        {provider.enabled
+                          ? t("providers.badge_active")
+                          : t("providers.badge_inactive")}
+                      </Badge>
                     </div>
                     <p className="mono small">{provider.base_url}</p>
                   </div>

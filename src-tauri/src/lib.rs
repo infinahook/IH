@@ -86,6 +86,12 @@ pub fn run() {
             commands::ai::models_list,
             commands::ai::provider_set_default_model,
             commands::ai::provider_set_enabled,
+            commands::ai::provider_create,
+            commands::ai::provider_update,
+            commands::ai::provider_delete,
+            commands::ai::provider_test,
+            commands::ai::provider_add_model,
+            commands::ai::provider_remove_model,
             // conversation
             commands::chat::chat_send,
             commands::chat::chat_cancel,

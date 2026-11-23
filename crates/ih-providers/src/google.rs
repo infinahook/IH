@@ -1,9 +1,9 @@
 //! Fournisseur Google Gemini (`generateContent` et `streamGenerateContent`).
 
 use crate::common::{
-    build_client, check_stream_payload, ensure_success, health_from_models, network_error,
-    parse_provider_json, parse_stream_json, require_secret, send, validate_base_url,
-    validate_config, versioned_endpoint,
+    apply_headers, build_client, check_stream_payload, custom_endpoint_url, ensure_success,
+    header_pairs, health_from_models, network_error, parse_provider_json, parse_stream_json,
+    require_secret, send, validate_base_url, validate_config, versioned_endpoint,
 };
 use crate::stream::{stream_sse, StreamState};
 use crate::{ChatRequest, ChatResponse, HealthReport, ModelEntry, Provider};
@@ -21,6 +21,9 @@ pub struct GoogleProvider {
     secret: String,
     client: reqwest::Client,
     timeout_secs: u64,
+    headers: Vec<(String, String)>,
+    stream_enabled: bool,
+    custom_chat_url: Option<String>,
 }
 
 impl std::fmt::Debug for GoogleProvider {
@@ -46,6 +49,12 @@ impl GoogleProvider {
             secret,
             client: build_client(timeout_secs)?,
             timeout_secs,
+            headers: header_pairs(config),
+            stream_enabled: config.streaming,
+            custom_chat_url: config
+                .endpoint_path
+                .as_deref()
+                .map(|path| custom_endpoint_url(&config.base_url, path)),
         })
     }
 
@@ -61,6 +70,17 @@ impl GoogleProvider {
         } else {
             "generateContent"
         };
+        if let Some(custom) = &self.custom_chat_url {
+            // Endpoint personnalisé : l'appelant fournit le chemin complet.
+            return if stream {
+                format!(
+                    "{custom}{}alt=sse",
+                    if custom.contains('?') { "&" } else { "?" }
+                )
+            } else {
+                custom.clone()
+            };
+        }
         versioned_endpoint(
             &self.base_url,
             "v1beta",
@@ -81,9 +101,11 @@ impl GoogleProvider {
         request: &ChatRequest,
         stream: bool,
     ) -> IhResult<reqwest::Response> {
-        let builder = self
-            .auth(self.client.post(self.generate_url(&request.model, stream)))
-            .json(&request_body(request));
+        let builder = apply_headers(
+            self.auth(self.client.post(self.generate_url(&request.model, stream)))
+                .json(&request_body(request)),
+            &self.headers,
+        );
         let response = send(builder, &self.id, self.timeout_secs).await?;
         ensure_success(response, &self.id).await
     }
@@ -255,7 +277,7 @@ impl Provider for GoogleProvider {
     }
 
     async fn list_models(&self) -> IhResult<Vec<ModelEntry>> {
-        let builder = self.auth(self.client.get(self.models_url()));
+        let builder = apply_headers(self.auth(self.client.get(self.models_url())), &self.headers);
         let response = send(builder, &self.id, self.timeout_secs).await?;
         let response = ensure_success(response, &self.id).await?;
         let body = response
@@ -334,6 +356,11 @@ impl Provider for GoogleProvider {
             .strip_prefix("models/")
             .unwrap_or(&request.model)
             .to_string();
+        if !self.stream_enabled {
+            let response = self.chat(request).await?;
+            on_delta(&response.text);
+            return Ok(response);
+        }
         let response = self.post_generate(&request, true).await?;
         let mut state = StreamState::new(&model);
         stream_sse(response, &self.id, self.timeout_secs, |data| {

@@ -117,6 +117,40 @@ pub trait Provider: Send + Sync {
     ) -> IhResult<ChatResponse>;
 }
 
+/// Classe un échec de connexion en statut lisible pour l'interface.
+///
+/// Volontairement heuristique : les clients normalisent déjà leurs messages,
+/// et cette fonction reste testable sans réseau.
+pub fn classify_connection_error(message: &str) -> &'static str {
+    let text = message.to_ascii_lowercase();
+    if text.contains("timed out") || text.contains("timeout") || text.contains("délai") {
+        "timeout"
+    } else if text.contains("401")
+        || text.contains("403")
+        || text.contains("clé")
+        || text.contains("api key")
+        || text.contains("unauthorized")
+        || text.contains("forbidden")
+    {
+        "auth_failed"
+    } else if text.contains("404")
+        || text.contains("405")
+        || text.contains("html")
+        || text.contains("invalide") && text.contains("json")
+    {
+        "unsupported_protocol"
+    } else if text.contains("connect")
+        || text.contains("dns")
+        || text.contains("refused")
+        || text.contains("unreachable")
+        || text.contains("joindre")
+    {
+        "unreachable"
+    } else {
+        "error"
+    }
+}
+
 /// Fabrique de fournisseurs.
 pub struct ProviderFactory;
 
@@ -142,5 +176,35 @@ pub fn build_provider(
         ProviderKind::Anthropic => Ok(Box::new(AnthropicProvider::new(config, secret)?)),
         ProviderKind::Google => Ok(Box::new(GoogleProvider::new(config, secret)?)),
         ProviderKind::Ollama => Ok(Box::new(OllamaProvider::new(config)?)),
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::classify_connection_error;
+
+    #[test]
+    fn classifie_les_echecs_courants() {
+        assert_eq!(
+            classify_connection_error("fournisseur perso : délai dépassé"),
+            "timeout"
+        );
+        assert_eq!(
+            classify_connection_error("HTTP 401 : clé invalide"),
+            "auth_failed"
+        );
+        assert_eq!(
+            classify_connection_error("HTTP 403 forbidden"),
+            "auth_failed"
+        );
+        assert_eq!(
+            classify_connection_error("HTTP 404 endpoint introuvable"),
+            "unsupported_protocol"
+        );
+        assert_eq!(
+            classify_connection_error("connexion refusée (connect error)"),
+            "unreachable"
+        );
+        assert_eq!(classify_connection_error("bizarre"), "error");
     }
 }

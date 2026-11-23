@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Save, Settings2, Undo2 } from "lucide-react";
+import { PlugZap, Save, Settings2, Undo2 } from "lucide-react";
 import type { AppConfig, LogLevel } from "../lib/api";
 import { api } from "../lib/api";
 import type { Locale } from "../lib/i18n";
@@ -28,6 +28,7 @@ export function SettingsPage() {
     saveConfig,
     setLocale,
     locale,
+    navigate,
   } = useApp();
   const [draft, setDraft] = useState<AppConfig | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -268,6 +269,29 @@ export function SettingsPage() {
           </Field>
         </section>
       </div>
+
+      <section className="card" aria-labelledby="settings-providers">
+        <div className="section-heading">
+          <h2 id="settings-providers">{t("settings.providers_section")}</h2>
+          <button type="button" className="ghost small" onClick={() => navigate("providers")}>
+            <PlugZap size={14} aria-hidden="true" />
+            {t("settings.manage_providers")}
+          </button>
+        </div>
+        <p className="muted small">{t("settings.providers_hint")}</p>
+        <div className="inline-status">
+          <Badge tone="accent">
+            {t("settings.providers_integrated", {
+              count: config.providers.filter((entry) => !entry.custom).length,
+            })}
+          </Badge>
+          <Badge tone="info">
+            {t("settings.providers_custom", {
+              count: config.providers.filter((entry) => entry.custom).length,
+            })}
+          </Badge>
+        </div>
+      </section>
 
       <section className="card" aria-labelledby="settings-resources">
         <div className="section-heading">

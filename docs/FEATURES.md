@@ -79,6 +79,18 @@ Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
   intégrations Claude Code / Codex / Gemini CLI / OpenCode sont implémentées
   mais **non exécutées** ; la validation réelle a utilisé un agent contrôlé.
 
+## Jalon 0.3.0 livré — Fournisseurs personnalisés
+
+- Providers personnalisés persistés dans la configuration : protocole, base URL,
+  chemin d'endpoint, en-têtes, timeout, streaming, paramètres de génération,
+  modèle par défaut, dates.
+- Quatre protocoles (OpenAI-compatible, Anthropic, Google, Ollama) inchangés
+  pour les providers intégrés.
+- Test de connexion structuré (7 statuts) et gestion des modèles (découverte,
+  ajout manuel, suppression, défaut).
+- Sécurité : clés uniquement au trousseau, en-têtes réservés refusés, anti-CRLF,
+  redirections non suivies, HTTP local autorisé.
+
 ## Ce qui est explicitement absent
 
 1. **Pièces jointes binaires** (images, PDF) dans le chat : absentes.
@@ -116,7 +128,7 @@ Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
 | `ih-workspace` | 33 | Git, prison de chemins, PTY, **diff LCS**, métadonnées, écriture vérifiée |
 | `ih-agent-mode` | 5 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
 | **Rust total** | **270** | |
-| Frontend (`vitest`) | 122 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, **agent** |
+| Frontend (`vitest`) | 143 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, **agent** |
 | **Total** | **392** | |
 
 ## Vérifications manuelles effectuées

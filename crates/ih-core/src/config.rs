@@ -61,6 +61,19 @@ pub struct ProviderConfig {
     /// Un secret est présent dans le trousseau — jamais le secret lui-même.
     pub has_secret: bool,
     pub timeout_secs: u64,
+    /// Chemin complet de l'endpoint de chat, relatif à l'origine de `base_url`
+    /// (ex. `/v1/chat/completions`). Absent : chemin standard du protocole.
+    pub endpoint_path: Option<String>,
+    /// En-têtes HTTP additionnels (métadonnées). Jamais de secret ici.
+    pub headers: std::collections::BTreeMap<String, String>,
+    /// Streaming activé (SSE/NDJSON) ; sinon réponse complète en un bloc.
+    pub streaming: bool,
+    pub temperature: Option<f32>,
+    pub max_tokens: Option<u32>,
+    /// Provider ajouté par l'utilisateur (non intégré).
+    pub custom: bool,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl Default for ProviderConfig {
@@ -75,6 +88,14 @@ impl Default for ProviderConfig {
             models: Vec::new(),
             has_secret: false,
             timeout_secs: 120,
+            endpoint_path: None,
+            headers: std::collections::BTreeMap::new(),
+            streaming: true,
+            temperature: None,
+            max_tokens: None,
+            custom: false,
+            created_at: None,
+            updated_at: None,
         }
     }
 }
@@ -416,6 +437,26 @@ impl AppConfig {
                 )));
             }
             validate_url(&provider.base_url, provider.kind)?;
+            if let Some(path) = &provider.endpoint_path {
+                validate_endpoint_path(path)?;
+            }
+            validate_headers(&provider.headers)?;
+            if let Some(temp) = provider.temperature {
+                if !(0.0..=2.0).contains(&temp) {
+                    return Err(IhError::Config(format!(
+                        "temperature hors bornes (0–2) pour {}",
+                        provider.id
+                    )));
+                }
+            }
+            if let Some(tokens) = provider.max_tokens {
+                if tokens == 0 || tokens > 1_000_000 {
+                    return Err(IhError::Config(format!(
+                        "max_tokens hors bornes pour {}",
+                        provider.id
+                    )));
+                }
+            }
             if provider.timeout_secs == 0 || provider.timeout_secs > 3_600 {
                 return Err(IhError::Config(format!(
                     "timeout fournisseur hors bornes : {}",
@@ -535,16 +576,88 @@ impl AppConfig {
     }
 }
 
+/// Vrai si l'hôte est local (localhost, boucle locale, réseau privé, `.local`).
+pub fn is_local_host(host: &str) -> bool {
+    let host = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
+    if host == "localhost" || host.ends_with(".local") || host.ends_with(".localhost") {
+        return true;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => {
+            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
+        }
+        Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback() || ip.is_unspecified(),
+        Err(_) => false,
+    }
+}
+
+fn validate_endpoint_path(path: &str) -> IhResult<()> {
+    if !path.starts_with('/') {
+        return Err(IhError::Config(
+            "endpoint_path doit commencer par '/'".into(),
+        ));
+    }
+    if path.len() > 256 || path.contains("..") || path.chars().any(|c| c.is_whitespace()) {
+        return Err(IhError::Config(format!("endpoint_path invalide : {path}")));
+    }
+    Ok(())
+}
+
+fn validate_headers(headers: &std::collections::BTreeMap<String, String>) -> IhResult<()> {
+    const RESERVED: [&str; 5] = [
+        "authorization",
+        "host",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+    ];
+    for (name, value) in headers {
+        if name.is_empty() || name.len() > 64 {
+            return Err(IhError::Config(format!("nom d'en-tête invalide : {name}")));
+        }
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        {
+            return Err(IhError::Config(format!("nom d'en-tête invalide : {name}")));
+        }
+        if RESERVED.contains(&name.to_ascii_lowercase().as_str()) {
+            return Err(IhError::Config(format!(
+                "en-tête réservé (utilisez la clé d'API du trousseau) : {name}"
+            )));
+        }
+        if value.len() > 1024 || value.contains(['\r', '\n']) {
+            return Err(IhError::Config(format!(
+                "valeur d'en-tête invalide pour {name}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn validate_url(url: &str, kind: ProviderKind) -> IhResult<()> {
     if url.trim().is_empty() {
         return Err(IhError::Config("URL de fournisseur vide".into()));
     }
-    let local_allowed = matches!(kind, ProviderKind::Ollama)
-        || url.starts_with("http://127.0.0.1")
-        || url.starts_with("http://localhost");
-    if !(url.starts_with("https://") || local_allowed) {
+    let host = url
+        .split_once("://")
+        .and_then(|(_, rest)| rest.split('/').next())
+        .map(|authority| {
+            let without_user = authority.rsplit('@').next().unwrap_or(authority);
+            without_user.split(':').next().unwrap_or(without_user)
+        })
+        .unwrap_or("");
+
+    // HTTPS exigé, sauf pour un hôte local explicitement configuré
+    // (serveurs locaux : LM Studio, vLLM, Ollama, gateway privée…).
+    let local_http =
+        url.starts_with("http://") && (matches!(kind, ProviderKind::Ollama) || is_local_host(host));
+    if !(url.starts_with("https://") || local_http) {
         return Err(IhError::Config(format!(
-            "URL de fournisseur non autorisée (HTTPS requis) : {url}"
+            "URL de fournisseur non autorisée (HTTPS requis hors hôte local) : {url}"
         )));
     }
     Ok(())
@@ -684,6 +797,112 @@ mod tests {
         let mut config = base;
         config.workspace.exclusions = vec!["node_modules".into(), "*.pem".into()];
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn hotes_locaux_reconnus() {
+        for host in [
+            "localhost",
+            "127.0.0.1",
+            "[::1]",
+            "192.168.1.10",
+            "10.0.0.5",
+            "172.16.3.4",
+            "192.168.0.22",
+            "box.local",
+        ] {
+            assert!(is_local_host(host), "{host} doit être considéré local");
+        }
+        for host in [
+            "api.openai.com",
+            "openrouter.ai",
+            "8.8.8.8",
+            "example.invalid",
+        ] {
+            assert!(!is_local_host(host), "{host} ne doit pas être local");
+        }
+    }
+
+    #[test]
+    fn http_autorise_pour_un_hote_local_uniquement() {
+        let mut config = AppConfig::default();
+        config.provider_mut("ollama").unwrap().base_url = "http://192.168.1.50:11434".into();
+        config.validate().unwrap();
+
+        let mut config = AppConfig::default();
+        config.provider_mut("openai").unwrap().base_url = "http://192.168.1.50:8000/v1".into();
+        config.validate().unwrap();
+
+        let mut config = AppConfig::default();
+        config.provider_mut("openai").unwrap().base_url = "http://api.openai.com/v1".into();
+        assert!(config.validate().is_err(), "HTTP distant refusé");
+    }
+
+    #[test]
+    fn endpoint_personnalise_valide() {
+        let mut config = AppConfig::default();
+        config.provider_mut("openai").unwrap().endpoint_path = Some("/v1/chat/completions".into());
+        config.validate().unwrap();
+
+        for path in ["v1/chat", "/v1/../secret", "/v1/chat completions"] {
+            let mut config = AppConfig::default();
+            config.provider_mut("openai").unwrap().endpoint_path = Some(path.into());
+            assert!(config.validate().is_err(), "chemin refusé : {path}");
+        }
+    }
+
+    #[test]
+    fn entetes_personnalises_valides_et_injections_refusees() {
+        let mut config = AppConfig::default();
+        let provider = config.provider_mut("openai").unwrap();
+        provider.headers.insert("X-Tenant".into(), "acme".into());
+        provider
+            .headers
+            .insert("X-Trace-Id".into(), "abc-123".into());
+        config.validate().unwrap();
+
+        // En-tête réservé : la clé doit passer par le trousseau.
+        let mut config = AppConfig::default();
+        config
+            .provider_mut("openai")
+            .unwrap()
+            .headers
+            .insert("Authorization".into(), "Bearer x".into());
+        assert!(config.validate().is_err());
+
+        // Injection CRLF.
+        let mut config = AppConfig::default();
+        config
+            .provider_mut("openai")
+            .unwrap()
+            .headers
+            .insert("X-Test".into(), "a\r\nHost: evil".into());
+        assert!(config.validate().is_err());
+
+        // Nom invalide.
+        let mut config = AppConfig::default();
+        config
+            .provider_mut("openai")
+            .unwrap()
+            .headers
+            .insert("X Test".into(), "v".into());
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn parametres_de_generation_bornees() {
+        let mut config = AppConfig::default();
+        config.provider_mut("openai").unwrap().temperature = Some(1.5);
+        config.provider_mut("openai").unwrap().max_tokens = Some(2048);
+        config.validate().unwrap();
+
+        let mut config = AppConfig::default();
+        config.provider_mut("openai").unwrap().temperature = Some(3.0);
+        assert!(config.validate().is_err());
+
+        let mut config = AppConfig::default();
+        config.provider_mut("openai").unwrap().max_tokens = Some(0);
+        assert!(config.validate().is_err());
     }
 
     #[test]

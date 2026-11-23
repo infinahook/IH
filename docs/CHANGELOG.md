@@ -35,6 +35,45 @@
 - La zone de saisie défilait avec les messages : la liste défile désormais dans
   son propre conteneur et le compositeur reste ancré en bas.
 
+## 0.3.0 — Fournisseurs personnalisés et endpoints API
+
+### Ajouté
+- **Providers personnalisés** : identifiant, nom, protocole, `base_url`,
+  `endpoint_path` optionnel, en-têtes HTTP, timeout, streaming, température,
+  `max_tokens`, modèle par défaut, modèles, dates de création/mise à jour.
+- **`endpoint_path`** : chemin complet de chat sur l'origine de `base_url`
+  (passerelles privées, préfixes exotiques).
+- **En-têtes personnalisés** transmis à toutes les requêtes (chat, modèles,
+  santé) des quatre protocoles.
+- **Streaming désactivable** : `streaming = false` → réponse complète en un
+  seul delta, sans casser l'interface.
+- **Test de connexion** structuré : `ok`, `auth_failed`, `unreachable`,
+  `unsupported_protocol`, `model_unavailable`, `timeout`, `error`, avec latence
+  et nombre de modèles.
+- **Gestion des modèles** : découverte, ajout manuel, suppression, modèle par
+  défaut.
+- **Interface** : page Fournisseurs (liste, ajout, édition, suppression avec
+  confirmation, activation, test, modèles), cartes « Intégré / Personnalisé »
+  et « Actif / Inactif ».
+- **HTTP local autorisé** : localhost, boucle locale, réseaux privés, `*.local`
+  (HTTPS reste exigé ailleurs).
+
+### Sécurité
+- Clés uniquement dans le trousseau ; jamais en configuration, logs ou IPC.
+- En-têtes `Authorization`, `Host`, `Content-Length`, `Transfer-Encoding`,
+  `Connection` refusés ; noms/valeurs validés (anti-injection CRLF).
+- **Redirections HTTP non suivies** (protection de la clé d'API).
+- Aucun blocage des IP privées ni de localhost.
+
+### Tests
+- Rust : validation de configuration (hôtes locaux, chemins, en-têtes,
+  paramètres), tests d'intégration sur serveur HTTP local (endpoint personnalisé,
+  en-têtes transmis, streaming désactivé, 302 non suivi), classification des
+  erreurs de connexion.
+- Frontend : validation du formulaire, parsing des en-têtes, mapping des statuts.
+- Validation réelle avec un serveur **compatible OpenAI local** (voir
+  `docs/CUSTOM_PROVIDERS.md`).
+
 ## 0.2.3 — Validation réelle OpenCode (jalon « 0.2.2.1 »)
 
 Version interne `0.2.3` : semver n'accepte pas quatre nombres, mais le jalon
