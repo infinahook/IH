@@ -30,6 +30,7 @@ Ubuntu/Debian and Arch Linux.
 | **Project context**: `@` mentions, Rust-side assembly, secret exclusions | ✅ |
 | **Diff**: preview, accept/reject, backup and conflict detection | ✅ |
 | **Agent mode**: detected CLI, one-shot approval, worktree isolation, events, diffs | ✅ (controlled agent) |
+| **Custom providers**: OpenAI/Anthropic/Google/Ollama-compatible endpoints, headers, connection test | ✅ |
 | Model manager (discovery, default model, enable/disable) | ✅ |
 | Projects, confined file editing, search | ✅ |
 | Git: status, diff, stage, commit, branches, log, worktrees | ✅ |

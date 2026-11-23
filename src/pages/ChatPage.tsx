@@ -179,6 +179,10 @@ export function ChatPage() {
     () => (providers.data ?? []).filter((entry) => entry.enabled),
     [providers.data],
   );
+  const disabledProviders = useMemo(
+    () => (providers.data ?? []).filter((entry) => !entry.enabled),
+    [providers.data],
+  );
   const [providerId, setProviderId] = useState("");
   const [model, setModel] = useState("");
   const [discovered, setDiscovered] = useState<Record<string, ModelEntry[]>>({});
@@ -1181,6 +1185,8 @@ export function ChatPage() {
     selectedProvider !== null &&
     selectedProvider.kind !== "ollama" &&
     !selectedProvider.has_secret;
+  const integratedEnabled = enabledProviders.filter((entry) => !entry.custom);
+  const customEnabled = enabledProviders.filter((entry) => entry.custom);
 
   const optimisticTurn = activeTurn?.threadId === selectedThreadId ? activeTurn : null;
   const showOptimisticUser =
@@ -1657,12 +1663,54 @@ export function ChatPage() {
                   onChange={(event) => setProviderId(event.target.value)}
                 >
                   {providerId ? null : <option value="">{t("chat.choose_provider")}</option>}
-                  {enabledProviders.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.label}
-                    </option>
-                  ))}
+                  {integratedEnabled.length > 0 ? (
+                    <optgroup label={t("providers.group_integrated")}>
+                      {integratedEnabled.map((entry) => (
+                        <option key={entry.id} value={entry.id}>
+                          {entry.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {customEnabled.length > 0 ? (
+                    <optgroup label={t("providers.group_custom")}>
+                      {customEnabled.map((entry) => (
+                        <option key={entry.id} value={entry.id}>
+                          {entry.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {disabledProviders.length > 0 ? (
+                    <optgroup label={t("providers.group_disabled")}>
+                      {disabledProviders.map((entry) => (
+                        <option key={entry.id} value={entry.id} disabled>
+                          {entry.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
                 </select>
+                {selectedProvider || disabledProviders.length > 0 ? (
+                  <div className="inline-status chat-provider-badges">
+                    {selectedProvider ? (
+                      <Badge tone={selectedProvider.custom ? "info" : "accent"}>
+                        {selectedProvider.custom
+                          ? t("providers.badge_custom")
+                          : t("providers.badge_integrated")}
+                      </Badge>
+                    ) : null}
+                    {disabledProviders.map((entry) => (
+                      <Badge
+                        key={entry.id}
+                        tone="warning"
+                        title={t("providers.disabled_select_hint")}
+                      >
+                        {entry.label} · {t("providers.badge_inactive")}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
               </Field>
               <Field
                 label={t("chat.model")}
@@ -1725,6 +1773,9 @@ export function ChatPage() {
                       {discover.busy ? <Spinner /> : <RefreshCw size={13} aria-hidden="true" />}
                       {discover.busy ? t("chat.discovering") : t("chat.discover")}
                     </button>
+                  ) : null}
+                  {selectedProvider?.custom ? (
+                    <Badge tone="info">{t("providers.badge_custom")}</Badge>
                   ) : null}
                 </div>
               </Field>

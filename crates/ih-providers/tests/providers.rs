@@ -288,6 +288,7 @@ fn provider_config(id: &str, kind: ProviderKind, base_url: String) -> ProviderCo
         models: Vec::new(),
         has_secret: true,
         timeout_secs: 10,
+        ..Default::default()
     }
 }
 
@@ -746,4 +747,103 @@ async fn signature_accepte_un_callback_dyn(
     on_delta: &mut (dyn FnMut(&str) + Send),
 ) -> ih_core::IhResult<ih_providers::ChatResponse> {
     provider.chat_stream(request, on_delta).await
+}
+
+// ---------------------------------------------------------------------------
+// Providers personnalisés : endpoint, en-têtes, streaming désactivable
+// ---------------------------------------------------------------------------
+
+fn custom_config(base_url: String, endpoint: &str) -> ProviderConfig {
+    ProviderConfig {
+        id: "perso".into(),
+        kind: ProviderKind::OpenaiCompatible,
+        label: "Perso".into(),
+        base_url,
+        enabled: true,
+        timeout_secs: 10,
+        endpoint_path: Some(endpoint.into()),
+        headers: BTreeMap::from([("x-tenant".to_string(), "acme".to_string())]),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn custom_endpoint_et_entetes_sont_utilises() {
+    let server = FakeServer::start(|request| {
+        if request.method == "POST" && path_of(request) == "/custom/chat" {
+            FakeResponse::sse_chunks(vec![
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Bon\"}}]}\n\n".to_string(),
+                "data: {\"choices\":[{\"delta\":{\"content\":\"jour\"}}]}\n\n".to_string(),
+                "data: [DONE]\n\n".to_string(),
+            ])
+        } else {
+            FakeResponse::status(404, r#"{"error":{"message":"route inconnue"}}"#)
+        }
+    });
+    let config = custom_config(server.base_url(), "/custom/chat");
+    let provider = OpenAiCompatibleProvider::new(&config, Some("sk-test".into())).unwrap();
+
+    let mut deltas = String::new();
+    let response = provider
+        .chat_stream(
+            chat_request("modele-perso", "bonjour"),
+            &mut |delta: &str| deltas.push_str(delta),
+        )
+        .await
+        .expect("streaming personnalisé");
+
+    assert_eq!(response.text, "Bonjour");
+    assert_eq!(deltas, "Bonjour");
+
+    let requests = server.requests();
+    assert_eq!(path_of(&requests[0]), "/custom/chat");
+    assert_eq!(
+        requests[0].headers.get("x-tenant").map(String::as_str),
+        Some("acme"),
+        "l'en-tête personnalisé doit être transmis"
+    );
+    assert_eq!(
+        requests[0].headers.get("authorization").map(String::as_str),
+        Some("Bearer sk-test")
+    );
+}
+
+#[tokio::test]
+async fn streaming_desactive_donne_un_seul_delta() {
+    let server = FakeServer::start(|_request| {
+        FakeResponse::json(
+            r#"{"id":"c1","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"Réponse complète"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}"#,
+        )
+    });
+    let mut config = custom_config(server.base_url(), "/v1/chat/completions");
+    config.streaming = false;
+    let provider = OpenAiCompatibleProvider::new(&config, Some("sk-test".into())).unwrap();
+
+    let mut deltas = Vec::new();
+    let response = provider
+        .chat_stream(chat_request("m", "salut"), &mut |delta: &str| {
+            deltas.push(delta.to_string())
+        })
+        .await
+        .expect("réponse non streamée");
+
+    assert_eq!(deltas, vec!["Réponse complète".to_string()]);
+    assert_eq!(response.text, "Réponse complète");
+    // Le corps envoyé au serveur ne demande pas de streaming.
+    let requests = server.requests();
+    let body: Value = serde_json::from_str(&requests[0].body).expect("corps");
+    assert_eq!(body["stream"].as_bool(), Some(false));
+}
+
+#[test]
+fn redirection_non_suivie_pour_ne_pas_fuir_la_cle() {
+    // Un 302 doit être remonté comme erreur, jamais suivi.
+    let server = FakeServer::start(|_request| FakeResponse::status(302, "{}"));
+    let config = custom_config(server.base_url(), "/v1/chat/completions");
+    let provider = OpenAiCompatibleProvider::new(&config, Some("sk-test".into())).unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let result = runtime.block_on(async { provider.health().await });
+    // `health` renvoie un rapport non-ok plutôt qu'une panique.
+    assert!(result.is_ok());
+    assert!(!result.unwrap().ok);
 }

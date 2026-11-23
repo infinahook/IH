@@ -181,6 +181,14 @@ export interface ProviderConfig {
   models: ModelEntry[];
   has_secret: boolean;
   timeout_secs: number;
+  endpoint_path: string | null;
+  headers: Record<string, string>;
+  streaming: boolean;
+  temperature: number | null;
+  max_tokens: number | null;
+  custom: boolean;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface AgentConfig {
@@ -350,6 +358,42 @@ export interface ProviderView {
   secret_stored: boolean;
   default_model: string | null;
   models: ModelEntry[];
+  /** Vrai pour un fournisseur ajouté par l'utilisateur, faux pour un intégré. */
+  custom: boolean;
+  endpoint_path: string | null;
+  /** Nombre d'en-têtes configurés ; les valeurs ne sont jamais renvoyées. */
+  headers_count: number;
+  streaming: boolean;
+  timeout_secs: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/** Saisie de `provider_create` / `provider_update`, sérialisée telle quelle par Rust. */
+export interface ProviderInput {
+  id: string;
+  label: string;
+  kind: ProviderKind;
+  base_url: string;
+  endpoint_path?: string | null;
+  headers?: Record<string, string>;
+  timeout_secs?: number;
+  streaming?: boolean;
+  temperature?: number | null;
+  max_tokens?: number | null;
+  default_model?: string | null;
+  models?: ModelEntry[];
+  /** Transmise une seule fois : le noyau la range dans le trousseau. */
+  api_key?: string | null;
+}
+
+/** Résultat de `provider_test`. */
+export interface ConnectionTest {
+  status: string;
+  detail: string;
+  latency_ms: number;
+  models: number;
+  protocol: string;
 }
 
 export interface HealthReport {
@@ -777,6 +821,15 @@ export const api = {
   // fournisseurs
   providers: {
     list: () => call<ProviderView[]>("providers_list"),
+    create: (input: ProviderInput) => call<ProviderView>("provider_create", { input }),
+    update: (id: string, input: ProviderInput) =>
+      call<ProviderView>("provider_update", { id, input }),
+    remove: (id: string) => call<void>("provider_delete", { id }),
+    test: (id: string) => call<ConnectionTest>("provider_test", { id }),
+    addModel: (providerId: string, modelId: string, label: string | null = null) =>
+      call<ProviderView>("provider_add_model", { providerId, modelId, label }),
+    removeModel: (providerId: string, modelId: string) =>
+      call<ProviderView>("provider_remove_model", { providerId, modelId }),
     setSecret: (providerId: string, secret: string) =>
       call<void>("provider_set_secret", { providerId, secret }),
     clearSecret: (providerId: string) =>
