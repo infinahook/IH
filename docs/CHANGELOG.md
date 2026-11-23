@@ -35,6 +35,32 @@
 - La zone de saisie défilait avec les messages : la liste défile désormais dans
   son propre conteneur et le compositeur reste ancré en bas.
 
+## 0.5.0 — Team Mode (Lead · Workers · Reviewer)
+
+### Ajouté
+- **Course d'équipe** : un objectif, un coordinateur (Lead), 1 à 3 exécutants
+  (Workers) et un relecteur (Reviewer). Le plan vient de `ih-orchestrator`
+  (graphe de tâches et rôles) et s'exécute en **sessions d'agent réelles**.
+- **Isolation** : toutes les tâches s'exécutent dans **un seul worktree git**
+  détaché ; le projet n'est modifié pendant la course.
+- **Une approbation par course**, liée à une empreinte (objectif + agents +
+  répertoire) ; toute modification invalide l'approbation.
+- **Progression** : événement `ih://team-event` par tâche (rôle, titre, état) et
+  événement final (résumé, fichiers).
+- **Modifications** : les fichiers produits deviennent des diffs en attente
+  (`origin = "team:<run_id>"`), acceptés ou rejetés via le système 0.2.1.
+- **Persistance** : chaque tâche du plan est enregistrée dans la table `tasks`
+  avec son rôle et son état.
+- Interface : sous-mode **Équipe** dans le panneau Agent (objectif, rôles,
+  modale d'approbation avec plan prévu, liste des tâches en direct, revue des
+  modifications).
+
+### Limites
+- Exécution **séquentielle** (la relecture dépend des exécutions) ; pas de
+  parallélisme entre workers.
+- Une course = un worktree ; pas de fusion inter-worktrees.
+- Pas de reprise d'une course interrompue.
+
 ## 0.4.0 — Refonte UX/UI : la conversation d'abord
 
 ### Problème corrigé

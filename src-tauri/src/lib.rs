@@ -107,6 +107,9 @@ pub fn run() {
             commands::agent::agent_session_detail,
             commands::agent::agent_session_events,
             commands::agent::agent_session_refuse,
+            // mode équipe
+            commands::team::team_request_approval,
+            commands::team::team_run,
             // skills & MCP
             commands::extensions::skills_list,
             commands::extensions::skill_install,

@@ -686,6 +686,48 @@ export interface AgentEventRow {
   created_at: string;
 }
 
+// --------------------------------------------------------------- mode équipe
+
+/**
+ * Saisie de `team_request_approval` / `team_run`.
+ * Les champs internes restent en `snake_case` : Tauri ne renomme que les
+ * arguments de commande, pas les champs d'une structure désérialisée.
+ */
+export interface TeamRunRequest {
+  project_id: string;
+  goal: string;
+  lead: string;
+  workers: string[];
+  reviewer: string | null;
+  work_items: number;
+}
+
+/** Demande d'approbation d'une course d'équipe (`team_request_approval`). */
+export interface TeamApprovalView {
+  approval_id: string;
+  detail: string;
+  fingerprint: string;
+  plan_summary: string;
+}
+
+/** Tâche d'une course, telle que `team_run` la renvoie. */
+export interface TeamRunTask {
+  task_id: string;
+  title: string;
+  role: string;
+  state: string;
+  sessions: number;
+}
+
+/** Résultat final de `team_run` (les modifications sont en attente de diff). */
+export interface TeamRunResult {
+  run_id: string;
+  summary: string;
+  files: string[];
+  changes_prepared: number;
+  tasks: TeamRunTask[];
+}
+
 // ------------------------------------------------------------ mises à jour
 
 export interface UpdateStatus {
@@ -816,6 +858,15 @@ export const api = {
       call<AgentSessionDetail>("agent_session_detail", { sessionId }),
     events: (sessionId: string, limit: number | null = null) =>
       call<AgentEventRow[]>("agent_session_events", { sessionId, limit }),
+  },
+
+  // mode équipe : une approbation couvre toute la course, les diffs sont
+  // ensuite relus via `diff_pending` (origine `team:<run_id>`)
+  team: {
+    requestApproval: (request: TeamRunRequest) =>
+      call<TeamApprovalView>("team_request_approval", { request }),
+    run: (request: TeamRunRequest, approvalId: string) =>
+      call<TeamRunResult>("team_run", { request, approvalId }),
   },
 
   // fournisseurs

@@ -10,6 +10,7 @@ import {
   RotateCcw,
   ShieldAlert,
   Terminal,
+  Users,
   X,
 } from "lucide-react";
 import { api, toAppError, type AppError, type AgentSessionDetail, type DiffPreview } from "../lib/api";
@@ -28,6 +29,7 @@ import { formatRelativeTime } from "../lib/chat";
 import { DiffView } from "./DiffView";
 import { formatBytes, formatDate, shortHash } from "../lib/format";
 import { useApp } from "../lib/store";
+import { useTeamRun } from "../lib/useTeamRun";
 import type { AgentSessionController } from "../lib/useAgentSession";
 import type { WorkspaceController } from "../lib/useWorkspace";
 import { Badge, agentStateTone, riskTone, type BadgeTone } from "./Badge";
@@ -36,6 +38,7 @@ import { ErrorBanner } from "./ErrorBanner";
 import { Field } from "./Field";
 import { Modal } from "./Modal";
 import { Notice } from "./Notice";
+import { TeamPanel } from "./TeamPanel";
 
 function phaseTone(phase: AgentPhase): BadgeTone {
   switch (phase) {
@@ -82,6 +85,10 @@ export function AgentPanel({
 }) {
   const { t, locale } = useApp();
   const c = controller;
+  // Le hook vit ici, pas dans TeamPanel : changer de sous-mode ne perd ni la
+  // course en cours ni son flux d'événements.
+  const team = useTeamRun(projectId);
+  const [subMode, setSubMode] = useState<"agent" | "team">("agent");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
   const outputRef = useRef<HTMLPreElement>(null);
@@ -161,26 +168,52 @@ export function AgentPanel({
     >
       <header className="chat-conversation-head">
         <div className="chat-conversation-heading">
-          <h2 id="agent-panel-title">{t("agent_mode.title")}</h2>
-          <div className="chat-badges">
-            <Badge tone={phaseTone(phase)}>
-              {c.active ? <Spinner /> : null}
-              {phaseLabel}
-            </Badge>
-            {c.sessionId ? (
-              <span className="mono small" title={c.sessionId}>
-                {shortHash(c.sessionId, 14)}
-              </span>
-            ) : null}
-            {c.selectedAdapter ? (
-              <Badge tone="info">{c.selectedAdapter.label}</Badge>
-            ) : (
-              <Badge tone="danger">{t("agent_mode.no_adapter")}</Badge>
-            )}
-            {c.steps > 0 ? (
-              <span className="small muted">{t("agent_mode.steps", { count: c.steps })}</span>
-            ) : null}
+          <h2 id="agent-panel-title">
+            {subMode === "team" ? t("team.title") : t("agent_mode.title")}
+          </h2>
+          <div className="mode-switch submode-switch" role="group" aria-label={t("team.mode_label")}>
+            <button
+              type="button"
+              className={subMode === "agent" ? "mode-option active" : "mode-option"}
+              aria-pressed={subMode === "agent"}
+              onClick={() => setSubMode("agent")}
+            >
+              <Bot size={13} aria-hidden="true" />
+              {t("team.mode_agent")}
+            </button>
+            <button
+              type="button"
+              className={subMode === "team" ? "mode-option active" : "mode-option"}
+              aria-pressed={subMode === "team"}
+              onClick={() => setSubMode("team")}
+            >
+              <Users size={13} aria-hidden="true" />
+              {t("team.mode_team")}
+            </button>
           </div>
+          {subMode === "agent" ? (
+            <div className="chat-badges">
+              <Badge tone={phaseTone(phase)}>
+                {c.active ? <Spinner /> : null}
+                {phaseLabel}
+              </Badge>
+              {c.sessionId ? (
+                <span className="mono small" title={c.sessionId}>
+                  {shortHash(c.sessionId, 14)}
+                </span>
+              ) : null}
+              {c.selectedAdapter ? (
+                <Badge tone="info">{c.selectedAdapter.label}</Badge>
+              ) : (
+                <Badge tone="danger">{t("agent_mode.no_adapter")}</Badge>
+              )}
+              {c.steps > 0 ? (
+                <span className="small muted">{t("agent_mode.steps", { count: c.steps })}</span>
+              ) : null}
+            </div>
+          ) : (
+            <p className="small muted chat-mode-hint">{t("team.subtitle")}</p>
+          )}
         </div>
         <div className="button-row compact">
           <button
@@ -198,6 +231,17 @@ export function AgentPanel({
         </div>
       </header>
 
+      {subMode === "team" ? (
+        <TeamPanel
+          projectId={projectId}
+          adapters={c.adapters}
+          adaptersLoading={c.adaptersLoading}
+          adaptersError={c.adaptersError}
+          onReloadAdapters={c.reloadAdapters}
+          controller={team}
+          workspace={workspace}
+        />
+      ) : (
       <div className="agent-panel-body">
         {c.adaptersError ? (
           <ErrorBanner error={c.adaptersError} onRetry={c.reloadAdapters} />
@@ -687,9 +731,10 @@ export function AgentPanel({
           )}
         </section>
       </div>
+      )}
 
       <Modal
-        open={c.approval !== null}
+        open={subMode === "agent" && c.approval !== null}
         title={t("agent_mode.approval_title")}
         size="wide"
         onClose={() => {

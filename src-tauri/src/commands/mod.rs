@@ -7,6 +7,7 @@ pub mod core;
 pub mod extensions;
 pub mod files;
 pub mod ops;
+pub mod team;
 pub mod workspace;
 
 use crate::state::AppState;

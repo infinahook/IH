@@ -4959,3 +4959,42 @@ body,
 .chat-conversation.agent-conversation {
   padding: 17px;
 }
+
+/* ====================================================== mode équipe 0.5.0 ===
+   Réutilise la carte et les sections du panneau Agent ; seuls la bascule de
+   sous-mode, les cases d'équipe et le plan d'approbation ont des styles propres. */
+
+.submode-switch {
+  margin: 0 0 8px;
+}
+
+.team-member-option {
+  cursor: pointer;
+}
+
+.team-member-option input[type="checkbox"] {
+  accent-color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.team-task {
+  cursor: default;
+}
+
+.team-task-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-plan {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  max-height: 190px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
