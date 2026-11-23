@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
+license.workspace = true
 repository.workspace = true
 description = "Extensions IH : installation vérifiée des skills et client MCP JSON-RPC 2.0 sur stdio"
 

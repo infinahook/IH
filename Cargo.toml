@@ -7,6 +7,7 @@ version = "0.5.2"
 edition = "2021"
 rust-version = "1.82"
 authors = ["IH contributors"]
+license = "MIT"
 repository = "https://github.com/infinahook/IH"
 
 [workspace.dependencies]

@@ -139,14 +139,6 @@ npm run build
 
 ## Licence
 
-À définir avant toute redistribution : aucun fichier `LICENSE` n'est encore
-fourni, et le `PKGBUILD` déclare donc `license=('custom')`. Les dépendances
-tierces conservent leurs licences respectives.
+IH est distribué sous licence **MIT** — voir le fichier [LICENSE](LICENSE).
+Les dépendances tierces conservent leurs licences respectives.
 
-## Attribution
-
-IH s'inspire de [PandaCode](https://github.com/aicodeking/pandacode) comme
-référence de produit. Aucun code, aucune icône et aucune marque de PandaCode
-n'est inclus dans ce dépôt. Voir [docs/UPSTREAM.md](docs/UPSTREAM.md).
-
-<!-- trace agent -->

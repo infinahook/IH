@@ -40,6 +40,13 @@
       "icons/128x128@2x.png",
       "icons/icon.png"
     ],
-    "linux": {}
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/doc/ih/copyright": "../LICENSE"
+        }
+      }
+    },
+    "copyright": "Copyright (c) 2026 Infinahook \u2014 MIT"
   }
 }

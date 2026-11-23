@@ -31,7 +31,7 @@ prétendre qu'un jalon est atteint s'il n'est pas testé.
 8. **Boucle autonome d'équipe** : relance automatique des tâches prêtes sans
    intervention, avec budget et limite d'itérations.
 9. **Validation sur Arch physique** en plus du conteneur CI.
-10. **Choix de licence** et fichier `LICENSE`.
+10. ~~Choix de licence et fichier `LICENSE`~~ → **MIT** (fait).
 
 ## Règle d'acceptation
 

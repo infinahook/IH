@@ -103,7 +103,7 @@ Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
 7. **Git distant** (`push`, `pull`, `fetch`) et résolution de conflits.
 8. **Planificateur d'automatisations** actif en arrière-plan.
 9. **Page d'audit** exposée par l'IPC (le stockage existe en base).
-10. **Fichier LICENSE** : licence pas encore choisie.
+10. ~~Fichier LICENSE~~ → **MIT** depuis 0.5.2 (voir `LICENSE`).
 11. **Arch sur machine physique** : la CI valide la compilation et les tests
     dans un conteneur `archlinux:latest`.
 12. **Repli de l'éditeur sur très gros fichiers** : au-delà de 2 Mio (limite

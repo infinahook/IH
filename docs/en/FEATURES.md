@@ -71,7 +71,7 @@ Last verified: 256 Rust tests + 92 frontend tests, all green.
 7. **Remote Git** (`push`, `pull`, `fetch`) and conflict resolution.
 8. **Active background automation scheduler**.
 9. **Audit page** exposed through IPC (storage exists).
-10. **LICENSE file**: license not chosen yet.
+10. ~~LICENSE file~~ → **MIT** since 0.5.2 (see `LICENSE`).
 11. **Physical Arch machine**: CI validates build and tests inside an
     `archlinux:latest` container.
 12. **Very large file fallback**: above 2 MiB (configurable limit) the file is
