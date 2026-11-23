@@ -20,6 +20,7 @@ export function Resizer({
   label,
   onChange,
   disabled = false,
+  className = "",
 }: {
   orientation: ResizerOrientation;
   value: number;
@@ -28,6 +29,7 @@ export function Resizer({
   label: string;
   onChange: (value: number) => void;
   disabled?: boolean;
+  className?: string;
 }) {
   const dragRef = useRef<{ start: number; value: number } | null>(null);
 
@@ -99,7 +101,9 @@ export function Resizer({
 
   return (
     <div
-      className={`resizer resizer-${orientation}${disabled ? " disabled" : ""}`}
+      className={`resizer resizer-${orientation}${disabled ? " disabled" : ""}${
+        className ? ` ${className}` : ""
+      }`}
       role="separator"
       aria-orientation={orientation}
       aria-valuemin={Math.round(min)}

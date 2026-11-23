@@ -15,8 +15,9 @@ import {
   type PendingDiff,
 } from "./api";
 import {
-  DEFAULT_LAYOUT,
   clampLayout,
+  defaultWorkspaceLayout,
+  migrateLayout,
   normalizeBottomTab,
   parseLayout,
   serializeLayout,
@@ -122,6 +123,7 @@ export interface WorkspaceController {
 
 function sameLayout(left: WorkspaceLayout, right: WorkspaceLayout): boolean {
   return (
+    left.ux_version === right.ux_version &&
     left.conversation_width === right.conversation_width &&
     left.explorer_width === right.explorer_width &&
     left.explorer_visible === right.explorer_visible &&
@@ -141,7 +143,9 @@ function sameLayout(left: WorkspaceLayout, right: WorkspaceLayout): boolean {
  */
 export function useWorkspace(projectId: string | null): WorkspaceController {
   const { t } = useApp();
-  const [layout, setLayoutState] = useState<WorkspaceLayout>(DEFAULT_LAYOUT);
+  const [layout, setLayoutState] = useState<WorkspaceLayout>(() =>
+    defaultWorkspaceLayout({ width: 1440, height: 900 }),
+  );
   const [bounds, setBounds] = useState<LayoutBounds>({ width: 1440, height: 900 });
   const [hydrated, setHydrated] = useState(false);
   const [settings, setSettings] = useState<ContextSettings | null>(null);
@@ -328,9 +332,17 @@ export function useWorkspace(projectId: string | null): WorkspaceController {
     }
     let cancelled = false;
     const restore = async () => {
-      let parsed = { ...DEFAULT_LAYOUT };
+      let parsed = defaultWorkspaceLayout(boundsRef.current);
       try {
-        parsed = parseLayout(await api.workspace.layoutGet());
+        const raw = await api.workspace.layoutGet();
+        const stored = parseLayout(raw);
+        // Une disposition historique (UX v1) est migrée une seule fois vers la
+        // répartition conversation-first ; une disposition absente utilise les
+        // dimensions réelles de la fenêtre.
+        parsed =
+          typeof raw === "string" && raw.trim().length > 0
+            ? migrateLayout(stored, boundsRef.current)
+            : defaultWorkspaceLayout(boundsRef.current);
       } catch (reason) {
         if (!cancelled && token === scopeToken.current) {
           setLayoutError(toAppError(reason));
@@ -403,7 +415,7 @@ export function useWorkspace(projectId: string | null): WorkspaceController {
     setLayoutState(
       clampLayout(
         {
-          ...DEFAULT_LAYOUT,
+          ...defaultWorkspaceLayout(boundsRef.current),
           project_id: projectRef.current,
           tabs: tabsRef.current.map((tab) => tab.path),
           active_tab: activePathRef.current,

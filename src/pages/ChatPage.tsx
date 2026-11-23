@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useReducer,
@@ -81,10 +82,18 @@ import { useAgentSession } from "../lib/useAgentSession";
 import { useWorkspace } from "../lib/useWorkspace";
 import { useAction, useAsync, useDebouncedValue } from "../lib/hooks";
 import { useApp } from "../lib/store";
+import {
+  INITIAL_PROVIDER_DRAWER_STATE,
+  changeProviderSelection,
+  providerAvailability,
+  providerDrawerReducer,
+  type ProviderDrawerSection,
+} from "../lib/ux";
 import { AgentPanel } from "../components/AgentPanel";
 import { Badge, type BadgeTone } from "../components/Badge";
 import { BottomPanel } from "../components/BottomPanel";
 import { ChatModeSwitch, type ChatMode } from "../components/ChatModeSwitch";
+import { ChatProviderBar } from "../components/ChatProviderBar";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState, LoadingRow, Spinner } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -94,6 +103,7 @@ import { Modal } from "../components/Modal";
 import { Notice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectGate } from "../components/ProjectGate";
+import { ProviderConfigDrawer } from "../components/ProviderConfigDrawer";
 import { Resizer } from "../components/Resizer";
 import { WorkspaceEditor } from "../components/WorkspaceEditor";
 
@@ -179,16 +189,10 @@ export function ChatPage() {
     () => (providers.data ?? []).filter((entry) => entry.enabled),
     [providers.data],
   );
-  const disabledProviders = useMemo(
-    () => (providers.data ?? []).filter((entry) => !entry.enabled),
-    [providers.data],
-  );
   const [providerId, setProviderId] = useState("");
   const [model, setModel] = useState("");
-  const [discovered, setDiscovered] = useState<Record<string, ModelEntry[]>>({});
   const previousProviderRef = useRef<string | null>(null);
   const saveDefault = useAction();
-  const discover = useAction();
 
   const selectedProvider = useMemo(
     () => enabledProviders.find((entry) => entry.id === providerId) ?? null,
@@ -200,11 +204,6 @@ export function ChatPage() {
       return [];
     }
     const merged = [...selectedProvider.models];
-    for (const entry of discovered[selectedProvider.id] ?? []) {
-      if (!merged.some((candidate) => candidate.id === entry.id)) {
-        merged.push(entry);
-      }
-    }
     if (
       selectedProvider.default_model &&
       !merged.some((candidate) => candidate.id === selectedProvider.default_model)
@@ -220,7 +219,7 @@ export function ChatPage() {
       });
     }
     return merged;
-  }, [selectedProvider, discovered]);
+  }, [selectedProvider]);
 
   useEffect(() => {
     if (providers.loading || !providers.data) {
@@ -256,6 +255,26 @@ export function ChatPage() {
     });
   }, [selectedProvider, modelOptions]);
 
+  const modelReady = model.trim().length > 0;
+  const missingSecret =
+    selectedProvider !== null &&
+    selectedProvider.kind !== "ollama" &&
+    !selectedProvider.has_secret &&
+    !selectedProvider.secret_stored;
+  const availability = providerAvailability({
+    provider: selectedProvider,
+    model,
+    loading: providers.loading,
+    error: providers.error !== null,
+  });
+  const sendBlocked = !selectedProvider
+    ? t("chat.send_no_provider")
+    : missingSecret
+      ? t("chat.send_missing_key", { provider: selectedProvider.label })
+      : !modelReady
+        ? t("chat.send_no_model")
+        : null;
+
   const persistDefaultModel = async (targetProviderId: string, value: string) => {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -276,30 +295,12 @@ export function ChatPage() {
     }
   };
 
-  const handleModelChange = (value: string) => {
+  const handleModelChange = (value: string, commit = false) => {
     setModel(value);
-    if (selectedProvider && value.trim().length > 0) {
+    setComposerAlert(null);
+    if (commit && selectedProvider && value.trim().length > 0) {
       void persistDefaultModel(selectedProvider.id, value);
     }
-  };
-
-  const discoverModels = async () => {
-    if (!selectedProvider) {
-      return;
-    }
-    const target = selectedProvider;
-    const found = await discover.run(() => api.providers.models(target.id));
-    if (!found) {
-      return;
-    }
-    setDiscovered((current) => ({ ...current, [target.id]: found }));
-    setNotice({
-      text:
-        found.length === 0
-          ? t("chat.discover_empty")
-          : t("chat.discovered", { count: found.length }),
-      tone: found.length === 0 ? "warning" : "success",
-    });
   };
 
   // ------------------------------------------------------------------- fils
@@ -339,6 +340,19 @@ export function ChatPage() {
     selectedThreadRef.current = threadId;
     setSelectedThreadIdState(threadId);
     setSelectedThreadSnapshot(thread);
+  };
+
+  const handleProviderChange = (nextId: string) => {
+    const next = enabledProviders.find((entry) => entry.id === nextId) ?? null;
+    // Contrat : seul le couple {providerId, model} change, jamais le fil ni les
+    // messages (voir `changeProviderSelection` et `ux.test.ts`).
+    const selection = changeProviderSelection(
+      { providerId, model, threadId: selectedThreadId, messages },
+      next,
+    );
+    setProviderId(selection.providerId);
+    setModel(selection.model);
+    setComposerAlert(null);
   };
 
   const createThreadAction = useAction();
@@ -609,9 +623,33 @@ export function ChatPage() {
   const sendAction = useAction();
   const cancelAction = useAction();
   const [prompt, setPrompt] = useState("");
+  const [composerAlert, setComposerAlert] = useState<{
+    tone: "warning" | "danger";
+    text: string;
+  } | null>(null);
+
+  // Le drawer de configuration est un état pur (testé dans `ux.test.ts`) :
+  // l'ouvrir ne démonte jamais la conversation qui reste derrière.
+  const [drawer, dispatchDrawer] = useReducer(
+    providerDrawerReducer,
+    INITIAL_PROVIDER_DRAWER_STATE,
+  );
+  const openDrawer = useCallback(() => dispatchDrawer({ type: "open" }), []);
+  const closeDrawer = useCallback(() => dispatchDrawer({ type: "close" }), []);
+  const toggleDrawerSection = useCallback(
+    (section: ProviderDrawerSection) =>
+      dispatchDrawer({ type: "toggle_section", section }),
+    [],
+  );
+  const selectDrawerSection = useCallback(
+    (section: ProviderDrawerSection) =>
+      dispatchDrawer({ type: "select_section", section }),
+    [],
+  );
 
   // -------------------------------------------------- contexte et mentions @
   const [chips, setChips] = useState<ContextChip[]>([]);
+  const [contextOpen, setContextOpen] = useState(false);
   const [allowSensitiveContext, setAllowSensitiveContext] = useState(false);
   const [sensitiveConfirm, setSensitiveConfirm] = useState(false);
   const [mentionResults, setMentionResults] = useState<FileMatch[]>([]);
@@ -728,6 +766,19 @@ export function ChatPage() {
   const chipPaths = useMemo(() => extractContextPaths(chips), [chips]);
   const chipKey = chipPaths.join("\n");
   const debouncedChipKey = useDebouncedValue(chipKey, 300);
+
+  // Replié par défaut sans contexte ; s'ouvre dès qu'un fichier est joint.
+  const previousChipCount = useRef(0);
+  useEffect(() => {
+    const count = chipPaths.length;
+    if (count > previousChipCount.current) {
+      setContextOpen(true);
+    }
+    if (count === 0) {
+      setContextOpen(false);
+    }
+    previousChipCount.current = count;
+  }, [chipPaths.length]);
 
   useEffect(() => {
     if (!project) {
@@ -945,6 +996,12 @@ export function ChatPage() {
     if (prompt.trim().length === 0) {
       return;
     }
+    // L'absence de clé/modèle n'est plus un bandeau permanent : on explique
+    // l'action impossible au moment précis de l'envoi.
+    if (sendBlocked) {
+      setComposerAlert({ tone: "warning", text: sendBlocked });
+      return;
+    }
     await sendTurn(prompt);
   };
 
@@ -1117,7 +1174,6 @@ export function ChatPage() {
     stream.status === "streaming" ||
     (activeTurn !== null && !activeTurn.finished) ||
     sendAction.busy;
-  const modelReady = model.trim().length > 0;
   const finalPending =
     stream.status === "done" &&
     stream.threadId === selectedThreadId &&
@@ -1154,13 +1210,6 @@ export function ChatPage() {
   }
 
   const list = threads.data ?? [];
-  const discoveredForProvider = selectedProvider
-    ? discovered[selectedProvider.id] ?? []
-    : [];
-  const needsDiscovery =
-    selectedProvider !== null &&
-    selectedProvider.models.length === 0 &&
-    discoveredForProvider.length === 0;
   const freeModelInput = selectedProvider?.kind === "ollama" && modelOptions.length === 0;
   const modelSelectOptions =
     model.trim().length > 0 && !modelOptions.some((entry) => entry.id === model)
@@ -1181,12 +1230,6 @@ export function ChatPage() {
     ? enabledProviders.find((entry) => entry.id === activeThread.providerId) ?? selectedProvider
     : selectedProvider;
   const headerModel = activeThread?.model ?? model;
-  const missingSecret =
-    selectedProvider !== null &&
-    selectedProvider.kind !== "ollama" &&
-    !selectedProvider.has_secret;
-  const integratedEnabled = enabledProviders.filter((entry) => !entry.custom);
-  const customEnabled = enabledProviders.filter((entry) => entry.custom);
 
   const optimisticTurn = activeTurn?.threadId === selectedThreadId ? activeTurn : null;
   const showOptimisticUser =
@@ -1303,75 +1346,67 @@ export function ChatPage() {
           <>
             <button
               type="button"
-              className="ghost"
+              className="icon-button"
               onClick={() => {
                 threads.reload();
                 providers.reload();
                 void refreshActive();
               }}
+              title={t("common.refresh")}
+              aria-label={t("common.refresh")}
             >
               <RefreshCw size={15} aria-hidden="true" />
-              {t("common.refresh")}
             </button>
             <button
               type="button"
-              className="ghost"
+              className="icon-button"
               onClick={ws.toggleExplorer}
               aria-pressed={ws.layout.explorer_visible}
+              title={
+                ws.layout.explorer_visible
+                  ? t("workspace.hide_explorer")
+                  : t("workspace.show_explorer")
+              }
+              aria-label={
+                ws.layout.explorer_visible
+                  ? t("workspace.hide_explorer")
+                  : t("workspace.show_explorer")
+              }
             >
               <PanelLeft size={15} aria-hidden="true" />
-              {ws.layout.explorer_visible
-                ? t("workspace.hide_explorer")
-                : t("workspace.show_explorer")}
             </button>
             <button
               type="button"
-              className="ghost"
+              className="icon-button"
               onClick={ws.toggleBottom}
               aria-expanded={ws.layout.bottom_open}
               aria-controls="workspace-bottom-panel"
+              title={
+                ws.layout.bottom_open
+                  ? t("workspace.hide_bottom")
+                  : t("workspace.show_bottom")
+              }
+              aria-label={
+                ws.layout.bottom_open
+                  ? t("workspace.hide_bottom")
+                  : t("workspace.show_bottom")
+              }
             >
               <PanelBottom size={15} aria-hidden="true" />
-              {ws.layout.bottom_open
-                ? t("workspace.hide_bottom")
-                : t("workspace.show_bottom")}
             </button>
-            <button type="button" className="ghost" onClick={ws.resetLayout}>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={ws.resetLayout}
+              title={t("workspace.reset_layout")}
+              aria-label={t("workspace.reset_layout")}
+            >
               <RotateCcw size={15} aria-hidden="true" />
-              {t("workspace.reset_layout")}
             </button>
           </>
         }
       />
 
-      <div className="chat-resource-bar" role="status">
-        <span className="chat-resource-item">
-          <Activity size={13} aria-hidden="true" />
-          {t("chat.active_generations", { count: activeCount ?? "—" })}
-        </span>
-        <span className="chat-resource-item" title={t("chat.last_turn")}>
-          {lastTurnLabel}
-        </span>
-        <span className="chat-resource-item" title={project.path}>
-          {t("workspace.project_label", { name: project.name })}
-        </span>
-        {activeTurn && !activeTurn.finished ? (
-          <button
-            type="button"
-            className="ghost small danger-text"
-            onClick={() => void handleStop()}
-            disabled={stopping || cancelAction.busy}
-            aria-busy={cancelAction.busy}
-          >
-            {cancelAction.busy || stopping ? <Spinner /> : <Ban size={13} aria-hidden="true" />}
-            {stopping ? t("chat.stopping") : t("chat.stop")}
-          </button>
-        ) : null}
-      </div>
-
-      {providers.error ? (
-        <ErrorBanner error={providers.error} onRetry={providers.reload} />
-      ) : null}
       {threads.error ? <ErrorBanner error={threads.error} onRetry={threads.reload} /> : null}
       {deltaListenerError ? <ErrorBanner error={deltaListenerError} /> : null}
       {doneListenerError ? <ErrorBanner error={doneListenerError} /> : null}
@@ -1383,9 +1418,6 @@ export function ChatPage() {
       {cancelAction.error ? <ErrorBanner error={cancelAction.error} /> : null}
       {saveDefault.error ? (
         <ErrorBanner error={saveDefault.error} onDismiss={() => saveDefault.setError(null)} />
-      ) : null}
-      {discover.error ? (
-        <ErrorBanner error={discover.error} onDismiss={() => discover.setError(null)} />
       ) : null}
       {streamError ? (
         <ErrorBanner
@@ -1416,7 +1448,7 @@ export function ChatPage() {
         >
           <div
             className={
-              ws.layout.conversation_width < 560 ? "workspace-chat compact" : "workspace-chat"
+              ws.layout.conversation_width < 620 ? "workspace-chat compact" : "workspace-chat"
             }
             style={{ width: ws.layout.conversation_width }}
           >
@@ -1555,6 +1587,18 @@ export function ChatPage() {
         <div className="chat-conversation-column">
           <div className="chat-mode-bar">
             <ChatModeSwitch mode={chatMode} onChange={setChatMode} />
+            <span
+              className="chat-mode-title"
+              title={
+                selectedThread
+                  ? displayThreadTitle(selectedThread.title, t("chat.default_title"))
+                  : t("chat.default_title")
+              }
+            >
+              {selectedThread
+                ? displayThreadTitle(selectedThread.title, t("chat.default_title"))
+                : t("chat.default_title")}
+            </span>
             {chatMode === "chat" && agentSession.active ? (
               <button
                 type="button"
@@ -1571,234 +1615,76 @@ export function ChatPage() {
             {chatMode === "agent" ? (
               <span className="small muted chat-mode-hint">{t("agent_mode.mode_hint")}</span>
             ) : null}
-          </div>
-
-          {chatMode === "agent" ? (
-            <AgentPanel projectId={project.id} controller={agentSession} workspace={ws} />
-          ) : providers.loading ? (
-          <section className="card chat-conversation">
-            <LoadingRow label={t("chat.providers_loading")} />
-          </section>
-        ) : enabledProviders.length === 0 ? (
-          <section className="card chat-conversation">
-            <EmptyState
-              icon={<MessagesSquare size={22} aria-hidden="true" />}
-              title={t("chat.no_providers")}
-              description={
-                <>
-                  <p>{t("chat.no_providers_hint")}</p>
-                  {providers.error ? <p>{t("chat.no_providers_error")}</p> : null}
-                </>
-              }
-              action={
-                <button type="button" className="primary" onClick={() => navigate("models")}>
-                  {t("chat.open_models")}
-                </button>
-              }
-            />
-          </section>
-        ) : (
-          <section className="card chat-conversation" aria-labelledby="chat-conversation-title">
-            <header className="chat-conversation-head">
-              <div className="chat-conversation-heading">
-                <h2 id="chat-conversation-title">
-                  {selectedThread
-                    ? displayThreadTitle(selectedThread.title, t("chat.default_title"))
-                    : t("chat.default_title")}
-                </h2>
-                <div className="chat-badges">
-                  <Badge tone="accent">
-                    {headerProvider?.label ?? t("chat.no_provider")}
-                  </Badge>
-                  {headerModel ? <Badge tone="info">{headerModel}</Badge> : null}
-                  {selectedThread ? (
-                    <span className="small muted">
-                      {formatRelativeTime(selectedThread.updated_at, locale)}
-                    </span>
-                  ) : null}
-                  {generating ? (
-                    <Badge tone="warning">
-                      <Spinner />
-                      {stopping ? t("chat.stopping") : t("chat.generating")}
-                    </Badge>
-                  ) : null}
-                </div>
-              </div>
-              <div className="button-row compact">
-                {activeThread && !activeThread.finished ? (
-                  <button
-                    type="button"
-                    className="danger small"
-                    onClick={() => void handleStop()}
-                    disabled={stopping || cancelAction.busy}
-                    aria-busy={cancelAction.busy}
-                  >
-                    {cancelAction.busy || stopping ? <Spinner /> : <Ban size={13} aria-hidden="true" />}
-                    {stopping ? t("chat.stopping") : t("chat.stop")}
-                  </button>
-                ) : null}
+            <div className="chat-mode-actions">
+              <span className="chat-mode-stats small muted" title={lastTurnLabel}>
+                <Activity size={12} aria-hidden="true" />
+                {t("chat.active_generations", { count: activeCount ?? "—" })}
+              </span>
+              {activeTurn && !activeTurn.finished ? (
                 <button
                   type="button"
-                  className="ghost small"
-                  onClick={() => {
-                    if (selectedThreadId) {
-                      void loadMessages(selectedThreadId);
-                    }
-                  }}
-                  disabled={!selectedThreadId || messagesLoading}
-                  aria-busy={messagesLoading}
+                  className="icon-button danger-text"
+                  onClick={() => void handleStop()}
+                  disabled={stopping || cancelAction.busy}
+                  aria-busy={cancelAction.busy}
+                  title={stopping ? t("chat.stopping") : t("chat.stop")}
+                  aria-label={stopping ? t("chat.stopping") : t("chat.stop")}
                 >
-                  {messagesLoading ? <Spinner /> : <RefreshCw size={13} aria-hidden="true" />}
-                  {t("chat.refresh_messages")}
+                  {cancelAction.busy || stopping ? <Spinner /> : <Ban size={14} aria-hidden="true" />}
                 </button>
-              </div>
-            </header>
-
-            <div className="chat-controls">
-              <Field label={t("chat.provider")} htmlFor="chat-provider">
-                <select
-                  id="chat-provider"
-                  className="input"
-                  value={providerId}
-                  onChange={(event) => setProviderId(event.target.value)}
-                >
-                  {providerId ? null : <option value="">{t("chat.choose_provider")}</option>}
-                  {integratedEnabled.length > 0 ? (
-                    <optgroup label={t("providers.group_integrated")}>
-                      {integratedEnabled.map((entry) => (
-                        <option key={entry.id} value={entry.id}>
-                          {entry.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ) : null}
-                  {customEnabled.length > 0 ? (
-                    <optgroup label={t("providers.group_custom")}>
-                      {customEnabled.map((entry) => (
-                        <option key={entry.id} value={entry.id}>
-                          {entry.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ) : null}
-                  {disabledProviders.length > 0 ? (
-                    <optgroup label={t("providers.group_disabled")}>
-                      {disabledProviders.map((entry) => (
-                        <option key={entry.id} value={entry.id} disabled>
-                          {entry.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ) : null}
-                </select>
-                {selectedProvider || disabledProviders.length > 0 ? (
-                  <div className="inline-status chat-provider-badges">
-                    {selectedProvider ? (
-                      <Badge tone={selectedProvider.custom ? "info" : "accent"}>
-                        {selectedProvider.custom
-                          ? t("providers.badge_custom")
-                          : t("providers.badge_integrated")}
-                      </Badge>
-                    ) : null}
-                    {disabledProviders.map((entry) => (
-                      <Badge
-                        key={entry.id}
-                        tone="warning"
-                        title={t("providers.disabled_select_hint")}
-                      >
-                        {entry.label} · {t("providers.badge_inactive")}
-                      </Badge>
-                    ))}
-                  </div>
-                ) : null}
-              </Field>
-              <Field
-                label={t("chat.model")}
-                htmlFor={freeModelInput ? "chat-model-free" : "chat-model"}
-                hint={
-                  freeModelInput
-                    ? t("chat.model_free_hint")
-                    : modelOptions.length === 0
-                      ? t("chat.no_model_hint")
-                      : t("chat.models_hint")
-                }
-              >
-                <div className="input-row chat-model-row">
-                  {freeModelInput ? (
-                    <input
-                      id="chat-model-free"
-                      className="input"
-                      value={model}
-                      placeholder={t("chat.model_free_placeholder")}
-                      onChange={(event) => setModel(event.target.value)}
-                      onBlur={() => {
-                        if (selectedProvider) {
-                          void persistDefaultModel(selectedProvider.id, model);
-                        }
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          if (selectedProvider) {
-                            void persistDefaultModel(selectedProvider.id, model);
-                          }
-                          event.currentTarget.blur();
-                        }
-                      }}
-                    />
-                  ) : (
-                    <select
-                      id="chat-model"
-                      className="input"
-                      value={model}
-                      disabled={modelSelectOptions.length === 0}
-                      onChange={(event) => handleModelChange(event.target.value)}
-                    >
-                      {model ? null : <option value="">{t("chat.choose_model")}</option>}
-                      {modelSelectOptions.map((entry) => (
-                        <option key={entry.id} value={entry.id}>
-                          {entry.label || entry.id}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {needsDiscovery ? (
-                    <button
-                      type="button"
-                      className="ghost small"
-                      onClick={() => void discoverModels()}
-                      disabled={discover.busy}
-                      aria-busy={discover.busy}
-                    >
-                      {discover.busy ? <Spinner /> : <RefreshCw size={13} aria-hidden="true" />}
-                      {discover.busy ? t("chat.discovering") : t("chat.discover")}
-                    </button>
-                  ) : null}
-                  {selectedProvider?.custom ? (
-                    <Badge tone="info">{t("providers.badge_custom")}</Badge>
-                  ) : null}
-                </div>
-              </Field>
-            </div>
-
-            {missingSecret ? (
-              <Notice tone="warning">{t("chat.provider_requires_key")}</Notice>
-            ) : null}
-            {messagesError ? (
-              <ErrorBanner
-                error={messagesError}
-                onRetry={() => {
+              ) : null}
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => {
                   if (selectedThreadId) {
                     void loadMessages(selectedThreadId);
                   }
                 }}
-              />
-            ) : null}
+                disabled={!selectedThreadId || messagesLoading}
+                aria-busy={messagesLoading}
+                title={t("chat.refresh_messages")}
+                aria-label={t("chat.refresh_messages")}
+              >
+                {messagesLoading ? <Spinner /> : <RefreshCw size={14} aria-hidden="true" />}
+              </button>
+            </div>
+          </div>
 
-            <div className="chat-message-area">
-              {messagesLoading && !hasVisibleMessages ? (
-                <LoadingRow label={t("chat.loading_messages")} />
-              ) : (
+          {chatMode === "agent" ? (
+            <AgentPanel projectId={project.id} controller={agentSession} workspace={ws} />
+          ) : (
+            <section className="card chat-conversation" aria-labelledby="chat-conversation-title">
+              <ChatProviderBar
+                providers={providers.data ?? []}
+                providerId={providerId}
+                model={model}
+                modelOptions={modelSelectOptions}
+                freeModelInput={freeModelInput}
+                loading={providers.loading}
+                availability={availability}
+                onProviderChange={handleProviderChange}
+                onModelChange={handleModelChange}
+                onOpenConfig={openDrawer}
+              />
+
+              {messagesError ? (
+                <div className="chat-inline-error">
+                  <ErrorBanner
+                    error={messagesError}
+                    onRetry={() => {
+                      if (selectedThreadId) {
+                        void loadMessages(selectedThreadId);
+                      }
+                    }}
+                  />
+                </div>
+              ) : null}
+
+              <div className="chat-message-area">
+                {messagesLoading && !hasVisibleMessages ? (
+                  <LoadingRow label={t("chat.loading_messages")} />
+                ) : null}
                 <ul
                   className="chat-message-list"
                   ref={messageListRef}
@@ -1835,207 +1721,263 @@ export function ChatPage() {
                   ) : null}
                   {finalMessage ? renderMessage(finalMessage) : null}
                 </ul>
-              )}
-              {!messagesLoading && !hasVisibleMessages ? (
-                <EmptyState
-                  icon={<MessagesSquare size={22} aria-hidden="true" />}
-                  title={t("chat.no_messages")}
-                  description={<p>{t("chat.no_messages_hint")}</p>}
-                />
-              ) : null}
-            </div>
-
-            <div className="context-bar" aria-labelledby="context-bar-title">
-              <div className="context-bar-head">
-                <span className="context-bar-title" id="context-bar-title">
-                  <AtSign size={13} aria-hidden="true" />
-                  {t("workspace.project_label", { name: project.name })}
-                </span>
-                {chipPaths.length > 0 ? (
-                  <button type="button" className="ghost small" onClick={clearContext}>
-                    <Trash2 size={12} aria-hidden="true" />
-                    {t("workspace.clear_context")}
-                  </button>
+                {!messagesLoading && !hasVisibleMessages ? (
+                  enabledProviders.length === 0 ? (
+                    <EmptyState
+                      icon={<MessagesSquare size={22} aria-hidden="true" />}
+                      title={t("chat.no_providers")}
+                      description={
+                        <>
+                          <p>{t("chat.no_providers_hint")}</p>
+                          {providers.error ? <p>{t("chat.no_providers_error")}</p> : null}
+                        </>
+                      }
+                      action={
+                        <button
+                          type="button"
+                          className="primary"
+                          onClick={() => navigate("models")}
+                        >
+                          {t("chat.open_models")}
+                        </button>
+                      }
+                    />
+                  ) : (
+                    <EmptyState
+                      icon={<MessagesSquare size={22} aria-hidden="true" />}
+                      title={t("chat.no_messages")}
+                      description={<p>{t("chat.no_messages_hint")}</p>}
+                    />
+                  )
                 ) : null}
               </div>
-              <p className="small muted">{t("workspace.context_hint")}</p>
-              {chips.length > 0 ? (
-                <ul className="context-chips" aria-label={t("workspace.context_files")}>
-                  {chips.map((chip) => (
-                    <li key={chip.path} className="context-chip">
-                      <FileCode2 size={12} aria-hidden="true" />
-                      <span className="mono small" title={chip.path}>
-                        {chip.path}
-                      </span>
-                      <span className="small muted">
-                        {chip.size !== null
-                          ? formatBytes(chip.size)
-                          : t("workspace.size_unknown")}
-                      </span>
-                      <button
-                        type="button"
-                        className="icon-button"
-                        aria-label={t("workspace.remove_context_file", { path: chip.path })}
-                        title={t("workspace.remove_context_file", { path: chip.path })}
-                        onClick={() => removeContextChip(chip.path)}
-                      >
-                        <X size={12} />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-              {allowSensitiveContext ? (
-                <div className="context-sensitive-flag">
-                  <Badge tone="warning">
-                    <ShieldAlert size={12} aria-hidden="true" />
-                    {t("workspace.sensitive_allowed")}
-                  </Badge>
-                  <button
-                    type="button"
-                    className="ghost small"
-                    onClick={() => setAllowSensitiveContext(false)}
+
+              <div className="chat-composer">
+                {mentionOpen ? (
+                  <div
+                    className="mention-pop"
+                    role="listbox"
+                    id="chat-mention-list"
+                    aria-label={t("workspace.mention_label")}
                   >
-                    {t("workspace.sensitive_revoke")}
-                  </button>
-                </div>
-              ) : null}
-              {ws.settingsError ? (
-                <p className="small danger-text">
-                  {t("workspace.settings_error", { message: ws.settingsError.message })}
-                </p>
-              ) : null}
-              {prepareBusy ? (
-                <p className="small muted" role="status">
-                  <Spinner /> {t("workspace.context_preparing")}
-                </p>
-              ) : null}
-              {prepareError ? (
-                <ErrorBanner
-                  error={prepareError}
-                  onRetry={() => setPrepareNonce((value) => value + 1)}
-                />
-              ) : null}
-              {prepared ? (
-                <div className="context-preview" aria-live="polite">
-                  <p className="small">
-                    {t("workspace.context_included", { count: prepared.files.length })} ·{" "}
-                    {t("workspace.context_bytes", {
-                      bytes: formatBytes(prepared.total_bytes),
-                    })}
-                    {ws.settings
-                      ? ` · ${t("workspace.context_budget", {
-                          max: formatBytes(ws.settings.max_total_bytes),
-                          files: ws.settings.max_files,
-                        })}`
-                      : ""}
-                  </p>
-                  {prepared.files.length === 0 ? (
-                    <p className="small muted">{t("workspace.context_none")}</p>
-                  ) : (
-                    <ul className="context-preview-list">
-                      {prepared.files.map((file) => (
-                        <li key={file.path}>
-                          <span className="mono small" title={file.path}>
-                            {file.path}
-                          </span>
-                          <span className="small muted">{formatBytes(file.bytes)}</span>
-                          {file.truncated ? (
-                            <Badge tone="warning">{t("workspace.context_truncated")}</Badge>
-                          ) : null}
-                          {file.sensitive ? (
-                            <Badge tone="warning">{t("workspace.context_sensitive")}</Badge>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {prepared.skipped.length > 0 ? (
-                    <div className="context-skipped">
-                      <p className="small">
-                        <strong>
-                          {t("workspace.context_skipped_title", {
-                            count: prepared.skipped.length,
-                          })}
-                        </strong>
+                    <div className="mention-pop-head">
+                      <span className="small muted">{t("workspace.mention_hint")}</span>
+                      {mentionLoading ? <Spinner /> : null}
+                    </div>
+                    {mentionError ? (
+                      <p className="small danger-text">{mentionError.message}</p>
+                    ) : null}
+                    {!mentionLoading && mentionResults.length === 0 && !mentionError ? (
+                      <p className="small muted">
+                        {t("workspace.mention_empty", { query: mentionToken?.query ?? "" })}
                       </p>
-                      <ul className="context-preview-list">
-                        {prepared.skipped.map((entry) => (
-                          <li key={entry.path}>
-                            <span className="mono small" title={entry.path}>
-                              {entry.path}
+                    ) : null}
+                    {mentionResults.map((match, index) => (
+                      <button
+                        key={match.path}
+                        type="button"
+                        role="option"
+                        aria-selected={index === mentionIndex}
+                        className={
+                          index === mentionIndex
+                            ? "mention-option active"
+                            : "mention-option"
+                        }
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => chooseMention(match)}
+                      >
+                        <FileCode2 size={13} aria-hidden="true" />
+                        <span className="mono small" title={match.path}>
+                          {match.path}
+                        </span>
+                        {match.excluded ? (
+                          <Badge tone="warning">{t("workspace.excluded")}</Badge>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {composerAlert ? (
+                  <div
+                    className={`chat-composer-alert chat-composer-alert-${composerAlert.tone}`}
+                    role="alert"
+                  >
+                    <span>{composerAlert.text}</span>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      onClick={() => setComposerAlert(null)}
+                      aria-label={t("common.close")}
+                      title={t("common.close")}
+                    >
+                      <X size={12} aria-hidden="true" />
+                    </button>
+                  </div>
+                ) : null}
+
+                {contextOpen ? (
+                  <div
+                    className="context-panel"
+                    id="chat-context-panel"
+                    aria-labelledby="context-panel-title"
+                  >
+                    <div className="context-bar-head">
+                      <span className="context-bar-title" id="context-panel-title">
+                        <AtSign size={13} aria-hidden="true" />
+                        {t("workspace.project_label", { name: project.name })}
+                      </span>
+                      <div className="button-row compact">
+                        {chipPaths.length > 0 ? (
+                          <button type="button" className="ghost small" onClick={clearContext}>
+                            <Trash2 size={12} aria-hidden="true" />
+                            {t("workspace.clear_context")}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="icon-button"
+                          onClick={() => setContextOpen(false)}
+                          aria-label={t("chat.collapse_context")}
+                          title={t("chat.collapse_context")}
+                        >
+                          <X size={12} aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="small muted">{t("workspace.context_hint")}</p>
+                    {chips.length > 0 ? (
+                      <ul className="context-chips" aria-label={t("workspace.context_files")}>
+                        {chips.map((chip) => (
+                          <li key={chip.path} className="context-chip">
+                            <FileCode2 size={12} aria-hidden="true" />
+                            <span className="mono small" title={chip.path}>
+                              {chip.path}
                             </span>
-                            <span className="small muted">{entry.reason}</span>
+                            <span className="small muted">
+                              {chip.size !== null
+                                ? formatBytes(chip.size)
+                                : t("workspace.size_unknown")}
+                            </span>
+                            <button
+                              type="button"
+                              className="icon-button"
+                              aria-label={t("workspace.remove_context_file", { path: chip.path })}
+                              title={t("workspace.remove_context_file", { path: chip.path })}
+                              onClick={() => removeContextChip(chip.path)}
+                            >
+                              <X size={12} />
+                            </button>
                           </li>
                         ))}
                       </ul>
-                      {sensitiveSkipped.length > 0 && !allowSensitiveContext ? (
+                    ) : null}
+                    {allowSensitiveContext ? (
+                      <div className="context-sensitive-flag">
+                        <Badge tone="warning">
+                          <ShieldAlert size={12} aria-hidden="true" />
+                          {t("workspace.sensitive_allowed")}
+                        </Badge>
                         <button
                           type="button"
                           className="ghost small"
-                          onClick={() => setSensitiveConfirm(true)}
+                          onClick={() => setAllowSensitiveContext(false)}
                         >
-                          <ShieldAlert size={12} aria-hidden="true" />
-                          {t("workspace.include_sensitive")}
+                          {t("workspace.sensitive_revoke")}
                         </button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="chat-composer">
-              {mentionOpen ? (
-                <div
-                  className="mention-pop"
-                  role="listbox"
-                  id="chat-mention-list"
-                  aria-label={t("workspace.mention_label")}
-                >
-                  <div className="mention-pop-head">
-                    <span className="small muted">{t("workspace.mention_hint")}</span>
-                    {mentionLoading ? <Spinner /> : null}
+                      </div>
+                    ) : null}
+                    {ws.settingsError ? (
+                      <p className="small danger-text">
+                        {t("workspace.settings_error", { message: ws.settingsError.message })}
+                      </p>
+                    ) : null}
+                    {prepareBusy ? (
+                      <p className="small muted" role="status">
+                        <Spinner /> {t("workspace.context_preparing")}
+                      </p>
+                    ) : null}
+                    {prepareError ? (
+                      <ErrorBanner
+                        error={prepareError}
+                        onRetry={() => setPrepareNonce((value) => value + 1)}
+                      />
+                    ) : null}
+                    {prepared ? (
+                      <div className="context-preview" aria-live="polite">
+                        <p className="small">
+                          {t("workspace.context_included", { count: prepared.files.length })} ·{" "}
+                          {t("workspace.context_bytes", {
+                            bytes: formatBytes(prepared.total_bytes),
+                          })}
+                          {ws.settings
+                            ? ` · ${t("workspace.context_budget", {
+                                max: formatBytes(ws.settings.max_total_bytes),
+                                files: ws.settings.max_files,
+                              })}`
+                            : ""}
+                        </p>
+                        {prepared.files.length === 0 ? (
+                          <p className="small muted">{t("workspace.context_none")}</p>
+                        ) : (
+                          <ul className="context-preview-list">
+                            {prepared.files.map((file) => (
+                              <li key={file.path}>
+                                <span className="mono small" title={file.path}>
+                                  {file.path}
+                                </span>
+                                <span className="small muted">{formatBytes(file.bytes)}</span>
+                                {file.truncated ? (
+                                  <Badge tone="warning">{t("workspace.context_truncated")}</Badge>
+                                ) : null}
+                                {file.sensitive ? (
+                                  <Badge tone="warning">{t("workspace.context_sensitive")}</Badge>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {prepared.skipped.length > 0 ? (
+                          <div className="context-skipped">
+                            <p className="small">
+                              <strong>
+                                {t("workspace.context_skipped_title", {
+                                  count: prepared.skipped.length,
+                                })}
+                              </strong>
+                            </p>
+                            <ul className="context-preview-list">
+                              {prepared.skipped.map((entry) => (
+                                <li key={entry.path}>
+                                  <span className="mono small" title={entry.path}>
+                                    {entry.path}
+                                  </span>
+                                  <span className="small muted">{entry.reason}</span>
+                                </li>
+                              ))}
+                            </ul>
+                            {sensitiveSkipped.length > 0 && !allowSensitiveContext ? (
+                              <button
+                                type="button"
+                                className="ghost small"
+                                onClick={() => setSensitiveConfirm(true)}
+                              >
+                                <ShieldAlert size={12} aria-hidden="true" />
+                                {t("workspace.include_sensitive")}
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
-                  {mentionError ? (
-                    <p className="small danger-text">{mentionError.message}</p>
-                  ) : null}
-                  {!mentionLoading && mentionResults.length === 0 && !mentionError ? (
-                    <p className="small muted">
-                      {t("workspace.mention_empty", { query: mentionToken?.query ?? "" })}
-                    </p>
-                  ) : null}
-                  {mentionResults.map((match, index) => (
-                    <button
-                      key={match.path}
-                      type="button"
-                      role="option"
-                      aria-selected={index === mentionIndex}
-                      className={
-                        index === mentionIndex
-                          ? "mention-option active"
-                          : "mention-option"
-                      }
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => chooseMention(match)}
-                    >
-                      <FileCode2 size={13} aria-hidden="true" />
-                      <span className="mono small" title={match.path}>
-                        {match.path}
-                      </span>
-                      {match.excluded ? (
-                        <Badge tone="warning">{t("workspace.excluded")}</Badge>
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              <Field label={t("chat.prompt_label")} htmlFor="chat-prompt" hint={t("chat.prompt_hint")}>
+                ) : null}
+
                 <textarea
                   id="chat-prompt"
                   ref={composerRef}
-                  className="input textarea"
-                  rows={4}
+                  className="input textarea chat-prompt"
+                  rows={3}
                   value={prompt}
                   placeholder={t("chat.prompt_placeholder")}
                   aria-label={t("chat.prompt_label")}
@@ -2045,6 +1987,7 @@ export function ChatPage() {
                   disabled={generating || selectedProvider === null}
                   onChange={(event) => {
                     setPrompt(event.target.value);
+                    setComposerAlert(null);
                     setMentionDismissed(false);
                   }}
                   onKeyDown={(event) => {
@@ -2061,37 +2004,61 @@ export function ChatPage() {
                     }
                   }}
                 />
-              </Field>
-              <div className="chat-composer-footer">
-                <span className="small muted">{t("chat.char_count", { count: prompt.length })}</span>
-                <div className="button-row compact">
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => void handleSend()}
-                    disabled={!canSend}
-                    aria-busy={sendAction.busy}
-                  >
-                    {sendAction.busy ? <Spinner /> : <Send size={14} aria-hidden="true" />}
-                    {t("chat.send")}
-                  </button>
-                  {activeTurn && !activeTurn.finished ? (
+                <div className="chat-composer-footer">
+                  <div className="composer-left">
                     <button
                       type="button"
-                      className="danger"
-                      onClick={() => void handleStop()}
-                      disabled={stopping || cancelAction.busy}
-                      aria-busy={cancelAction.busy}
+                      className={contextOpen ? "context-toggle active" : "context-toggle"}
+                      aria-expanded={contextOpen}
+                      aria-controls="chat-context-panel"
+                      onClick={() => setContextOpen((current) => !current)}
+                      title={t("chat.context_hint")}
                     >
-                      {cancelAction.busy || stopping ? <Spinner /> : <Ban size={14} aria-hidden="true" />}
-                      {stopping ? t("chat.stopping") : t("chat.stop")}
+                      <AtSign size={13} aria-hidden="true" />
+                      {t("chat.context")} · {chipPaths.length}
                     </button>
-                  ) : null}
+                    {prepareBusy ? (
+                      <span className="small muted inline-status" role="status">
+                        <Spinner />
+                        {t("workspace.context_preparing")}
+                      </span>
+                    ) : null}
+                    <span className="small muted">
+                      {t("chat.char_count", { count: prompt.length })}
+                    </span>
+                  </div>
+                  <div className="button-row compact">
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => void handleSend()}
+                      disabled={!canSend}
+                      aria-busy={sendAction.busy}
+                    >
+                      {sendAction.busy ? <Spinner /> : <Send size={14} aria-hidden="true" />}
+                      {t("chat.send")}
+                    </button>
+                    {activeTurn && !activeTurn.finished ? (
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => void handleStop()}
+                        disabled={stopping || cancelAction.busy}
+                        aria-busy={cancelAction.busy}
+                      >
+                        {cancelAction.busy || stopping ? (
+                          <Spinner />
+                        ) : (
+                          <Ban size={14} aria-hidden="true" />
+                        )}
+                        {stopping ? t("chat.stopping") : t("chat.stop")}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               </div>
-            </div>
-          </section>
-        )}
+            </section>
+          )}
         </div>
             </div>
           </div>
@@ -2102,6 +2069,7 @@ export function ChatPage() {
             min={MIN_CONVERSATION_WIDTH}
             max={Math.max(MIN_CONVERSATION_WIDTH, maxChatWidth)}
             label={t("workspace.resize_conversation")}
+            className="conversation-resizer"
             onChange={(value) => ws.updateLayout({ conversation_width: value })}
           />
 
@@ -2121,6 +2089,7 @@ export function ChatPage() {
                 min={MIN_EXPLORER_WIDTH}
                 max={Math.max(MIN_EXPLORER_WIDTH, maxExplorer)}
                 label={t("workspace.resize_explorer")}
+                className="explorer-resizer"
                 onChange={(value) => ws.updateLayout({ explorer_width: value })}
               />
             </>
@@ -2149,6 +2118,24 @@ export function ChatPage() {
         />
       </div>
       )}
+
+      <ProviderConfigDrawer
+        state={drawer}
+        providers={providers.data ?? []}
+        selectedProviderId={providerId}
+        selectedModel={model}
+        onClose={closeDrawer}
+        onSelectProvider={handleProviderChange}
+        onSelectModel={(value) => {
+          setModel(value);
+          setComposerAlert(null);
+        }}
+        onToggleSection={toggleDrawerSection}
+        onSelectSection={selectDrawerSection}
+        onReload={async () => {
+          providers.reload();
+        }}
+      />
 
       <Modal
         open={renameTarget !== null}

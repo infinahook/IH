@@ -8,12 +8,21 @@
 
 export const LAYOUT_VERSION = 1;
 
+/**
+ * Version de la disposition « UX ». Elle ne touche pas au schéma lu par le
+ * noyau (toujours `LAYOUT_VERSION`) : elle sert uniquement à migrer une fois
+ * les largeurs historiques vers la nouvelle répartition conversation-first.
+ */
+export const LAYOUT_UX_VERSION = 2;
+
 export type BottomTab = "terminal" | "git" | "problems";
 
 export const BOTTOM_TABS: readonly BottomTab[] = ["terminal", "git", "problems"];
 
 export interface WorkspaceLayout {
   version: number;
+  /** Version des valeurs par défaut (voir `migrateLayout`). */
+  ux_version: number;
   /** Projet auquel appartiennent les onglets persistés. */
   project_id: string | null;
   conversation_width: number;
@@ -33,9 +42,16 @@ export interface LayoutBounds {
   height: number;
 }
 
-export const MIN_CONVERSATION_WIDTH = 340;
-export const MIN_EDITOR_WIDTH = 360;
-export const MAX_CONVERSATION_RATIO = 0.62;
+/**
+ * La conversation est le point focal : elle occupe au moins 55 % de la zone
+ * utile par défaut. L'éditeur conserve toujours une largeur exploitable.
+ */
+export const MIN_CONVERSATION_WIDTH = 420;
+export const MIN_EDITOR_WIDTH = 320;
+/** Alias explicite : le workspace (explorateur + éditeur) ne descend pas sous 320 px. */
+export const MIN_WORKSPACE_WIDTH = MIN_EDITOR_WIDTH;
+export const MAX_CONVERSATION_RATIO = 0.78;
+export const DEFAULT_CONVERSATION_RATIO = 0.66;
 
 export const MIN_EXPLORER_WIDTH = 180;
 export const MAX_EXPLORER_WIDTH = 520;
@@ -44,10 +60,14 @@ export const MIN_BOTTOM_HEIGHT = 150;
 export const MAX_BOTTOM_RATIO = 0.6;
 export const MIN_WORKSPACE_HEIGHT = 300;
 
+/** En dessous de cette largeur de fenêtre, le workspace passe en mode replié. */
+export const COMPACT_BREAKPOINT = 1200;
+
 export const DEFAULT_LAYOUT: WorkspaceLayout = {
   version: LAYOUT_VERSION,
+  ux_version: LAYOUT_UX_VERSION,
   project_id: null,
-  conversation_width: 660,
+  conversation_width: 760,
   explorer_width: 270,
   explorer_visible: true,
   bottom_height: 240,
@@ -83,6 +103,57 @@ export function maxConversationWidth(bounds: LayoutBounds): number {
     MIN_CONVERSATION_WIDTH,
     Math.min(safe.width * MAX_CONVERSATION_RATIO, safe.width - MIN_EDITOR_WIDTH),
   );
+}
+
+/**
+ * Largeur de conversation par défaut : environ 66 % de la zone utile, sans
+ * jamais descendre sous 420 px ni affamer l'éditeur. La valeur est calculée à
+ * partir des dimensions réelles pour rester ≥ 55 % à toutes les tailles.
+ */
+export function defaultConversationWidth(bounds: LayoutBounds): number {
+  const safe = safeBounds(bounds);
+  const preferred = Math.round(safe.width * DEFAULT_CONVERSATION_RATIO);
+  return clamp(preferred, MIN_CONVERSATION_WIDTH, maxConversationWidth(safe));
+}
+
+/** Vrai quand la fenêtre est trop étroite pour garder le workspace côte à côte. */
+export function isCompactWidth(width: number): boolean {
+  const safe = finiteNumber(width);
+  return safe === null || safe < COMPACT_BREAKPOINT;
+}
+
+/**
+ * Disposition d'ouverture pour un projet sans disposition sauvegardée :
+ * conversation majoritaire et explorateur replié. Les onglets restent gérés
+ * par `useWorkspace`.
+ */
+export function defaultWorkspaceLayout(bounds: LayoutBounds): WorkspaceLayout {
+  return {
+    ...DEFAULT_LAYOUT,
+    ux_version: LAYOUT_UX_VERSION,
+    conversation_width: defaultConversationWidth(bounds),
+    explorer_visible: false,
+  };
+}
+
+/**
+ * Migration unique d'une disposition antérieure : on applique la nouvelle
+ * répartition conversation-first sans toucher aux onglets, au panneau bas ni
+ * au projet. Une disposition déjà migrée est renvoyée telle quelle.
+ */
+export function migrateLayout(
+  layout: WorkspaceLayout,
+  bounds: LayoutBounds,
+): WorkspaceLayout {
+  if (layout.ux_version >= LAYOUT_UX_VERSION) {
+    return layout;
+  }
+  return {
+    ...layout,
+    ux_version: LAYOUT_UX_VERSION,
+    conversation_width: defaultConversationWidth(bounds),
+    explorer_visible: false,
+  };
 }
 
 export function clampConversationWidth(value: number, bounds: LayoutBounds): number {
@@ -181,6 +252,10 @@ export function clampLayout(layout: WorkspaceLayout, bounds: LayoutBounds): Work
   }
   return {
     version: LAYOUT_VERSION,
+    ux_version:
+      typeof layout.ux_version === "number" && Number.isFinite(layout.ux_version)
+        ? layout.ux_version
+        : LAYOUT_UX_VERSION,
     project_id: typeof layout.project_id === "string" ? layout.project_id : null,
     conversation_width: conversationWidth,
     explorer_width: explorerWidth,
@@ -234,6 +309,8 @@ export function parseLayout(raw: string | null | undefined): WorkspaceLayout {
   const activeRaw = record.active_tab ?? record.activeTab;
   return {
     version: LAYOUT_VERSION,
+    // Une charge historique n'a pas ce champ : 0 déclenche la migration UX.
+    ux_version: readNumber(record, "ux_version", "uxVersion", 0, 0, 1000),
     project_id:
       typeof record.project_id === "string"
         ? record.project_id
@@ -276,6 +353,10 @@ export function parseLayout(raw: string | null | undefined): WorkspaceLayout {
 export function serializeLayout(layout: WorkspaceLayout): string {
   const payload: WorkspaceLayout = {
     version: LAYOUT_VERSION,
+    ux_version:
+      typeof layout.ux_version === "number" && Number.isFinite(layout.ux_version)
+        ? layout.ux_version
+        : LAYOUT_UX_VERSION,
     project_id: layout.project_id,
     conversation_width: Math.round(layout.conversation_width),
     explorer_width: Math.round(layout.explorer_width),

@@ -35,6 +35,40 @@
 - La zone de saisie défilait avec les messages : la liste défile désormais dans
   son propre conteneur et le compositeur reste ancré en bas.
 
+## 0.4.0 — Refonte UX/UI : la conversation d'abord
+
+### Problème corrigé
+Dans la colonne de conversation, les contrôles Fournisseur/Modèle, un bandeau
+d'alerte permanent et le bloc contexte occupaient ~300 px : **la liste des
+messages était écrasée à zéro** (aucun message visible malgré une conversation
+existante).
+
+### Changements
+- **Barre compacte 46 px** dans l'en-tête : `[Provider ▼] [Model ▼] [pastille] [⚙]`.
+  Plus de libellés empilés, plus de bouton « Découvrir » dans la colonne.
+- **Plus aucun bandeau permanent** : clé manquante, modèle absent, provider
+  désactivé deviennent une pastille avec infobulle ; le blocage s'affiche au
+  moment de l'envoi.
+- **Contexte repliable** (`Contexte · N`) en overlay dans le composer, replié
+  par défaut.
+- **Drawer de configuration** (420 px, ✕/Échap/clic extérieur) : Providers,
+  Models, API Endpoints, API Keys, Avancé — la conversation reste montée et un
+  streaming continue pendant la configuration.
+- **Settings → Providers en maître/détail** : liste compacte à gauche, détail et
+  modèles à droite ; plus de tableau géant.
+- **Layout conversation-first** : 66 % par défaut, explorateur replié, bornes
+  420/320 px, migration des anciennes dispositions, mode compact < 1200 px,
+  `overflow-x: hidden`.
+- Messages pleine largeur, liste en `flex: 1` avec scroll interne, composer
+  ancré et borné.
+
+### Tests
+- Frontend : **156 tests** (13 nouveaux : répartition, bornes, mode compact,
+  pastille de disponibilité, drawer, conservation de la conversation au
+  changement de provider).
+- Vérification visuelle réelle : captures avant/après dans
+  `docs/screenshots/ux-before.png`, `ux-after.png`, `ux-drawer.png`.
+
 ## 0.3.0 — Fournisseurs personnalisés et endpoints API
 
 ### Ajouté
