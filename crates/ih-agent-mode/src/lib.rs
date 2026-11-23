@@ -108,7 +108,23 @@ pub fn probe_version(program: &Path) -> Option<String> {
     // Répertoire neutre : un CLI qui écrirait pendant `--version` ne doit pas
     // toucher au projet ni au répertoire courant d'IH.
     let neutral = std::env::temp_dir().join("ih-version-probe");
-    let _ = std::fs::create_dir_all(&neutral);
+    // Répertoire neutre garanti : si sa création échoue (TMPDIR exotique en CI),
+    // on retombe sur le répertoire temporaire lui-même, puis sur le parent du
+    // programme — un `current_dir` invalide ferait échouer le spawn.
+    if std::fs::create_dir_all(&neutral).is_err() || !neutral.is_dir() {
+        let fallback = std::env::temp_dir();
+        if fallback.is_dir() {
+            std::fs::create_dir_all(&neutral).ok();
+        }
+    }
+    let neutral = if neutral.is_dir() {
+        neutral
+    } else {
+        program
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_path_buf()
+    };
     let mut child = Command::new(program)
         .arg("--version")
         .current_dir(&neutral)
@@ -482,7 +498,17 @@ mod tests {
         ];
         let reports = detect_adapters(&configs);
         assert!(reports[0].detected);
-        assert_eq!(reports[0].version.as_deref(), Some("fake-agent 1.2.3"));
+        assert_eq!(
+            reports[0].version.as_deref(),
+            Some("fake-agent 1.2.3"),
+            "diagnostic={:?} chemin={:?} exécutable={:?}",
+            reports[0].diagnostic,
+            reports[0].path,
+            std::fs::metadata(&script).map(|m| {
+                use std::os::unix::fs::PermissionsExt;
+                m.permissions().mode() & 0o111
+            })
+        );
         assert!(reports[0].capabilities.contains(&"annulation".to_string()));
         assert!(reports[1].detected);
         assert!(
