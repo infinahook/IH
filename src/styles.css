@@ -4998,3 +4998,11 @@ body,
   border: 1px solid var(--border);
   border-radius: 7px;
 }
+
+/* Le rappel de mode ne doit pas être comprimé dans une colonne étroite :
+   on le masque sous 1400 px (l'information reste dans l'infobulle du sélecteur). */
+@media (max-width: 1400px) {
+  .chat-mode-hint {
+    display: none;
+  }
+}

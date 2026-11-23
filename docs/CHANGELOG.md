@@ -35,6 +35,41 @@
 - La zone de saisie défilait avec les messages : la liste défile désormais dans
   son propre conteneur et le compositeur reste ancré en bas.
 
+## 0.5.2 — Team Mode : validation graphique et fiabilisation
+
+### Corrigé (découvert dans l'application réelle)
+- **Ordre d'exécution non topologique** : `TaskGraph::iter()` suivait les
+  identifiants aléatoires (Lead parfois en dernier, Reviewer avant un Worker).
+  Nouvel ordre `Lead → Workers → Reviewer` respectant les dépendances, utilisé
+  pour l'exécution, la persistance et le plan affiché ; test dédié.
+- **Interface figée pendant une course** (« IH ne répond pas ») : `team_run`
+  bloquait le thread principal. Commande déportée sur un thread de travail.
+- **Texte d'aide obsolète** sur les exécutants (le même agent peut tenir
+  plusieurs rôles).
+- **Rappel de mode comprimé** en fenêtre étroite (masqué sous 1400 px).
+
+### Ajouté
+- `team_fingerprint` / `approval_covers` partagés entre la commande et les
+  tests ; tests d'invalidation : objectif, Lead, Workers (ordre inclus),
+  Reviewer, répertoire, empreinte d'une autre course.
+- `run_team_tasks_with_events` : les événements de tâche sont émis depuis le
+  chemin d'exécution réel ; test d'intégration vérifiant ordre, états et
+  absence de doublon.
+- Validation graphique réelle documentée (captures `team-form`,
+  `team-approval`, `team-progress`, `team-review`, `team-small-window`).
+
+### Validé en conditions réelles
+Parcours complet dans l'application sur Zorin OS : bascule Équipe, sélection
+des agents détectés, même CLI multi-rôles, approbation avec plan et empreinte,
+progression live réactive, résumé, revue des diffs, rejet sans écriture,
+acceptation avec sauvegarde, fenêtre 1280×800.
+
+### Non validé
+Expiration du TTL d'approbation en conditions réelles, réutilisation d'une
+approbation consommée via l'interface, worktree indisponible, fichier modifié
+extérieurement avant acceptation. Reprise, annulation et parallélisme ne sont
+pas implémentés.
+
 ## 0.5.1 — Team Mode : validation réelle et correctifs
 
 ### Corrigé

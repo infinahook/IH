@@ -10,9 +10,7 @@
 
 use super::project_path;
 use crate::state::{AppState, PendingDiff};
-use ih_agent_mode::{
-    action_fingerprint, collect_changes, create_sandbox, remove_sandbox, MAX_CHANGE_BYTES,
-};
+use ih_agent_mode::{collect_changes, create_sandbox, remove_sandbox, MAX_CHANGE_BYTES};
 use ih_core::events::TaskState;
 use ih_core::TaskId;
 use ih_core::{IhError, IhResult, ProjectId};
@@ -43,13 +41,13 @@ fn default_workers() -> usize {
 
 /// Empreinte de la course : toute modification invalide l'approbation.
 fn fingerprint(request: &TeamRequest, root: &std::path::Path) -> IhResult<String> {
-    let agents = format!(
-        "{}|{}|{}",
-        request.lead,
-        request.workers.join(","),
-        request.reviewer.clone().unwrap_or_default()
-    );
-    Ok(action_fingerprint("team", &agents, root, &request.goal))
+    Ok(ih_agent_mode::team_fingerprint(
+        &request.goal,
+        &request.lead,
+        &request.workers,
+        request.reviewer.as_deref(),
+        root,
+    ))
 }
 
 fn build_team(request: &TeamRequest, config: &ih_core::config::AppConfig) -> IhResult<Team> {
@@ -94,6 +92,7 @@ pub fn team_request_approval(
     let fingerprint = fingerprint(&request, &root)?;
     let summary = plan
         .graph
+        .topological_order()
         .iter()
         .map(|node| format!("- [{}] {}", node.role.as_str(), node.title))
         .collect::<Vec<_>>()
@@ -139,7 +138,7 @@ pub struct TeamRunResult {
 }
 
 /// Exécute la course : une session d'agent par tâche, dans un worktree unique.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn team_run(
     state: State<'_, AppState>,
     request: TeamRequest,
@@ -159,7 +158,7 @@ pub fn team_run(
         .approvals
         .get(&approval_id)?
         .ok_or_else(|| IhError::NotFound(format!("approbation {approval_id}")))?;
-    if !pending.detail.contains(&expected) {
+    if !ih_agent_mode::approval_covers(&pending.detail, &expected) {
         return Err(IhError::Denied(
             "l'approbation ne correspond pas à cet objectif ou à ces agents".into(),
         ));
@@ -173,7 +172,7 @@ pub fn team_run(
 
     // Tâches persistées d'abord, puis exécution réelle (une session par tâche).
     let mut store_ids: Vec<(String, String)> = Vec::new();
-    for node in plan.graph.iter() {
+    for node in plan.graph.topological_order() {
         let store_task = state.store.create_task(&ih_store::NewTask {
             project_id: project.clone(),
             title: node.title.clone(),
@@ -191,13 +190,28 @@ pub fn team_run(
         .map(|a| a.timeout_secs)
         .max()
         .unwrap_or(1_800);
-    let outcomes = ih_agent_mode::run_team_tasks(
+    let app = state.app_handle.clone();
+    let run_for_events = run_id.clone();
+    let mut emit = |outcome: &ih_agent_mode::TeamTaskOutcome| {
+        let _ = app.emit(
+            "ih://team-event",
+            serde_json::json!({
+                "run_id": run_for_events,
+                "task_id": outcome.task_id,
+                "title": outcome.title,
+                "role": outcome.role,
+                "state": outcome.state,
+            }),
+        );
+    };
+    let outcomes = ih_agent_mode::run_team_tasks_with_events(
         &state.supervisor,
         &sandbox,
         &config,
         &plan,
         &request.goal,
         std::time::Duration::from_secs(max_timeout + 30),
+        &mut emit,
     )?;
 
     let mut results: Vec<TeamTaskResult> = Vec::new();

@@ -1331,7 +1331,7 @@
     "goal_placeholder": "Ex. : ajouter la validation des paramètres TOML avec des tests.",
     "lead_hint": "Le lead analyse l'objectif et décompose le plan.",
     "reviewer_hint": "Optionnel : le lead relit par défaut.",
-    "workers_hint": "1 à 3 exécutants, distincts du lead et du relecteur.",
+    "workers_hint": "1 à 3 exécutants ; un même agent peut tenir plusieurs rôles (une session par rôle).",
     "work_items_hint": "Nombre de tâches d'exécution (1 à 4).",
     "launch_hint": "Une seule approbation couvre toute la course ; le projet n'est jamais modifié.",
     "requesting": "Demande…",

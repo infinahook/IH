@@ -576,10 +576,50 @@ pub fn run_team_tasks(
     goal: &str,
     task_timeout: Duration,
 ) -> IhResult<Vec<TeamTaskOutcome>> {
+    run_team_tasks_with_events(
+        supervisor,
+        sandbox,
+        config,
+        plan,
+        goal,
+        task_timeout,
+        &mut |_| {},
+    )
+}
+
+/// Comme [`run_team_tasks`], en notifiant chaque tâche (démarrage et fin).
+pub fn run_team_tasks_with_events(
+    supervisor: &AgentSupervisor,
+    sandbox: &Sandbox,
+    config: &AppConfig,
+    plan: &Plan,
+    goal: &str,
+    task_timeout: Duration,
+    on_task: &mut dyn FnMut(&TeamTaskOutcome),
+) -> IhResult<Vec<TeamTaskOutcome>> {
     let mut outcomes = Vec::new();
     let mut aborted = false;
-    for node in plan.graph.iter() {
+    // `iter()` suit les identifiants : l'ordre d'exécution vient du tri
+    // topologique (lead, puis workers, puis reviewer).
+    for node in plan.graph.topological_order() {
+        let started = TeamTaskOutcome {
+            task_id: node.id.to_string(),
+            title: node.title.clone(),
+            role: node.role.as_str().to_string(),
+            agent_id: node.assignee.clone().unwrap_or_default(),
+            state: "running".into(),
+        };
+        on_task(&started);
+
         if aborted {
+            let cancelled = TeamTaskOutcome {
+                task_id: node.id.to_string(),
+                title: node.title.clone(),
+                role: node.role.as_str().to_string(),
+                agent_id: node.assignee.clone().unwrap_or_default(),
+                state: "cancelled".into(),
+            };
+            on_task(&cancelled);
             outcomes.push(TeamTaskOutcome {
                 task_id: node.id.to_string(),
                 title: node.title.clone(),
@@ -634,13 +674,125 @@ pub fn run_team_tasks(
         if state != "completed" {
             aborted = true;
         }
-        outcomes.push(TeamTaskOutcome {
+        let finished = TeamTaskOutcome {
             task_id: node.id.to_string(),
             title: node.title.clone(),
             role: node.role.as_str().to_string(),
             agent_id,
             state: state.into(),
-        });
+        };
+        on_task(&finished);
+        outcomes.push(finished);
     }
     Ok(outcomes)
+}
+
+// ---------------------------------------------------------------------------
+// Empreinte d'approbation d'une course d'équipe.
+// ---------------------------------------------------------------------------
+
+/// Empreinte couvrant **tous** les paramètres qui changent l'exécution :
+/// objectif, lead, workers (ordre inclus), relecteur et répertoire de travail.
+pub fn team_fingerprint(
+    goal: &str,
+    lead: &str,
+    workers: &[String],
+    reviewer: Option<&str>,
+    project_root: &std::path::Path,
+) -> String {
+    let agents = format!(
+        "lead={lead}|workers={}|reviewer={}",
+        workers.join(","),
+        reviewer.unwrap_or("")
+    );
+    action_fingerprint("team", &agents, project_root, goal)
+}
+
+/// Vrai si le détail d'approbation contient exactement cette empreinte.
+pub fn approval_covers(detail: &str, fingerprint: &str) -> bool {
+    !fingerprint.is_empty() && detail.contains(fingerprint)
+}
+
+#[cfg(test)]
+mod team_fingerprint_tests {
+    use super::{approval_covers, team_fingerprint};
+    use std::path::Path;
+
+    fn fp(goal: &str, lead: &str, workers: &[&str], reviewer: Option<&str>, root: &str) -> String {
+        let workers: Vec<String> = workers.iter().map(|w| w.to_string()).collect();
+        team_fingerprint(goal, lead, &workers, reviewer, Path::new(root))
+    }
+
+    #[test]
+    fn toute_modification_change_lempreinte() {
+        let base = fp("objectif", "opencode", &["pi"], Some("pi"), "/tmp/projet");
+        assert_ne!(
+            base,
+            fp(
+                "objectif modifié",
+                "opencode",
+                &["pi"],
+                Some("pi"),
+                "/tmp/projet"
+            )
+        );
+        assert_ne!(
+            base,
+            fp("objectif", "claude", &["pi"], Some("pi"), "/tmp/projet")
+        );
+        assert_ne!(
+            base,
+            fp(
+                "objectif",
+                "opencode",
+                &["codex"],
+                Some("pi"),
+                "/tmp/projet"
+            )
+        );
+        assert_ne!(
+            base,
+            fp(
+                "objectif",
+                "opencode",
+                &["pi", "codex"],
+                Some("pi"),
+                "/tmp/projet"
+            )
+        );
+        assert_ne!(
+            base,
+            fp(
+                "objectif",
+                "opencode",
+                &["pi"],
+                Some("opencode"),
+                "/tmp/projet"
+            )
+        );
+        assert_ne!(
+            base,
+            fp("objectif", "opencode", &["pi"], None, "/tmp/projet")
+        );
+        assert_ne!(
+            base,
+            fp("objectif", "opencode", &["pi"], Some("pi"), "/tmp/autre")
+        );
+        // Déterministe à paramètres égaux.
+        assert_eq!(
+            base,
+            fp("objectif", "opencode", &["pi"], Some("pi"), "/tmp/projet")
+        );
+    }
+
+    #[test]
+    fn une_approbation_ne_couvre_que_son_empreinte() {
+        let detail = "Objectif : x\nEmpreinte : abc123\n";
+        assert!(approval_covers(detail, "abc123"));
+        assert!(!approval_covers(detail, "def456"));
+        assert!(!approval_covers(detail, ""));
+        // Le détail d'une autre course ne couvre pas cette empreinte.
+        let other = "Objectif : y\nEmpreinte : zzz999\n";
+        assert!(!approval_covers(other, "abc123"));
+    }
 }

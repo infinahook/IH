@@ -1331,7 +1331,7 @@
     "goal_placeholder": "E.g. add TOML parameter validation with tests.",
     "lead_hint": "The lead analyses the goal and breaks down the plan.",
     "reviewer_hint": "Optional: the lead reviews by default.",
-    "workers_hint": "1 to 3 workers, distinct from the lead and reviewer.",
+    "workers_hint": "1 to 3 workers; the same agent may hold several roles (one session per role).",
     "work_items_hint": "Number of work items (1 to 4).",
     "launch_hint": "A single approval covers the whole run; the project is never modified.",
     "requesting": "Requesting…",

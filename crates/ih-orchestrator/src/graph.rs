@@ -105,6 +105,54 @@ impl TaskGraph {
         self.nodes.values()
     }
 
+    /// Ordre d'exécution : dépendances d'abord, puis Lead, Workers, Reviewer.
+    ///
+    /// `iter()` suit l'ordre des clés (identifiants aléatoires) : il n'est pas
+    /// exécutable tel quel. Ce tri garantit qu'aucune tâche ne précède une
+    /// dépendance et que la relecture reste en dernier.
+    pub fn topological_order(&self) -> Vec<&TaskNode> {
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+        let mut remaining: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut children: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for (id, node) in &self.nodes {
+            remaining.insert(id.as_str(), node.depends_on.len());
+            for dep in &node.depends_on {
+                children.entry(dep.as_str()).or_default().push(id.as_str());
+            }
+        }
+        let priority = |node: &TaskNode| match node.role {
+            TeamRole::Lead => 0u8,
+            TeamRole::Worker => 1,
+            TeamRole::Reviewer => 2,
+        };
+        let mut ready: BinaryHeap<Reverse<(u8, String)>> = remaining
+            .iter()
+            .filter(|(_, count)| **count == 0)
+            .filter_map(|(id, _)| self.nodes.get(*id))
+            .map(|node| Reverse((priority(node), node.id.to_string())))
+            .collect();
+        let mut ordered = Vec::with_capacity(self.nodes.len());
+        while let Some(Reverse((_, id))) = ready.pop() {
+            if let Some(node) = self.nodes.get(&id) {
+                ordered.push(node);
+            }
+            if let Some(dependents) = children.get(id.as_str()) {
+                for child in dependents {
+                    if let Some(count) = remaining.get_mut(*child) {
+                        *count -= 1;
+                        if *count == 0 {
+                            if let Some(node) = self.nodes.get(*child) {
+                                ready.push(Reverse((priority(node), node.id.to_string())));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        ordered
+    }
+
     /// Vérifie que chaque dépendance existe et qu'il n'existe aucun cycle.
     pub fn validate(&self) -> IhResult<()> {
         for node in self.nodes.values() {
