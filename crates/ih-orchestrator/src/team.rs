@@ -51,18 +51,14 @@ impl Team {
                 "max_parallel d'équipe doit être entre 1 et 4".into(),
             ));
         }
-        let mut ids = std::collections::BTreeSet::new();
         for member in &self.members {
             if member.agent_id.trim().is_empty() {
                 return Err(IhError::Invalid("membre d'équipe sans agent".into()));
             }
-            if !ids.insert(member.agent_id.as_str()) {
-                return Err(IhError::Config(format!(
-                    "agent présent deux fois dans l'équipe : {}",
-                    member.agent_id
-                )));
-            }
         }
+        // Un même CLI peut tenir plusieurs rôles : chaque rôle exécute ses
+        // propres sessions. Avec un seul agent installé, l'équipe doit rester
+        // utilisable (lead + workers + reviewer sur le même adaptateur).
         Ok(())
     }
 
@@ -242,10 +238,12 @@ mod tests {
         };
         assert!(invalid.validate().is_err());
 
-        let duplicate = Team::new("x")
+        // Un seul CLI installé : le même agent peut couvrir plusieurs rôles.
+        let same_agent = Team::new("x")
             .with_member("a", TeamRole::Lead)
-            .with_member("a", TeamRole::Worker);
-        assert!(duplicate.validate().is_err());
+            .with_member("a", TeamRole::Worker)
+            .with_member("a", TeamRole::Reviewer);
+        same_agent.validate().unwrap();
     }
 
     #[test]

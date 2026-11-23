@@ -34,6 +34,8 @@ pub enum AgentKind {
     Codex,
     GeminiCli,
     Opencode,
+    /// `pi` — assistant de code avec outils read/bash/edit/write.
+    Pi,
     Custom,
 }
 
@@ -364,6 +366,14 @@ fn default_agents() -> Vec<AgentConfig> {
             enabled: true,
             ..Default::default()
         },
+        AgentConfig {
+            id: "pi".into(),
+            kind: AgentKind::Pi,
+            label: "pi".into(),
+            program: "pi".into(),
+            enabled: true,
+            ..Default::default()
+        },
     ]
 }
 
@@ -679,7 +689,7 @@ mod tests {
         config.validate().unwrap();
         assert_eq!(config.locale, "fr");
         assert_eq!(config.providers.len(), 5);
-        assert_eq!(config.agents.len(), 4);
+        assert_eq!(config.agents.len(), 5);
         assert!(config.providers.iter().all(|p| !p.has_secret));
     }
 

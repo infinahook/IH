@@ -517,3 +517,104 @@ mod tests {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Exécution d'une équipe : une session d'agent réelle par tâche, dans un
+// worktree unique. Extrait du commanditaire Tauri pour rester testable.
+// ---------------------------------------------------------------------------
+
+use ih_agents::{AgentSupervisor, StartRequest};
+use ih_core::config::AppConfig;
+use ih_core::events::AgentState;
+use ih_orchestrator::Plan;
+
+/// Résultat d'une tâche d'équipe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamTaskOutcome {
+    pub task_id: String,
+    pub title: String,
+    pub role: String,
+    pub agent_id: String,
+    pub state: String,
+}
+
+/// Exécute les tâches du plan, dans l'ordre fourni, dans `sandbox`.
+///
+/// S'arrête à la première erreur ; les tâches suivantes sont marquées
+/// `cancelled`. Chaque tâche lance **sa propre session** (aucun mock).
+pub fn run_team_tasks(
+    supervisor: &AgentSupervisor,
+    sandbox: &Sandbox,
+    config: &AppConfig,
+    plan: &Plan,
+    goal: &str,
+    task_timeout: Duration,
+) -> IhResult<Vec<TeamTaskOutcome>> {
+    let mut outcomes = Vec::new();
+    let mut aborted = false;
+    for node in plan.graph.iter() {
+        if aborted {
+            outcomes.push(TeamTaskOutcome {
+                task_id: node.id.to_string(),
+                title: node.title.clone(),
+                role: node.role.as_str().to_string(),
+                agent_id: node.assignee.clone().unwrap_or_default(),
+                state: "cancelled".into(),
+            });
+            continue;
+        }
+        let agent_id = node
+            .assignee
+            .clone()
+            .ok_or_else(|| IhError::Invalid(format!("tâche sans agent : {}", node.title)))?;
+        let agent = config
+            .agent(&agent_id)
+            .ok_or_else(|| IhError::NotFound(format!("agent {agent_id}")))?;
+        let adapter = AgentAdapter::from_config(agent);
+        if adapter.detection().is_none() {
+            aborted = true;
+            outcomes.push(TeamTaskOutcome {
+                task_id: node.id.to_string(),
+                title: node.title.clone(),
+                role: node.role.as_str().to_string(),
+                agent_id,
+                state: "failed".into(),
+            });
+            continue;
+        }
+        let prompt = format!(
+            "Rôle : {}\nObjectif global : {}\nTâche : {}\n\n{}",
+            node.role.as_str(),
+            goal,
+            node.title,
+            node.description
+        );
+        let state = match supervisor.start(StartRequest {
+            agent: adapter,
+            project_dir: sandbox.workdir().to_path_buf(),
+            prompt,
+            session_id: None,
+        }) {
+            Ok(session) => supervisor
+                .wait(&session, task_timeout)
+                .unwrap_or(AgentState::Failed),
+            Err(_) => AgentState::Failed,
+        };
+        let state = match state {
+            AgentState::Completed => "completed",
+            AgentState::Cancelled => "cancelled",
+            _ => "failed",
+        };
+        if state != "completed" {
+            aborted = true;
+        }
+        outcomes.push(TeamTaskOutcome {
+            task_id: node.id.to_string(),
+            title: node.title.clone(),
+            role: node.role.as_str().to_string(),
+            agent_id,
+            state: state.into(),
+        });
+    }
+    Ok(outcomes)
+}

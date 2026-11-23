@@ -13,8 +13,8 @@ use crate::state::{AppState, PendingDiff};
 use ih_agent_mode::{
     action_fingerprint, collect_changes, create_sandbox, remove_sandbox, MAX_CHANGE_BYTES,
 };
-use ih_agents::{AgentAdapter, StartRequest};
-use ih_core::events::{AgentState, TaskState};
+use ih_core::events::TaskState;
+use ih_core::TaskId;
 use ih_core::{IhError, IhResult, ProjectId};
 use ih_orchestrator::{plan_goal, Team, TeamRole};
 use serde::{Deserialize, Serialize};
@@ -171,12 +171,9 @@ pub fn team_run(
     let run_id = format!("team-{}", uuid::Uuid::new_v4());
     let sandbox = create_sandbox(&root, &state.paths.data_dir().join("worktrees"), &run_id)?;
 
-    let mut results: Vec<TeamTaskResult> = Vec::new();
-    let mut aborted: Option<String> = None;
-
-    // Ordre topologique déterministe fourni par l'orchestrateur.
-    let ordered: Vec<_> = plan.graph.iter().cloned().collect();
-    for node in &ordered {
+    // Tâches persistées d'abord, puis exécution réelle (une session par tâche).
+    let mut store_ids: Vec<(String, String)> = Vec::new();
+    for node in plan.graph.iter() {
         let store_task = state.store.create_task(&ih_store::NewTask {
             project_id: project.clone(),
             title: node.title.clone(),
@@ -185,115 +182,61 @@ pub fn team_run(
             depends_on: Vec::new(),
             role: node.role.as_str().to_string(),
         })?;
-        let _ = state
-            .store
-            .update_task_state(&store_task.id, TaskState::Running);
+        store_ids.push((node.id.to_string(), store_task.id.to_string()));
+    }
+
+    let max_timeout = config
+        .agents
+        .iter()
+        .map(|a| a.timeout_secs)
+        .max()
+        .unwrap_or(1_800);
+    let outcomes = ih_agent_mode::run_team_tasks(
+        &state.supervisor,
+        &sandbox,
+        &config,
+        &plan,
+        &request.goal,
+        std::time::Duration::from_secs(max_timeout + 30),
+    )?;
+
+    let mut results: Vec<TeamTaskResult> = Vec::new();
+    for outcome in &outcomes {
+        let task_id = store_ids
+            .iter()
+            .find(|(node_id, _)| node_id == &outcome.task_id)
+            .map(|(_, id)| id.clone())
+            .unwrap_or_default();
+        let task_state = match outcome.state.as_str() {
+            "completed" => TaskState::Completed,
+            "cancelled" => TaskState::Cancelled,
+            _ => TaskState::Failed,
+        };
+        if let Ok(parsed) = TaskId::parse(&task_id) {
+            let _ = state.store.update_task_state(&parsed, task_state);
+        }
         let _ = state.app_handle.emit(
             "ih://team-event",
             serde_json::json!({
                 "run_id": run_id,
-                "task_id": node.id.to_string(),
-                "title": node.title,
-                "role": node.role.as_str(),
-                "state": "running",
+                "task_id": outcome.task_id,
+                "title": outcome.title,
+                "role": outcome.role,
+                "state": outcome.state,
             }),
         );
-
-        if aborted.is_some() {
-            let _ = state
-                .store
-                .update_task_state(&store_task.id, TaskState::Cancelled);
-            results.push(TeamTaskResult {
-                task_id: node.id.to_string(),
-                title: node.title.clone(),
-                role: node.role.as_str().to_string(),
-                state: "cancelled".into(),
-                sessions: 0,
-            });
-            continue;
-        }
-
-        let agent_id = node
-            .assignee
-            .clone()
-            .ok_or_else(|| IhError::Invalid(format!("tâche sans agent : {}", node.title)))?;
-        let agent_config = config
-            .agent(&agent_id)
-            .ok_or_else(|| IhError::NotFound(format!("agent {agent_id}")))?
-            .clone();
-        let adapter = AgentAdapter::from_config(&agent_config);
-        if adapter.detection().is_none() {
-            aborted = Some(format!("agent introuvable : {agent_id}"));
-            let _ = state
-                .store
-                .update_task_state(&store_task.id, TaskState::Failed);
-            results.push(TeamTaskResult {
-                task_id: node.id.to_string(),
-                title: node.title.clone(),
-                role: node.role.as_str().to_string(),
-                state: "failed".into(),
-                sessions: 0,
-            });
-            continue;
-        }
-
-        let prompt = format!(
-            "Rôle : {}\nObjectif global : {}\nTâche : {}\n\n{}",
-            node.role.as_str(),
-            request.goal,
-            node.title,
-            node.description
-        );
-        let started = state.supervisor.start(StartRequest {
-            agent: adapter,
-            project_dir: sandbox.workdir().to_path_buf(),
-            prompt,
-            session_id: None,
+        results.push(TeamTaskResult {
+            task_id: outcome.task_id.clone(),
+            title: outcome.title.clone(),
+            role: outcome.role.clone(),
+            state: outcome.state.clone(),
+            sessions: if outcome.state == "cancelled" { 0 } else { 1 },
         });
-        match started {
-            Ok(session_id) => {
-                let final_state = state
-                    .supervisor
-                    .wait(
-                        &session_id,
-                        std::time::Duration::from_secs(agent_config.timeout_secs + 30),
-                    )
-                    .unwrap_or(AgentState::Failed);
-                let success = matches!(final_state, AgentState::Completed);
-                let _ = state.store.update_task_state(
-                    &store_task.id,
-                    if success {
-                        TaskState::Completed
-                    } else {
-                        TaskState::Failed
-                    },
-                );
-                if !success {
-                    aborted = Some(format!("tâche « {} » : {final_state:?}", node.title));
-                }
-                results.push(TeamTaskResult {
-                    task_id: node.id.to_string(),
-                    title: node.title.clone(),
-                    role: node.role.as_str().to_string(),
-                    state: if success { "completed" } else { "failed" }.into(),
-                    sessions: 1,
-                });
-            }
-            Err(error) => {
-                aborted = Some(format!("tâche « {} » : {error}", node.title));
-                let _ = state
-                    .store
-                    .update_task_state(&store_task.id, TaskState::Failed);
-                results.push(TeamTaskResult {
-                    task_id: node.id.to_string(),
-                    title: node.title.clone(),
-                    role: node.role.as_str().to_string(),
-                    state: "failed".into(),
-                    sessions: 0,
-                });
-            }
-        }
     }
+    let aborted: Option<String> = outcomes
+        .iter()
+        .find(|o| o.state != "completed")
+        .map(|o| format!("tâche « {} » : {}", o.title, o.state));
 
     // Modifications produites par l'équipe, préparées comme diffs en attente.
     let mut files = Vec::new();

@@ -10,6 +10,8 @@ description = "Mode Agent IH : sandbox worktree, détection d'adaptateurs, colle
 [dependencies]
 ih-core = { path = "../ih-core" }
 ih-agents = { path = "../ih-agents" }
+ih-orchestrator = { path = "../ih-orchestrator" }
+tokio.workspace = true
 ih-workspace = { path = "../ih-workspace" }
 serde.workspace = true
 serde_json.workspace = true

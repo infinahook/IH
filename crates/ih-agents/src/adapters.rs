@@ -105,6 +105,16 @@ impl AgentAdapter {
             // `opencode run --format json --archived "<prompt>"` : le JSON est
             // normalisé par `normalize` ; `--archived` garde les sessions IH
             // hors de la liste de sessions de l'utilisateur.
+            AgentKind::Pi => {
+                // Non interactif : traite l'invite et rend la main.
+                if !args.iter().any(|a| a == "--print" || a == "-p") {
+                    args.push("--print".into());
+                }
+                if !args.iter().any(|a| a == "--no-session") {
+                    args.push("--no-session".into());
+                }
+                args.push(prompt.to_string());
+            }
             AgentKind::Opencode => {
                 if !args.iter().any(|a| a == "run") {
                     args.push("run".into());
@@ -206,6 +216,13 @@ mod tests {
             vec!["run", "--format", "json", "--archived", "--standalone", "p"],
             "OpenCode reçoit son format JSON et reste hors des sessions utilisateur"
         );
+        // pi : non interactif, sans session persistée.
+        let (program, args) = adapter(AgentKind::Pi, vec![]).build_command("p");
+        assert_eq!(program, "sh", "le helper garde son programme de test");
+        assert_eq!(args, vec!["--print", "--no-session", "p"]);
+        let (_, args) = adapter(AgentKind::Pi, vec!["--print"]).build_command("p");
+        assert_eq!(args, vec!["--print", "--no-session", "p"], "pas de doublon");
+
         // Les arguments déjà fournis ne sont pas dupliqués.
         let (_, args) =
             adapter(AgentKind::Opencode, vec!["run", "--format", "json"]).build_command("p");

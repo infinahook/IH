@@ -35,6 +35,35 @@
 - La zone de saisie défilait avec les messages : la liste défile désormais dans
   son propre conteneur et le compositeur reste ancré en bas.
 
+## 0.5.1 — Team Mode : validation réelle et correctifs
+
+### Corrigé
+- **Course impossible avec un seul CLI** : `Team::validate` et le formulaire
+  refusaient le même agent dans deux rôles. Aucune équipe n'était lançable avec
+  OpenCode seul. Un agent peut désormais tenir plusieurs rôles (une session par
+  rôle) ; test de régression Rust + frontend.
+- **Exécution dédupliquée** : la boucle d'exécution de la commande Tauri est
+  extraite dans `ih-agent-mode::run_team_tasks`, seule implémentation, testable.
+
+### Ajouté
+- **Adaptateur `pi`** (v1.6.0) : détection, commande `pi --print --no-session`,
+  agent activé par défaut, test de construction de commande.
+- **Test d'intégration réel** `crates/ih-agent-mode/tests/team_real.rs`
+  (`#[ignore]`, exécution manuelle) : 4 sessions réelles OpenCode + pi, worktree
+  isolé, dépôt principal intact, acceptation d'un diff (sauvegarde + écriture),
+  rejet d'un autre.
+
+### Validé en conditions réelles
+Voir `docs/TEAM_MODE.md` : 4 tâches (`lead`, 2 `worker`, `reviewer`) terminées en
+40,5 s, 2 fichiers produits, acceptation écrite (102 octets + sauvegarde), rejet
+sans écriture, worktree supprimé.
+
+### Non validé
+Interface graphique du mode Équipe (rendu Xvfb indisponible dans
+l'environnement), invalidation d'approbation après changement d'objectif ou
+d'agents, événements `ih://team-event` observés dans un client, persistance
+SQLite vérifiée en base, annulation et reprise de course.
+
 ## 0.5.0 — Team Mode (Lead · Workers · Reviewer)
 
 ### Ajouté

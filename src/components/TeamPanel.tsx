@@ -296,9 +296,7 @@ export function TeamPanel({
             label={t("team.reviewer")}
             htmlFor="team-reviewer"
             hint={t("team.reviewer_hint")}
-            error={
-              build.error === "reviewer_conflict" ? t("team.error.reviewer_conflict") : null
-            }
+            error={null}
           >
             <select
               id="team-reviewer"
@@ -325,23 +323,17 @@ export function TeamPanel({
           hint={t("team.workers_hint")}
           required
           error={
-            build.error === "workers" ||
-            build.error === "workers_duplicate" ||
-            build.error === "worker_conflict"
-              ? t(`team.error.${build.error}`)
+            build.error === "workers" ? t(`team.error.${build.error}`)
               : null
           }
         >
           <ul className="agent-adapter-list" aria-label={t("team.workers")}>
             {adapters.map((adapter) => {
               const checked = workers.includes(adapter.id);
-              const conflictRole: TeamRole | null =
-                adapter.id === lead ? "lead" : adapter.id === reviewer ? "reviewer" : null;
+              // Un même CLI peut tenir plusieurs rôles (plusieurs sessions).
               const reason = !adapter.detected
                 ? t("agent_mode.adapter_missing_hint", { diagnostic: adapter.diagnostic })
-                : conflictRole
-                  ? t("team.role_conflict", { role: t(teamRoleLabelKey(conflictRole)) })
-                  : null;
+                : null;
               const disabled = reason !== null || (!checked && workers.length >= 3);
               const missing = !adapter.detected;
               return (

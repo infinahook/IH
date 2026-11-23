@@ -153,13 +153,20 @@ describe("construction de la requête d'équipe", () => {
     expect(buildTeamRequest(form({ workers: ["a", "b", "c"] })).error).toBeNull();
   });
 
-  it("refuse un worker dupliqué ou déjà lead, et un relecteur en conflit", () => {
-    expect(buildTeamRequest(form({ workers: ["codex", "codex"] })).error).toBe(
-      "workers_duplicate",
+  it("accepte le même agent dans plusieurs rôles (un seul CLI installé)", () => {
+    // Cas réel : OpenCode est le seul CLI détecté, il doit pouvoir être
+    // lead, worker et reviewer — chaque rôle lance sa propre session.
+    const solo = buildTeamRequest(
+      form({ lead: "opencode", workers: ["opencode"], reviewer: "opencode" }),
     );
-    expect(buildTeamRequest(form({ workers: ["claude"] })).error).toBe("worker_conflict");
-    expect(buildTeamRequest(form({ reviewer: "codex" })).error).toBe("reviewer_conflict");
-    expect(buildTeamRequest(form({ reviewer: "claude" })).error).toBe("reviewer_conflict");
+    expect(solo.error).toBeNull();
+    expect(solo.request?.lead).toBe("opencode");
+    expect(solo.request?.workers).toEqual(["opencode"]);
+    expect(solo.request?.reviewer).toBe("opencode");
+    // Un worker listé deux fois est dédoublonné, pas rejeté.
+    const duplicate = buildTeamRequest(form({ workers: ["codex", "codex"] }));
+    expect(duplicate.error).toBeNull();
+    expect(duplicate.request?.workers).toEqual(["codex"]);
   });
 
   it("borne le nombre de tâches d'exécution entre 1 et 4", () => {

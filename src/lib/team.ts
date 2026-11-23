@@ -52,9 +52,6 @@ export type TeamFieldError =
   | "goal"
   | "lead"
   | "workers"
-  | "workers_duplicate"
-  | "worker_conflict"
-  | "reviewer_conflict"
   | "work_items";
 
 export interface TeamRequestBuild {
@@ -94,7 +91,7 @@ export function buildTeamRequest(form: TeamForm): TeamRequestBuild {
       continue;
     }
     if (seen.has(worker)) {
-      return invalid("workers_duplicate");
+      continue; // un même agent peut tenir plusieurs rôles
     }
     seen.add(worker);
     workers.push(worker);
@@ -102,13 +99,7 @@ export function buildTeamRequest(form: TeamForm): TeamRequestBuild {
   if (workers.length < MIN_TEAM_WORKERS || workers.length > MAX_TEAM_WORKERS) {
     return invalid("workers");
   }
-  if (workers.includes(lead)) {
-    return invalid("worker_conflict");
-  }
   const reviewer = (form.reviewer ?? "").trim();
-  if (reviewer.length > 0 && (reviewer === lead || seen.has(reviewer))) {
-    return invalid("reviewer_conflict");
-  }
   const workItems = Math.trunc(Number(form.workItems));
   if (!Number.isFinite(workItems) || workItems < MIN_TEAM_WORK_ITEMS || workItems > MAX_TEAM_WORK_ITEMS) {
     return invalid("work_items");

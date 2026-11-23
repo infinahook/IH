@@ -1321,9 +1321,6 @@
       "goal": "L'objectif est vide.",
       "lead": "Choisissez un coordinateur.",
       "workers": "Sélectionnez 1 à 3 exécutants.",
-      "workers_duplicate": "Un exécutant est sélectionné deux fois.",
-      "worker_conflict": "Le coordinateur ne peut pas être aussi exécutant.",
-      "reviewer_conflict": "Le relecteur doit être différent du coordinateur et des exécutants.",
       "work_items": "Le nombre de tâches doit être entre 1 et 4."
     },
     "mode_label": "Sous-mode",
@@ -1339,7 +1336,6 @@
     "launch_hint": "Une seule approbation couvre toute la course ; le projet n'est jamais modifié.",
     "requesting": "Demande…",
     "clear": "Effacer le suivi",
-    "role_conflict": "Rôle déjà attribué : {role}.",
     "role_lead": "Lead",
     "role_worker": "Worker",
     "role_reviewer": "Relecteur",
