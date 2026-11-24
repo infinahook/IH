@@ -1,5 +1,7 @@
 //! Commandes de conversation : envoi avec streaming, annulation, historique.
 
+use crate::commands::chat_tools::{continue_with, propose_calls, ContinuationDeps};
+use crate::commands::mcp_tools::chat_tool_catalog;
 use crate::state::AppState;
 use ih_chat::{cancel_channel, mcp_proposal, run_turn, ChatTurn, DEFAULT_THREAD_TITLE};
 use ih_core::{IhError, IhResult, ProjectId, ThreadId};
@@ -17,6 +19,9 @@ pub struct ChatAccepted {
     pub project_id: String,
     pub provider_id: String,
     pub model: String,
+    /// Vrai si ce tour peut recevoir des cartes d'appel d'outils natives ;
+    /// faux : protocole texte `ih-mcp-call` (fournisseur sans support natif).
+    pub native_tools: bool,
 }
 
 /// Démarre un tour de conversation et renvoie immédiatement de quoi annuler.
@@ -70,6 +75,15 @@ pub async fn chat_send(
     };
     // Échoue avant tout travail si la clé manque (fournisseur cloud).
     let provider = build_provider(&provider_config, secret)?;
+    // Capacité déclarée par le fournisseur, jamais devinée. Sans support
+    // natif, le tour garde le protocole texte `ih-mcp-call` (aucune
+    // régression pour les familles qui ne l'implémentent pas).
+    let native_tools = provider.supports_native_tools();
+    let catalog = if native_tools {
+        chat_tool_catalog(&state)?
+    } else {
+        Default::default()
+    };
 
     let thread = match thread_id {
         Some(id) => {
@@ -90,9 +104,13 @@ pub async fn chat_send(
             .create_thread(&project, DEFAULT_THREAD_TITLE, Some(&provider_id))?,
     };
 
-    // Outils MCP activés : proposés au modèle dans le prompt système, jamais
-    // exécutés par lui (l'approbation est exigée plus tard).
-    let mcp_tools = mcp_tools_addendum(&state);
+    // Outils MCP activés : en natif, transmis comme définitions d'outils ;
+    // sinon proposés au modèle dans le prompt système (protocole texte).
+    let mcp_tools = if native_tools {
+        None
+    } else {
+        mcp_tools_addendum(&state)
+    };
     let mut turn = ChatTurn::new(
         thread.id.clone(),
         provider_id.clone(),
@@ -106,6 +124,7 @@ pub async fn chat_send(
         (None, None) => None,
     };
     let enabled_pairs = mcp_tools.map(|(_, pairs)| pairs).unwrap_or_default();
+    turn.tools = catalog.definitions.clone();
     if let Some(paths) = context_paths {
         if !paths.is_empty() {
             let config = state.config_snapshot()?;
@@ -134,6 +153,9 @@ pub async fn chat_send(
     let store = state.store.clone();
     let handle = state.app_handle.clone();
     let registry = state.chat.clone();
+    let deps_for_task = ContinuationDeps::from_state(&state)?;
+    let catalog_for_task = catalog.clone();
+    let project_for_task = project.clone();
 
     state
         .chat
@@ -155,25 +177,80 @@ pub async fn chat_send(
         let result = run_turn(provider.as_ref(), store.as_ref(), &turn, token, &mut sink).await;
         match result {
             Ok(outcome) => {
-                let _ = handle.emit(
-                    "ih://chat-done",
-                    serde_json::json!({
-                        "request_id": request_for_task,
-                        "thread_id": thread_for_task,
-                        "outcome": outcome,
-                    }),
-                );
-                if !outcome.cancelled && !enabled_pairs.is_empty() {
-                    let proposals = mcp_proposal::extract_proposals(&outcome.text, &enabled_pairs);
-                    if !proposals.is_empty() {
-                        let _ = handle.emit(
-                            "ih://chat-mcp-proposal",
-                            serde_json::json!({
-                                "request_id": request_for_task,
-                                "thread_id": thread_for_task,
-                                "proposals": proposals,
-                            }),
-                        );
+                let has_native_calls =
+                    native_tools && !outcome.cancelled && !outcome.tool_calls.is_empty();
+                if has_native_calls {
+                    // Aucune exécution ici : les demandes deviennent des cartes
+                    // soumises à la décision humaine (cycle sécurisé).
+                    match propose_calls(
+                        &deps_for_task.store,
+                        &deps_for_task.handle,
+                        &thread_for_task,
+                        &project_for_task,
+                        &request_for_task,
+                        0,
+                        &outcome.tool_calls,
+                        &catalog_for_task,
+                    ) {
+                        Ok(pending) if pending.is_empty() => {
+                            // Tout est invalide : le modèle reprend avec les
+                            // erreurs, sans exécution.
+                            let _ = handle.emit(
+                                "ih://chat-done",
+                                serde_json::json!({
+                                    "request_id": request_for_task,
+                                    "thread_id": thread_for_task.as_str(),
+                                    "outcome": outcome,
+                                }),
+                            );
+                            let _ =
+                                continue_with(&deps_for_task, &thread_for_task, &request_for_task);
+                        }
+                        Ok(_) => {
+                            let _ = handle.emit(
+                                "ih://chat-done",
+                                serde_json::json!({
+                                    "request_id": request_for_task,
+                                    "thread_id": thread_for_task.as_str(),
+                                    "outcome": outcome,
+                                }),
+                            );
+                        }
+                        Err(error) => {
+                            let _ = handle.emit(
+                                "ih://chat-error",
+                                serde_json::json!({
+                                    "request_id": request_for_task,
+                                    "thread_id": thread_for_task.as_str(),
+                                    "code": error.code(),
+                                    "message": error.to_string(),
+                                }),
+                            );
+                        }
+                    }
+                } else {
+                    let _ = handle.emit(
+                        "ih://chat-done",
+                        serde_json::json!({
+                            "request_id": request_for_task,
+                            "thread_id": thread_for_task.as_str(),
+                            "outcome": outcome,
+                        }),
+                    );
+                    // Protocole texte : proposition extraite du texte, comme avant.
+                    if !outcome.cancelled && !enabled_pairs.is_empty() {
+                        let proposals =
+                            mcp_proposal::extract_proposals(&outcome.text, &enabled_pairs);
+                        if !proposals.is_empty() {
+                            let _ = handle.emit(
+                                "ih://chat-mcp-proposal",
+                                serde_json::json!({
+                                    "request_id": request_for_task,
+                                    "thread_id": thread_for_task.as_str(),
+                                    "proposals": proposals,
+                                }),
+                            );
+                        }
                     }
                 }
             }
@@ -202,6 +279,7 @@ pub async fn chat_send(
         project_id: project.into_string(),
         provider_id,
         model,
+        native_tools,
     })
 }
 
