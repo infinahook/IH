@@ -23,7 +23,8 @@ prétendre qu'un jalon est atteint s'il n'est pas testé.
 2. **Planificateur d'automatisations en arrière-plan** (aujourd'hui : exécution
    manuelle) + édition/suppression des workflows.
 3. **Registre de skills distant** avec vérification de mise à jour.
-4. **MCP étendu** : ressources, prompts, transport HTTP/SSE.
+4. **MCP étendu** : ressources, prompts, sampling et tool use — les transports
+   HTTP/Streamable et SSE sont **livrés en 0.6.1**.
 5. **Git distant** : `fetch`, `pull`, `push`, résolution de conflits.
 6. **Coloration syntaxique** dans l'éditeur.
 7. **Page d'audit** : exposer `list_audit` via une commande IPC et enregistrer

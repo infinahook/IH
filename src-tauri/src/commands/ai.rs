@@ -289,12 +289,9 @@ fn providers_list_view(state: &AppState) -> IhResult<Vec<ProviderView>> {
             base_url: p.base_url.clone(),
             enabled: p.enabled,
             has_secret: p.has_secret,
-            secret_stored: state
-                .secrets
-                .get(&provider_account(&p.id))
-                .ok()
-                .flatten()
-                .is_some(),
+            // Drapeau persisté : ne pas lire le trousseau ici (cette liste est
+            // chargée au démarrage et déclencherait une demande de mot de passe).
+            secret_stored: p.has_secret,
             default_model: p.default_model.clone(),
             models: p.models.clone(),
             custom: p.custom,

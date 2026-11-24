@@ -21,7 +21,7 @@ use rusqlite::Connection;
 use crate::util::db_err;
 
 /// Version de schéma attendue par ce crate.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// v1 — schéma initial.
 ///
@@ -208,6 +208,78 @@ CREATE TABLE agent_events (
 CREATE INDEX idx_agent_events_session ON agent_events (session_id, seq);
 "#;
 
+/// v4 — intégration MCP native (serveurs distants, catalogue, appels).
+///
+/// Les jetons et secrets ne sont **jamais** stockés ici : seule la
+/// configuration non secrète vit en base, le secret est lu dans le trousseau.
+/// `mcp_tools.enabled` vaut 0 par défaut : un outil découvert n'est jamais
+/// autorisé sans activation explicite. Les appels sont historisés pour
+/// l'observabilité (serveur, outil, appelant, statut, durée, erreur), avec
+/// cascade à la suppression du serveur.
+pub(crate) const V4: &str = r#"
+CREATE TABLE mcp_servers (
+    id                 TEXT PRIMARY KEY NOT NULL,
+    name               TEXT NOT NULL,
+    url                TEXT NOT NULL,
+    transport          TEXT NOT NULL CHECK (transport IN ('streamable_http', 'sse')),
+    headers            TEXT NOT NULL DEFAULT '{}',
+    timeout_secs       INTEGER NOT NULL DEFAULT 30 CHECK (timeout_secs > 0),
+    enabled            INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    allow_auto_approve INTEGER NOT NULL DEFAULT 0 CHECK (allow_auto_approve IN (0, 1)),
+    last_status        TEXT NOT NULL DEFAULT 'disconnected',
+    last_error         TEXT,
+    last_connected_at  TEXT,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+);
+
+CREATE INDEX idx_mcp_servers_enabled ON mcp_servers (enabled);
+
+CREATE TABLE mcp_tools (
+    server_id     TEXT NOT NULL REFERENCES mcp_servers (id) ON DELETE CASCADE,
+    name          TEXT NOT NULL,
+    description   TEXT NOT NULL DEFAULT '',
+    input_schema  TEXT NOT NULL DEFAULT '{}',
+    output_schema TEXT,
+    category      TEXT NOT NULL DEFAULT 'write'
+                  CHECK (category IN ('read', 'write', 'execute', 'destructive', 'network')),
+    risk          TEXT NOT NULL DEFAULT 'medium'
+                  CHECK (risk IN ('low', 'medium', 'high', 'critical')),
+    enabled       INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+    discovered_at TEXT NOT NULL,
+    PRIMARY KEY (server_id, name)
+);
+
+CREATE INDEX idx_mcp_tools_server ON mcp_tools (server_id);
+
+CREATE TABLE mcp_calls (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id   TEXT NOT NULL REFERENCES mcp_servers (id) ON DELETE CASCADE,
+    tool_name   TEXT NOT NULL,
+    caller      TEXT NOT NULL,
+    caller_id   TEXT,
+    arguments   TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    error       TEXT,
+    duration_ms INTEGER,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT
+);
+
+CREATE INDEX idx_mcp_calls_started ON mcp_calls (started_at DESC);
+CREATE INDEX idx_mcp_calls_server ON mcp_calls (server_id, id DESC);
+"#;
+
+/// v5 — MCP : mémoriser l'existence d'un jeton sans jamais lire le trousseau.
+///
+/// `mcp_servers.has_secret` est un simple drapeau, comme `providers.has_secret`
+/// dans la configuration : il permet d'afficher « jeton configuré » sans
+/// solliciter le trousseau (qui déclencherait une demande de déverrouillage).
+pub(crate) const V5: &str = r#"
+ALTER TABLE mcp_servers ADD COLUMN has_secret INTEGER NOT NULL DEFAULT 0
+    CHECK (has_secret IN (0, 1));
+"#;
+
 /// Applique les migrations manquantes et renvoie la version courante.
 pub(crate) fn migrate(conn: &mut Connection) -> IhResult<()> {
     let current: i64 = conn
@@ -263,6 +335,32 @@ pub(crate) fn migrate(conn: &mut Connection) -> IhResult<()> {
         tx.commit()
             .map_err(|err| db_err("validation de la migration v3", err))?;
         tracing::info!(version = 3, "migration du schéma ih-store appliquée");
+    }
+
+    if current < 4 {
+        let tx = conn
+            .transaction()
+            .map_err(|err| db_err("début de la migration v4", err))?;
+        tx.execute_batch(V4)
+            .map_err(|err| db_err("application de la migration v4", err))?;
+        tx.pragma_update(None, "user_version", 4_i64)
+            .map_err(|err| db_err("écriture de user_version = 4", err))?;
+        tx.commit()
+            .map_err(|err| db_err("validation de la migration v4", err))?;
+        tracing::info!(version = 4, "migration du schéma ih-store appliquée");
+    }
+
+    if current < 5 {
+        let tx = conn
+            .transaction()
+            .map_err(|err| db_err("début de la migration v5", err))?;
+        tx.execute_batch(V5)
+            .map_err(|err| db_err("application de la migration v5", err))?;
+        tx.pragma_update(None, "user_version", 5_i64)
+            .map_err(|err| db_err("écriture de user_version = 5", err))?;
+        tx.commit()
+            .map_err(|err| db_err("validation de la migration v5", err))?;
+        tracing::info!(version = 5, "migration du schéma ih-store appliquée");
     }
 
     Ok(())

@@ -33,6 +33,7 @@ ih-extensions = { path = "../crates/ih-extensions" }
 ih-workspace = { path = "../crates/ih-workspace" }
 ih-orchestrator = { path = "../crates/ih-orchestrator" }
 ih-update = { path = "../crates/ih-update" }
+ih-mcp = { path = "../crates/ih-mcp" }
 
 tauri.workspace = true
 tauri-plugin-dialog.workspace = true

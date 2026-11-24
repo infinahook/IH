@@ -12,6 +12,7 @@ import {
   AtSign,
   Ban,
   Bot,
+  Cable,
   FileCode2,
   MessageSquare,
   MessagesSquare,
@@ -34,6 +35,7 @@ import {
   toAppError,
   type ChatUsage,
   type FileMatch,
+  type McpRemoteTool,
   type Message,
   type ModelEntry,
   type PreparedContext,
@@ -54,7 +56,9 @@ import {
   type ChatDeltaEvent,
   type ChatDoneEvent,
   type ChatErrorEvent,
+  type ChatMcpProposalEvent,
   type ChatStreamAction,
+  type McpToolProposal,
 } from "../lib/chat";
 import { agentPhaseLabelKey } from "../lib/agent";
 import { errorIsFixable } from "../lib/errors";
@@ -100,6 +104,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { Field } from "../components/Field";
 import { FileExplorer } from "../components/FileExplorer";
 import { Modal } from "../components/Modal";
+import { McpCallPanel } from "../components/McpCallPanel";
 import { Notice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectGate } from "../components/ProjectGate";
@@ -615,14 +620,120 @@ export function ChatPage() {
     }
   };
 
+  const handleProposal = (payload: ChatMcpProposalEvent) => {
+    if (selectedThreadRef.current !== payload.thread_id) {
+      return;
+    }
+    setMcpProposals(payload.proposals);
+    setMcpProposalNotice(null);
+    void api.mcpRemote
+      .tools()
+      .then((tools) => setMcpToolsCatalog(tools))
+      .catch(() => undefined);
+  };
+
+  const toolRisk = (proposal: McpToolProposal): string =>
+    mcpToolsCatalog.find(
+      (tool) => tool.server_id === proposal.server_id && tool.name === proposal.tool,
+    )?.risk ?? "medium";
+
+  const finishProposal = async (
+    proposal: McpToolProposal,
+    status: "completed" | "failed",
+    text: string,
+  ) => {
+    setMcpProposals((previous) =>
+      previous.filter(
+        (entry) => !(entry.server_id === proposal.server_id && entry.tool === proposal.tool),
+      ),
+    );
+    if (selectedThreadRef.current) {
+      try {
+        await api.chat.appendToolResult(
+          selectedThreadRef.current,
+          proposal.tool,
+          status,
+          text,
+        );
+        await loadMessages(selectedThreadRef.current);
+        setMcpProposalNotice(t("chat.mcp_proposal_done"));
+      } catch (reason) {
+        const error = toAppError(reason);
+        setMcpProposalNotice(t("chat.mcp_proposal_failed", { message: error.message }));
+      }
+    }
+  };
+
+  const executeProposal = async (proposal: McpToolProposal, approvalId?: string) => {
+    setMcpProposalBusy(`${proposal.server_id}/${proposal.tool}`);
+    const outcome = await api.mcpRemote
+      .call({
+        serverId: proposal.server_id,
+        tool: proposal.tool,
+        arguments: proposal.arguments,
+        caller: "chat",
+        approvalId,
+      })
+      .catch((reason) => {
+        setMcpProposalNotice(
+          t("chat.mcp_proposal_failed", { message: toAppError(reason).message }),
+        );
+        return null;
+      });
+    setMcpProposalBusy(null);
+    if (!outcome) {
+      return;
+    }
+    if (outcome.status === "approval_required" && outcome.approval_id) {
+      setMcpProposalApproval({ approvalId: outcome.approval_id, proposal });
+      return;
+    }
+    if (outcome.result) {
+      await finishProposal(proposal, "completed", outcome.result.text);
+    }
+  };
+
+  const approveProposal = async () => {
+    const pending = mcpProposalApproval;
+    if (!pending) {
+      return;
+    }
+    setMcpProposalApproval(null);
+    try {
+      await api.approvalResolve(pending.approvalId, "approve");
+    } catch (reason) {
+      setMcpProposalNotice(
+        t("chat.mcp_proposal_failed", { message: toAppError(reason).message }),
+      );
+      return;
+    }
+    await executeProposal(pending.proposal, pending.approvalId);
+  };
+
   const deltaListenerError = useTauriEvent<ChatDeltaEvent>("ih://chat-delta", handleDelta);
   const doneListenerError = useTauriEvent<ChatDoneEvent>("ih://chat-done", handleDone);
   const errorListenerError = useTauriEvent<ChatErrorEvent>("ih://chat-error", handleError);
+  const proposalListenerError = useTauriEvent<ChatMcpProposalEvent>(
+    "ih://chat-mcp-proposal",
+    handleProposal,
+  );
 
   // --------------------------------------------------------------- envoi
   const sendAction = useAction();
   const cancelAction = useAction();
   const [prompt, setPrompt] = useState("");
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const [mcpResult, setMcpResult] = useState<string | null>(null);
+  // Proposition d'appel MCP émise par le modèle : jamais exécutée sans
+  // approbation liée aux paramètres.
+  const [mcpProposals, setMcpProposals] = useState<McpToolProposal[]>([]);
+  const [mcpToolsCatalog, setMcpToolsCatalog] = useState<McpRemoteTool[]>([]);
+  const [mcpProposalApproval, setMcpProposalApproval] = useState<{
+    approvalId: string;
+    proposal: McpToolProposal;
+  } | null>(null);
+  const [mcpProposalBusy, setMcpProposalBusy] = useState<string | null>(null);
+  const [mcpProposalNotice, setMcpProposalNotice] = useState<string | null>(null);
   const [composerAlert, setComposerAlert] = useState<{
     tone: "warning" | "danger";
     text: string;
@@ -1752,6 +1863,64 @@ export function ChatPage() {
                 ) : null}
               </div>
 
+              {proposalListenerError && mcpProposals.length > 0 ? (
+                <ErrorBanner error={proposalListenerError} />
+              ) : null}
+              {mcpProposals.length > 0 ? (
+                <div className="card mcp-proposal-card">
+                  <div className="section-heading">
+                    <h3>{t("chat.mcp_proposal_title")}</h3>
+                    <Badge tone="warning">{t("mcp.approval_title")}</Badge>
+                  </div>
+                  <p className="muted small">{t("chat.mcp_proposal_hint")}</p>
+                  {mcpProposalNotice ? <Notice tone="success">{mcpProposalNotice}</Notice> : null}
+                  <div className="mcp-proposal-list">
+                    {mcpProposals.map((proposal) => {
+                      const key = `${proposal.server_id}/${proposal.tool}`;
+                      return (
+                        <div className="mcp-proposal-row" key={key}>
+                          <div>
+                            <strong className="mono">
+                              {proposal.server_id} · {proposal.tool}
+                            </strong>{" "}
+                            <Badge tone="warning">
+                              {t("chat.mcp_proposal_risk")} :{" "}
+                              {t(`mcp.risk_${toolRisk(proposal)}`, {
+                                defaultValue: toolRisk(proposal),
+                              })}
+                            </Badge>
+                            <pre className="code-block">
+                              {JSON.stringify(proposal.arguments, null, 2)}
+                            </pre>
+                          </div>
+                          <div className="button-row compact">
+                            <button
+                              type="button"
+                              className="primary small"
+                              onClick={() => void executeProposal(proposal)}
+                              disabled={mcpProposalBusy !== null}
+                            >
+                              {mcpProposalBusy === key ? <Spinner /> : null}
+                              {t("chat.mcp_proposal_execute")}
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost small"
+                              onClick={() =>
+                                setMcpProposals((previous) =>
+                                  previous.filter((entry) => entry !== proposal),
+                                )
+                              }
+                            >
+                              {t("chat.mcp_proposal_dismiss")}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
               <div className="chat-composer">
                 {mentionOpen ? (
                   <div
@@ -2017,6 +2186,18 @@ export function ChatPage() {
                       <AtSign size={13} aria-hidden="true" />
                       {t("chat.context")} · {chipPaths.length}
                     </button>
+                    <button
+                      type="button"
+                      className="ghost small"
+                      onClick={() => {
+                        setMcpResult(null);
+                        setMcpOpen(true);
+                      }}
+                      title={t("chat.mcp_hint")}
+                    >
+                      <Cable size={13} aria-hidden="true" />
+                      {t("chat.mcp_tools")}
+                    </button>
                     {prepareBusy ? (
                       <span className="small muted inline-status" role="status">
                         <Spinner />
@@ -2184,6 +2365,62 @@ export function ChatPage() {
           />
         </Field>
       </Modal>
+
+      <Modal
+        open={mcpOpen}
+        title={t("chat.mcp_tools")}
+        onClose={() => setMcpOpen(false)}
+        size="wide"
+        footer={
+          mcpResult !== null ? (
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                setPrompt(mcpResult);
+                setMcpOpen(false);
+              }}
+            >
+              {t("chat.mcp_insert")}
+            </button>
+          ) : undefined
+        }
+      >
+        <p className="muted small">{t("chat.mcp_hint")}</p>
+        <McpCallPanel
+          caller="chat"
+          compact
+          onResult={(outcome) => {
+            if (outcome.result) {
+              setMcpResult(outcome.result.text);
+            }
+          }}
+        />
+      </Modal>
+
+      <ConfirmDialog
+        open={mcpProposalApproval !== null}
+        title={t("mcp.approval_title")}
+        description={
+          <div>
+            <p>
+              <Badge tone="warning">
+                {mcpProposalApproval
+                  ? `${mcpProposalApproval.proposal.server_id} · ${mcpProposalApproval.proposal.tool}`
+                  : ""}
+              </Badge>
+            </p>
+            <pre className="code-block">
+              {JSON.stringify(mcpProposalApproval?.proposal.arguments ?? {}, null, 2)}
+            </pre>
+            <p className="muted small">{t("mcp.approval_hint")}</p>
+          </div>
+        }
+        confirmLabel={t("mcp.approval_confirm")}
+        danger
+        onConfirm={() => void approveProposal()}
+        onCancel={() => setMcpProposalApproval(null)}
+      />
 
       <ConfirmDialog
         open={toDelete !== null}

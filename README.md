@@ -37,7 +37,7 @@ Linux.
 | Git : statut, diff, index, commit, branches, log, worktrees | ✅ |
 | Terminal Linux intégré (PTY réel) | ✅ (pas d'émulation VT complète) |
 | Skills : manifeste, installation, empreinte SHA-256, vérification | ✅ |
-| MCP : serveurs stdio, outils, appels soumis à approbation | ✅ (stdio uniquement) |
+| MCP : serveurs distants natifs (Streamable HTTP + SSE), catalogue d'outils, appels soumis à approbation liée aux paramètres | ✅ (ressources/prompts non couverts) |
 | Tâches, équipes, graphe de dépendances, ordonnanceur | ✅ |
 | Mémoire persistante par projet + injection bornée dans les prompts | ✅ |
 | Approbations, classification du risque, secrets dans le trousseau | ✅ |
@@ -117,9 +117,9 @@ Vérifications exécutées en CI et localement :
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace        # 270 tests
+cargo test --workspace        # 368 tests
 npm run typecheck
-npm test                      # 122 tests
+npm test                      # 181 tests
 npm run build
 ```
 
@@ -133,6 +133,7 @@ npm run build
 | [docs/UPDATES.md](docs/UPDATES.md) | signature, manifeste, installation, rollback |
 | [docs/WORKSPACE.md](docs/WORKSPACE.md) | guide du workspace, du contexte et du diff |
 | [docs/AGENT_MODE.md](docs/AGENT_MODE.md) | guide du mode Agent, adaptateurs et limites |
+| [docs/MCP.md](docs/MCP.md) | intégration MCP : transports, sécurité, permissions, intégrations, limites |
 | [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md) | compilation et paquets par distribution |
 | [docs/I18N.md](docs/I18N.md) | catalogues FR/EN et parité |
 | [README.en.md](README.en.md) | English documentation |

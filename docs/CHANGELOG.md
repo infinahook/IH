@@ -1,5 +1,92 @@
 # Journal des versions
 
+## 0.6.1 — MCP natif : Streamable HTTP et SSE
+
+### Ajouté
+- **Crate `ih-mcp`** : client MCP natif.
+  - Transport **Streamable HTTP** via `rmcp` 3.11 (SDK officiel,
+    Apache-2.0) : négociation, sessions `Mcp-Session-Id`, flux SSE de réponse,
+    reconnexions, expiration de session.
+  - Transport **SSE historique** (HTTP+SSE 2024-11-05) implémenté localement :
+    le SDK officiel l'a retiré. Flux borné, délais en envoi et en attente,
+    reconnexions contrôlées (repli exponentiel, abandon explicite).
+  - URL **épinglée** après résolution DNS (anti-rebinding), redirections non
+    suivies, proxys ignorés, en-têtes réservés refusés.
+  - Validation structurelle des schémas d'outils et des arguments.
+- **Sécurité** (`ih-security`) : politique réseau anti-SSRF (blocage métadonnées
+  cloud/link-local/CGNAT/réservées, revalidation des adresses résolues) ;
+  classification MCP (lecture/écriture/exécution/destructif/réseau) ;
+  décision d'appel (auto-approbation limitée aux lectures pré-autorisées) ;
+  empreinte canonique SHA-256 des paramètres ; approbations **liées à
+  l'empreinte** (`ask_with_fingerprint`, `consume_with_fingerprint`).
+- **Persistance** (migration SQLite v4) : `mcp_servers`, `mcp_tools`,
+  `mcp_calls` ; catalogue avec préservation des activations ; historique pour
+  l'observabilité ; cascade à la suppression. Aucun secret en base.
+- **IPC** : `mcp_call` (point d'entrée unique : serveur, outil, arguments,
+  permission, approbation, exécution, historique, audit), gestion complète des
+  serveurs (ajout/édition/suppression/activation/connexion/déconnexion/test/
+  rafraîchissement), catalogue d'outils, historique, export de configuration
+  sans secrets. Événements `ih://mcp-status`, `ih://mcp-discovered`,
+  `ih://mcp-call`.
+- **Conversation** : bouton « Outils MCP » dans le composeur, panneau d'appel
+  contrôlé (approbation liée aux paramètres) et insertion du résultat dans le
+  message ; partagé avec la page MCP.
+- **Proposition d'outil par le modèle** : les outils MCP activés sont décrits
+  dans le prompt système ; une proposition `ih-mcp-call` est filtrée (couples
+  serveur/outil autorisés), affichée avec son risque, puis exécutée seulement
+  après approbation ; le résultat est ajouté au fil comme message `tool`.
+  (Pas de tool use natif des fournisseurs ; résultat non réinjecté au modèle.)
+- **Automatisations** : étapes « outil MCP » (`server_id`, `mcp_tool`,
+  `arguments`) exécutées via le même point d'entrée, avec la règle de mode sans
+  interaction (seules les lectures pré-autorisées s'exécutent).
+- **Agents / Team** : `mcp_agent_config` génère la configuration MCP des CLI
+  (Claude Code, Gemini CLI, OpenCode) sans secrets ; fichier non injecté
+  automatiquement (documenté).
+- **Permissions MCP par rôle d'équipe** : `mcp_role_permissions_get/set`
+  (Lead/Worker/Reviewer), édition dans la page MCP, vérification dans
+  `invoke_mcp_tool` avant approbation ; rôle absent = défaut global, liste
+  vide = aucun outil, appel Team sans rôle refusé.
+- **Interface** : section **Serveurs MCP** (transport, URL, délai, jeton
+  trousseau, en-têtes JSON, pré-autorisation), statuts lisibles, catalogue avec
+  risque et activation individuelle, appel avec approbation affichant serveur,
+  outil, paramètres, effet, risque et empreinte ; historique compact ; export.
+
+### Tests
+- `ih-mcp` : 29 tests unitaires + **9 tests d'intégration Streamable HTTP** et
+  **4 tests d'intégration SSE** contre un vrai serveur MCP local (JSON-RPC et
+  flux SSE réels, 127.0.0.1) : connexion, découverte, appels, erreurs serveur,
+  délai, réponse surdimensionnée, JSON invalide, schémas invalides exclus,
+  jeton exigé, redirection non suivie, reconnexion après coupure.
+- `ih-security` : URL/SSRF, classification, décision, empreintes, approbations
+  liées (42 tests).
+- `ih-store` : migration v4, CRUD serveurs, catalogue (préservation
+  d'activation, purge), historique et cascade (19 tests).
+- Frontend : helpers MCP (schéma, risques, troncature) ; i18n FR/EN en parité.
+
+### Corrigé
+- **Revue de sécurité (avant merge 0.6.1)** — durcissements :
+  - arguments d'appel **redactés** avant persistance dans `mcp_calls` et dans
+    le détail d'audit/approbation (un argument nommé `api_key`, `token`,
+    `secret`, `password`… n'atteint plus SQLite en clair) ;
+  - borne de taille des arguments exécutés (256 Kio) avant toute exécution ;
+  - **serveurs MCP stdio (page Plugins)** : approbation désormais liée à
+    l'empreinte des paramètres (comme les serveurs distants), risque classé
+    localement au lieu d'un niveau figé, arguments obligatoirement un objet.
+- Le trousseau système n'est plus sollicité au démarrage : le statut ne lit
+  plus d'entrée sonde ; la liste des fournisseurs n'effectue plus de lecture
+  (drapeau `has_secret` persisté), et l'existence d'un jeton MCP est désormais
+  un drapeau en base (migration v5, `mcp_servers.has_secret`). Le chat local
+  (Ollama) ne lit plus le trousseau. Le déverrouillage n'est demandé qu'au
+  premier usage réel d'un secret (conversation avec clé, test de fournisseur,
+  connexion/appel MCP authentifié).
+
+### Limites assumées
+OAuth 2.1 non intégré ; appel d'outil proposé par le modèle (tool use) non
+câblé ; injection automatique dans les CLI d'agents et étapes MCP des
+automatisations non implémentées ; ressources/prompts/sampling MCP non exposés.
+Détail : [docs/MCP.md](MCP.md).
+
+
 ## 0.2.0 — AI Workspace · Chat
 
 ### Ajouté

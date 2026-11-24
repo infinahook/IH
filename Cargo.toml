@@ -3,7 +3,7 @@ members = ["crates/*", "src-tauri"]
 resolver = "2"
 
 [workspace.package]
-version = "0.5.2"
+version = "0.6.1"
 edition = "2021"
 rust-version = "1.82"
 authors = ["IH contributors"]
@@ -34,6 +34,17 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 futures-util = "0.3"
 tokio = { version = "1", features = ["full"] }
 bytes = "1"
+url = "2"
+http = "1"
+# Client HTTP aligné sur la version exigée par rmcp (reqwest 0.13).
+mcp-reqwest = { package = "reqwest", version = "0.13", default-features = false, features = ["json", "stream", "rustls"] }
+
+# --- MCP (SDK Rust officiel, Apache-2.0) ---
+rmcp = { version = "3.11", default-features = false, features = [
+    "client",
+    "reqwest",
+    "transport-streamable-http-client-reqwest",
+] }
 
 # --- cryptographie (vérification des mises à jour) ---
 sha2 = "0.10"

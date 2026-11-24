@@ -4,7 +4,6 @@ use crate::state::AppState;
 use ih_core::{IhError, IhResult};
 use ih_extensions::mcp::{McpClient, McpServerConfig, McpTool};
 use ih_extensions::skills::{install_skill, remove_skill, verify_installed};
-use ih_security::risk::RiskLevel;
 use ih_store::InstalledExtension;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -238,17 +237,34 @@ pub async fn mcp_call_tool(
     approval_id: Option<String>,
 ) -> IhResult<McpCallOutcome> {
     let category = "mcp_tool";
+    if !arguments.is_object() {
+        return Err(IhError::Invalid(
+            "les arguments d'un outil MCP doivent être un objet JSON".into(),
+        ));
+    }
+    // Même garantie que le client distant : l'approbation est liée à
+    // l'empreinte exacte des paramètres et le risque est classé localement
+    // (jamais un niveau figé).
+    let fingerprint = ih_security::mcp::mcp_call_fingerprint(&id, &tool, &arguments);
+    let safety = ih_security::mcp::McpToolSafety::classify(
+        &tool,
+        "",
+        ih_security::mcp::McpToolHints::default(),
+    );
     let approval = match approval_id {
         Some(approval) => {
-            state.approvals.consume(&approval, category)?;
+            state
+                .approvals
+                .consume_with_fingerprint(&approval, category, &fingerprint)?;
             approval
         }
         None => {
-            let request = state.approvals.ask(
+            let request = state.approvals.ask_with_fingerprint(
                 category,
                 &format!("Appel de l'outil MCP « {tool} »"),
-                &serde_json::to_string(&arguments).unwrap_or_default(),
-                RiskLevel::Medium,
+                &ih_core::redaction::redact(&serde_json::to_string(&arguments).unwrap_or_default()),
+                safety.risk,
+                Some(fingerprint),
             )?;
             return Ok(McpCallOutcome {
                 status: "approval_required".into(),

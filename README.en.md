@@ -36,7 +36,7 @@ Ubuntu/Debian and Arch Linux.
 | Git: status, diff, stage, commit, branches, log, worktrees | ✅ |
 | Built-in Linux terminal (real PTY) | ✅ (no full VT emulation) |
 | Skills: manifest, install, SHA-256 digest, verification | ✅ |
-| MCP: stdio servers, tools, approval-gated calls | ✅ (stdio only) |
+| MCP: native remote servers (Streamable HTTP + SSE), tool catalog, parameter-bound approvals | ✅ (resources/prompts not covered) |
 | Tasks, teams, dependency graph, scheduler | ✅ |
 | Per-project persistent memory + bounded prompt injection | ✅ |
 | Approvals, risk classification, keyring secrets | ✅ |
@@ -114,9 +114,9 @@ Checks run locally and in CI:
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace        # 270 tests
+cargo test --workspace        # 368 tests
 npm run typecheck
-npm test                      # 122 tests
+npm test                      # 181 tests
 npm run build
 ```
 

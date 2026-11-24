@@ -14,8 +14,12 @@ import { PageHeader } from "../components/PageHeader";
 import { ProjectGate } from "../components/ProjectGate";
 
 interface StepDefinition {
-  agent_id: string;
-  prompt: string;
+  agent_id?: string;
+  prompt?: string;
+  /** Étape « outil MCP » : serveur MCP existant et outil activé. */
+  server_id?: string;
+  mcp_tool?: string;
+  arguments?: unknown;
 }
 
 export function AutomationPage() {
@@ -59,7 +63,34 @@ export function AutomationPage() {
           setStepsError(t("automation.steps_hint"));
           return null;
         }
-        const candidate = entry as { agent_id?: unknown; prompt?: unknown };
+        const candidate = entry as {
+          agent_id?: unknown;
+          prompt?: unknown;
+          server_id?: unknown;
+          mcp_tool?: unknown;
+          arguments?: unknown;
+        };
+        if (typeof candidate.mcp_tool === "string" && candidate.mcp_tool.length > 0) {
+          if (typeof candidate.server_id !== "string" || candidate.server_id.length === 0) {
+            setStepsError(t("automation.steps_hint"));
+            return null;
+          }
+          if (
+            candidate.arguments !== undefined &&
+            (typeof candidate.arguments !== "object" ||
+              candidate.arguments === null ||
+              Array.isArray(candidate.arguments))
+          ) {
+            setStepsError(t("automation.steps_hint"));
+            return null;
+          }
+          steps.push({
+            server_id: candidate.server_id,
+            mcp_tool: candidate.mcp_tool,
+            arguments: candidate.arguments,
+          });
+          continue;
+        }
         if (typeof candidate.agent_id !== "string" || typeof candidate.prompt !== "string") {
           setStepsError(t("automation.steps_hint"));
           return null;

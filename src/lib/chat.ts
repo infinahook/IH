@@ -21,6 +21,19 @@ export interface ChatErrorEvent {
   message: string;
 }
 
+/** Proposition d'appel d'outil MCP émise par le modèle (jamais exécutée telle quelle). */
+export interface McpToolProposal {
+  server_id: string;
+  tool: string;
+  arguments: unknown;
+}
+
+export interface ChatMcpProposalEvent {
+  request_id: string;
+  thread_id: string;
+  proposals: McpToolProposal[];
+}
+
 // ------------------------------------------------------ état de streaming
 
 export type ChatStreamStatus = "idle" | "streaming" | "done" | "error";

@@ -5,6 +5,7 @@ use super::project_path;
 use crate::state::{AppState, UpdateStatus};
 use ih_core::{IhError, IhResult, ProjectId};
 use ih_orchestrator::{plan_goal, MemorySnippet, Team, TeamRole};
+use ih_security::mcp::McpCaller;
 use ih_security::risk::RiskLevel;
 use ih_store::{
     MemoryEntry, Message, NewMemoryEntry, NewTask, Task, Thread, Workflow, WorkflowRun,
@@ -261,6 +262,69 @@ pub fn workflows_list(state: State<'_, AppState>, project_id: String) -> IhResul
     state.store.list_workflows(&id)
 }
 
+/// Une étape de workflow est soit un prompt d'agent, soit un appel d'outil MCP.
+fn validate_workflow_step(step: &serde_json::Value, index: usize) -> IhResult<()> {
+    let object = step
+        .as_object()
+        .ok_or_else(|| IhError::Invalid(format!("étape {index} : objet JSON attendu")))?;
+    if let Some(tool) = object.get("mcp_tool") {
+        let tool = tool
+            .as_str()
+            .filter(|name| !name.trim().is_empty())
+            .ok_or_else(|| IhError::Invalid(format!("étape {index} : mcp_tool non textuel")))?;
+        let _ = tool;
+        if object
+            .get("server_id")
+            .and_then(|value| value.as_str())
+            .filter(|id| !id.trim().is_empty())
+            .is_none()
+        {
+            return Err(IhError::Invalid(format!(
+                "étape {index} : un appel d'outil MCP exige server_id"
+            )));
+        }
+        if let Some(arguments) = object.get("arguments") {
+            if !arguments.is_object() {
+                return Err(IhError::Invalid(format!(
+                    "étape {index} : les arguments d'un outil MCP doivent être un objet JSON"
+                )));
+            }
+        }
+        return Ok(());
+    }
+    let agent = object
+        .get("agent_id")
+        .and_then(|value| value.as_str())
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| {
+            IhError::Invalid(format!(
+                "étape {index} : agent_id (prompt d'agent) ou mcp_tool (outil MCP) requis"
+            ))
+        })?;
+    let _ = agent;
+    if object
+        .get("prompt")
+        .and_then(|value| value.as_str())
+        .is_none()
+    {
+        return Err(IhError::Invalid(format!(
+            "étape {index} : prompt requis pour un agent"
+        )));
+    }
+    Ok(())
+}
+
+/// Extrait la description d'un appel d'outil MCP d'une étape de workflow.
+fn mcp_step_of(step: &serde_json::Value) -> Option<(String, String, serde_json::Value)> {
+    let server_id = step.get("server_id")?.as_str()?.to_string();
+    let tool = step.get("mcp_tool")?.as_str()?.to_string();
+    let arguments = step
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    Some((server_id, tool, arguments))
+}
+
 #[tauri::command]
 pub fn workflow_upsert(
     state: State<'_, AppState>,
@@ -283,6 +347,9 @@ pub fn workflow_upsert(
         .ok_or_else(|| IhError::Invalid("les étapes doivent être un tableau".into()))?;
     if steps_array.is_empty() {
         return Err(IhError::Invalid("workflow sans étape".into()));
+    }
+    for (index, step) in steps_array.iter().enumerate() {
+        validate_workflow_step(step, index)?;
     }
     let workflow = Workflow {
         id: format!("wf-{}", uuid::Uuid::new_v4()),
@@ -321,6 +388,45 @@ pub fn workflow_run_now(state: State<'_, AppState>, id: String) -> IhResult<Work
     let mut failure: Option<String> = None;
 
     for (index, step) in steps.iter().enumerate() {
+        // Étape « outil MCP » : passe par le point d'entrée unique d'IH, donc
+        // par la validation des arguments, le contrôle du serveur et de
+        // l'outil, et la règle d'approbation (ici : mode sans interaction,
+        // seule une lecture pré-autorisée peut s'exécuter).
+        if let Some((server_id, tool, arguments)) = mcp_step_of(step) {
+            let request = crate::commands::mcp::InvokeRequest {
+                server_id: server_id.clone(),
+                tool: tool.clone(),
+                arguments,
+                caller: McpCaller::Automation,
+                caller_id: Some(workflow.id.clone()),
+                approval_id: None,
+                role: None,
+            };
+            match crate::commands::mcp::invoke_mcp_tool_blocking(&state, request) {
+                Ok(outcome) if outcome.status == "completed" => {
+                    detail.push_str(&format!(
+                        "étape {} (MCP {server_id}/{tool}) : completed\n",
+                        index + 1
+                    ));
+                }
+                Ok(_) => {
+                    failure = Some(format!(
+                        "étape {} : approbation requise pour l'outil MCP {server_id}/{tool} \
+                         (mode automatisation : seule une lecture pré-autorisée peut s'exécuter)",
+                        index + 1
+                    ));
+                    break;
+                }
+                Err(error) => {
+                    failure = Some(format!(
+                        "étape {} (MCP {server_id}/{tool}) : {error}",
+                        index + 1
+                    ));
+                    break;
+                }
+            }
+            continue;
+        }
         let agent_id = step
             .get("agent_id")
             .and_then(|v| v.as_str())

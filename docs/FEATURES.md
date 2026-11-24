@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
+Dernière vérification : 368 tests Rust + 181 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -18,7 +18,7 @@ Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
 | 4 | Fournisseurs IA cloud et locaux | ✅ | OpenAI-compatible (OpenAI, OpenRouter, custom), Anthropic, Gemini, Ollama ; chat, streaming SSE/NDJSON, modèles, santé. **Écran de conversation complet** : streaming temps réel, annulation, historique, sélection provider/modèle, réessai |
 | 5 | Gestionnaire de modèles | ✅ | Découverte réelle par API, modèle par défaut, activation par fournisseur, capacités seulement si exposées par l'API |
 | 6 | Skills : installation et mises à jour | ⚠️ | Installation depuis un dossier avec validation stricte du manifeste, empreinte SHA-256, vérification d'intégrité, activation, désinstallation. **Mise à jour depuis un registre distant : absente** |
-| 7 | Plugins MCP | ⚠️ | Serveurs stdio, `initialize`, `tools/list`, `tools/call`, appels soumis à approbation à usage unique, pas de zombie. **Pas de resources/prompts/sampling, pas de transport HTTP/SSE** |
+| 7 | Plugins MCP | ⚠️ | **Serveurs MCP natifs distants : Streamable HTTP et SSE historique** (transports réels, testés contre un serveur local), découverte d'outils, catalogue avec activation explicite, appels contrôlés par approbation liée à l'empreinte des paramètres, jeton au trousseau, anti-SSRF, tailles et délais bornés, historique et audit ; serveurs stdio existants conservés. **Reste : resources/prompts/sampling, tool use côté chat, injection automatique dans les CLI d'agents** |
 | 8 | Gestion des projets | ✅ | Ouverture par sélecteur de dossier, persistance, projets récents, retrait de liste **sans jamais supprimer le dossier** |
 | 9 | Éditeur de code | ✅ | CodeMirror 6 : coloration Rust/TS/JS/Python/JSON/TOML/Markdown/YAML/CSS/HTML, numéros de ligne, Ctrl+F, Ctrl+S, onglets, détection de conflit d'écriture |
 | 10 | Terminal Linux intégré | ⚠️ | PTY réel (`portable-pty`), saisie, redimensionnement, fermeture, filtrage ANSI/OSC. **Pas d'émulation VT complète** (curseur, écran alterné, IME) |
@@ -27,7 +27,7 @@ Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
 | 13 | Orchestrateur de tâches | ✅ | Création de plan déterministe, persistance, transitions d'état, détection de cycle, blocage en cas d'échec d'une dépendance |
 | 14 | Mémoire persistante par projet | ✅ | Portée projet/globale, tags, recherche, suppression, aperçu du contexte injecté borné en octets |
 | 15 | Permissions et sécurité | ✅ | Approbations à usage unique liées à une catégorie, TTL, classification du risque, prison de chemins, secrets dans le trousseau uniquement |
-| 16 | Automatisations et workflows | ⚠️ | Création (intervalle ≥ 5 min, étapes agent+prompt), exécution manuelle réelle, historique des exécutions. **Pas de planificateur en arrière-plan qui déclenche seul**, pas d'édition/suppression de workflow dans l'UI |
+| 16 | Automatisations et workflows | ⚠️ | Création (intervalle ≥ 5 min, étapes agent+prompt **ou outil MCP**), exécution manuelle réelle, historique des exécutions ; les étapes MCP passent par le contrôle d'IH (serveur/outil activés, arguments validés, mode sans interaction limité aux lectures pré-autorisées). **Pas de planificateur en arrière-plan qui déclenche seul**, pas d'édition/suppression de workflow dans l'UI |
 | 17 | Historique conversations et tâches | ✅ | Threads, messages paginés, suppression, export JSON téléchargeable |
 | 18 | Interface française et anglaise | ✅ | 800 clés FR et EN, parité vérifiée par test Rust et par test frontend, changement immédiat |
 | 19 | Paramètres complets | ✅ | Thème, langue, limites de ressources, niveau de logs, canal et intervalle de mise à jour, téléchargement automatique. Enregistrement validé côté Rust |
@@ -99,7 +99,7 @@ Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
 3. **Team Mode** visuel (Lead/Worker/Reviewer) : prévu pour 0.2.3.
 4. **Sessions d'agents CLI réinjectées dans les threads de conversation**.
 5. **Registre de skills distant** avec vérification de mise à jour.
-6. **MCP hors stdio** (HTTP/SSE, ressources, prompts, sampling).
+6. **MCP étendu** : ressources, prompts, sampling et tool use des modèles — les transports **HTTP/Streamable et SSE sont livrés en 0.6.1**.
 7. **Git distant** (`push`, `pull`, `fetch`) et résolution de conflits.
 8. **Planificateur d'automatisations** actif en arrière-plan.
 9. **Page d'audit** exposée par l'IPC (le stockage existe en base).
@@ -113,23 +113,23 @@ Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
 
 | Suite | Nombre | Portée |
 |---|---|---|
-| `ih-core` | 30 | configuration, erreurs, événements, ressources, chemins, redaction, plateforme |
-| `ih-store` | 16 | migrations (v3 incluse), CRUD, cascade, pagination, concurrence, recherche |
-| `ih-security` | 19 | approbations, expiration/rejeu, classification de risque, trousseau |
-| `ih-providers` | 15 | 4 fournisseurs, SSE/NDJSON, erreurs 401, timeout, clé absente |
-| `ih-agents` | 13 | adaptateurs, succès/échec, annulation, timeout, limite, sortie bornée |
+| `ih-core` | 38 | configuration, erreurs, événements, ressources, chemins, redaction, plateforme |
+| `ih-store` | 19 | migrations (v4 incluse), CRUD, cascade, pagination, concurrence, recherche, **MCP : catalogue et appels** |
+| `ih-security` | 41 | approbations (dont empreintes), expiration/rejeu, classification de risque, **politique réseau MCP (SSRF)**, trousseau |
+| `ih-providers` | 19 | 4 fournisseurs, SSE/NDJSON, erreurs 401, timeout, clé absente |
+| `ih-agents` | 20 | adaptateurs, succès/échec, annulation, timeout, limite, sortie bornée |
 | `ih-extensions` | 27 | manifestes, empreinte, installation, prison, MCP stdio, serveur muet |
-| `ih-workspace` | 22 | Git (statut, commit, worktrees), prison de chemins, PTY sans zombie |
+| `ih-workspace` | 33 | Git, prison de chemins, PTY, **diff LCS**, métadonnées, écriture vérifiée |
 | `ih-orchestrator` | 23 | cycles, disponibilité, équipes, ordonnanceur, budget mémoire |
 | `ih-update` | 39 | signature Ed25519, digest, téléchargement, staging, rollback |
 | `ih-i18n` | 5 | parité FR/EN, repli, substitution |
-| `ih-chat` | 11 | streaming, annulation, historique borné, contexte injecté, erreurs, titre, recherche + **e2e Ollama réel** |
+| `ih-chat` | 12 | streaming, annulation, historique borné, contexte injecté, erreurs, titre, recherche + **e2e Ollama réel** |
 | `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
-| `ih-workspace` | 33 | Git, prison de chemins, PTY, **diff LCS**, métadonnées, écriture vérifiée |
-| `ih-agent-mode` | 5 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
-| **Rust total** | **270** | |
-| Frontend (`vitest`) | 143 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, **agent** |
-| **Total** | **392** | |
+| `ih-agent-mode` | 8 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
+| `ih-mcp` | 42 | schémas, politique URL, session unifiée ; **9 tests d'intégration Streamable HTTP** et **4 tests SSE** contre un vrai serveur MCP local |
+| **Rust total** | **368** | |
+| Frontend (`vitest`) | 181 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent, **MCP** |
+| **Total** | **530** | |
 
 ## Vérifications manuelles effectuées
 

@@ -243,3 +243,83 @@ pub struct AuditEntry {
     pub decision: String,
     pub created_at: DateTime<Utc>,
 }
+
+// ---------------------------------------------------------------------------
+// MCP (serveurs distants, catalogue d'outils, appels)
+// ---------------------------------------------------------------------------
+
+/// Serveur MCP distant enregistré. Aucun secret n'est stocké ici.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct McpServerRecord {
+    pub id: String,
+    pub name: String,
+    /// URL complète du serveur (validée avant connexion).
+    pub url: String,
+    /// `streamable_http` ou `sse`.
+    pub transport: String,
+    /// En-têtes personnalisés **non secrets** (JSON objet en base).
+    pub headers: std::collections::BTreeMap<String, String>,
+    pub timeout_secs: u32,
+    pub enabled: bool,
+    /// Pré-autorisation explicite : seules les lectures peuvent être
+    /// auto-approuvées ; tout le reste exige une approbation interactive.
+    pub allow_auto_approve: bool,
+    /// Un jeton existe-t-il au trousseau ? Drapeau persisté, jamais relu du
+    /// trousseau à l'affichage (le déverrouillage n'est demandé qu'à l'usage).
+    pub has_secret: bool,
+    /// `disconnected`, `connecting`, `connected`, `error`.
+    pub last_status: String,
+    pub last_error: Option<String>,
+    pub last_connected_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Outil MCP découvert et mis en catalogue.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct McpToolRecord {
+    pub server_id: String,
+    pub name: String,
+    pub description: String,
+    /// Schéma JSON d'entrée, déjà validé structurellement.
+    pub input_schema: serde_json::Value,
+    pub output_schema: Option<serde_json::Value>,
+    /// `read`, `write`, `execute`, `destructive`, `network`.
+    pub category: String,
+    /// `low`, `medium`, `high`, `critical`.
+    pub risk: String,
+    /// Un outil découvert n'est jamais autorisé par défaut.
+    pub enabled: bool,
+    pub discovered_at: DateTime<Utc>,
+}
+
+/// Appel MCP à historiser (observabilité).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NewMcpCall {
+    pub server_id: String,
+    pub tool_name: String,
+    /// `ui`, `chat`, `agent`, `team`, `automation`.
+    pub caller: String,
+    pub caller_id: Option<String>,
+    pub arguments: serde_json::Value,
+    /// `completed`, `failed`, `denied`, `approval_required`.
+    pub status: String,
+    pub error: Option<String>,
+    pub duration_ms: Option<u64>,
+}
+
+/// Appel MCP persisté.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct McpCallRecord {
+    pub id: i64,
+    pub server_id: String,
+    pub tool_name: String,
+    pub caller: String,
+    pub caller_id: Option<String>,
+    pub arguments: serde_json::Value,
+    pub status: String,
+    pub error: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+}

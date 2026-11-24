@@ -18,9 +18,10 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::migrate;
 use crate::model::{
-    AgentEventRow, AgentSessionDetail, AuditEntry, InstalledExtension, MemoryEntry, Message,
-    NewAgentEvent, NewAuditEntry, NewMemoryEntry, NewMessage, NewSession, NewTask, NewWorkflowRun,
-    Project, SessionRow, Task, Thread, Workflow, WorkflowRun,
+    AgentEventRow, AgentSessionDetail, AuditEntry, InstalledExtension, McpCallRecord,
+    McpServerRecord, McpToolRecord, MemoryEntry, Message, NewAgentEvent, NewAuditEntry, NewMcpCall,
+    NewMemoryEntry, NewMessage, NewSession, NewTask, NewWorkflowRun, Project, SessionRow, Task,
+    Thread, Workflow, WorkflowRun,
 };
 use crate::util::{
     agent_state_str, db_err, decode_json, decode_opt_json, encode_json, get_agent_state, get_id,
@@ -1146,6 +1147,350 @@ impl Store {
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|err| db_err("lecture de l'audit", err))
     }
+
+    // ---------------------------------------------------------------------
+    // MCP (serveurs distants, catalogue, appels)
+    // ---------------------------------------------------------------------
+
+    /// Liste les serveurs MCP, du plus récent au plus ancien.
+    pub fn list_mcp_servers(&self) -> IhResult<Vec<McpServerRecord>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, url, transport, headers, timeout_secs, enabled,
+                        allow_auto_approve, has_secret, last_status, last_error,
+                        last_connected_at, created_at, updated_at
+                 FROM mcp_servers
+                 ORDER BY created_at DESC, rowid DESC",
+            )
+            .map_err(|err| db_err("préparation de la liste des serveurs MCP", err))?;
+        let rows = stmt
+            .query_map([], mcp_server_from_row)
+            .map_err(|err| db_err("lecture des serveurs MCP", err))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| db_err("lecture des serveurs MCP", err))
+    }
+
+    /// Lit un serveur MCP par identifiant.
+    pub fn get_mcp_server(&self, id: &str) -> IhResult<Option<McpServerRecord>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, url, transport, headers, timeout_secs, enabled,
+                        allow_auto_approve, has_secret, last_status, last_error,
+                        last_connected_at, created_at, updated_at
+                 FROM mcp_servers
+                 WHERE id = ?1",
+            )
+            .map_err(|err| db_err("préparation de la lecture d'un serveur MCP", err))?;
+        let mut rows = stmt
+            .query_map(params![id], mcp_server_from_row)
+            .map_err(|err| db_err(format!("lecture du serveur MCP {id}"), err))?;
+        rows.next()
+            .transpose()
+            .map_err(|err| db_err(format!("lecture du serveur MCP {id}"), err))
+    }
+
+    /// Insère ou met à jour un serveur MCP. `created_at` est préservé lors
+    /// d'une mise à jour.
+    pub fn upsert_mcp_server(&self, server: &McpServerRecord) -> IhResult<()> {
+        require_non_empty("identifiant de serveur MCP", &server.id)?;
+        require_non_empty("nom de serveur MCP", &server.name)?;
+        require_non_empty("URL de serveur MCP", &server.url)?;
+        validate_choice(
+            "transport MCP",
+            &server.transport,
+            &["streamable_http", "sse"],
+        )?;
+        if server.timeout_secs == 0 {
+            return Err(IhError::Invalid(
+                "le délai d'un serveur MCP doit être supérieur à zéro".into(),
+            ));
+        }
+        let headers = encode_json("en-têtes du serveur MCP", &server.headers)?;
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO mcp_servers
+                (id, name, url, transport, headers, timeout_secs, enabled,
+                 allow_auto_approve, has_secret, last_status, last_error,
+                 last_connected_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+             ON CONFLICT (id) DO UPDATE SET
+                 name = excluded.name,
+                 url = excluded.url,
+                 transport = excluded.transport,
+                 headers = excluded.headers,
+                 timeout_secs = excluded.timeout_secs,
+                 enabled = excluded.enabled,
+                 allow_auto_approve = excluded.allow_auto_approve,
+                 has_secret = excluded.has_secret,
+                 last_status = excluded.last_status,
+                 last_error = excluded.last_error,
+                 last_connected_at = excluded.last_connected_at,
+                 updated_at = excluded.updated_at",
+            params![
+                server.id,
+                server.name,
+                server.url,
+                server.transport,
+                headers,
+                i64::from(server.timeout_secs),
+                server.enabled,
+                server.allow_auto_approve,
+                server.has_secret,
+                server.last_status,
+                server.last_error,
+                server.last_connected_at,
+                server.created_at,
+                server.updated_at,
+            ],
+        )
+        .map_err(|err| db_err(format!("enregistrement du serveur MCP {}", server.id), err))?;
+        Ok(())
+    }
+
+    /// Met à jour l'état de connexion d'un serveur MCP.
+    pub fn set_mcp_server_status(
+        &self,
+        id: &str,
+        status: &str,
+        last_error: Option<&str>,
+        last_connected_at: Option<DateTime<Utc>>,
+    ) -> IhResult<()> {
+        validate_choice(
+            "état de connexion MCP",
+            status,
+            &["disconnected", "connecting", "connected", "error"],
+        )?;
+        let now = Utc::now();
+        let conn = self.lock()?;
+        let touched = conn
+            .execute(
+                "UPDATE mcp_servers
+                 SET last_status = ?2, last_error = ?3,
+                     last_connected_at = COALESCE(?4, last_connected_at),
+                     updated_at = ?5
+                 WHERE id = ?1",
+                params![id, status, last_error, last_connected_at, now],
+            )
+            .map_err(|err| db_err(format!("mise à jour de l'état du serveur MCP {id}"), err))?;
+        if touched == 0 {
+            return Err(IhError::NotFound(format!("serveur MCP {id}")));
+        }
+        Ok(())
+    }
+
+    /// Supprime un serveur MCP, son catalogue et son historique d'appels.
+    pub fn delete_mcp_server(&self, id: &str) -> IhResult<()> {
+        let conn = self.lock()?;
+        let touched = conn
+            .execute("DELETE FROM mcp_servers WHERE id = ?1", params![id])
+            .map_err(|err| db_err(format!("suppression du serveur MCP {id}"), err))?;
+        if touched == 0 {
+            return Err(IhError::NotFound(format!("serveur MCP {id}")));
+        }
+        Ok(())
+    }
+
+    /// Met à jour le catalogue d'outils d'un serveur.
+    ///
+    /// Les outils absents du nouveau catalogue sont supprimés ; l'état activé
+    /// (choix explicite de l'utilisateur) est préservé par nom pour les outils
+    /// qui existaient déjà, sinon `enabled` vaut faux.
+    pub fn refresh_mcp_tools(&self, server_id: &str, tools: &[McpToolRecord]) -> IhResult<()> {
+        let mut conn = self.lock()?;
+        let tx = conn
+            .transaction()
+            .map_err(|err| db_err("début du rafraîchissement du catalogue MCP", err))?;
+
+        // 1) relevé des activations existantes AVANT de remplacer le catalogue.
+        let mut previous: std::collections::HashMap<String, bool> =
+            std::collections::HashMap::new();
+        {
+            let mut stmt = tx
+                .prepare("SELECT name, enabled FROM mcp_tools WHERE server_id = ?1")
+                .map_err(|err| db_err("préparation du relevé des outils MCP", err))?;
+            let rows = stmt
+                .query_map(params![server_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+                })
+                .map_err(|err| db_err("relevé des outils MCP existants", err))?;
+            for entry in rows {
+                let (name, enabled) =
+                    entry.map_err(|err| db_err("relevé des outils MCP existants", err))?;
+                previous.insert(name, enabled);
+            }
+        }
+
+        // 2) remplacement transactionnel du catalogue.
+        tx.execute(
+            "DELETE FROM mcp_tools WHERE server_id = ?1",
+            params![server_id],
+        )
+        .map_err(|err| db_err("purge du catalogue MCP", err))?;
+        for tool in tools {
+            let input_schema = encode_json("schéma d'entrée MCP", &tool.input_schema)?;
+            let output_schema = match &tool.output_schema {
+                Some(schema) => Some(encode_json("schéma de sortie MCP", schema)?),
+                None => None,
+            };
+            let enabled = previous.get(&tool.name).copied().unwrap_or(false);
+            tx.execute(
+                "INSERT INTO mcp_tools
+                    (server_id, name, description, input_schema, output_schema, category,
+                     risk, enabled, discovered_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    server_id,
+                    tool.name,
+                    tool.description,
+                    input_schema,
+                    output_schema,
+                    tool.category,
+                    tool.risk,
+                    enabled,
+                    tool.discovered_at,
+                ],
+            )
+            .map_err(|err| db_err(format!("enregistrement de l'outil MCP {}", tool.name), err))?;
+        }
+        tx.commit()
+            .map_err(|err| db_err("validation du catalogue MCP", err))?;
+        Ok(())
+    }
+
+    /// Liste les outils MCP (tous serveurs, ou un seul).
+    pub fn list_mcp_tools(&self, server_id: Option<&str>) -> IhResult<Vec<McpToolRecord>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT server_id, name, description, input_schema, output_schema,
+                        category, risk, enabled, discovered_at
+                 FROM mcp_tools
+                 WHERE (?1 IS NULL OR server_id = ?1)
+                 ORDER BY server_id, name",
+            )
+            .map_err(|err| db_err("préparation de la liste des outils MCP", err))?;
+        let rows = stmt
+            .query_map(params![server_id], mcp_tool_from_row)
+            .map_err(|err| db_err("lecture des outils MCP", err))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| db_err("lecture des outils MCP", err))
+    }
+
+    /// Lit un outil MCP précis.
+    pub fn get_mcp_tool(&self, server_id: &str, name: &str) -> IhResult<Option<McpToolRecord>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT server_id, name, description, input_schema, output_schema,
+                        category, risk, enabled, discovered_at
+                 FROM mcp_tools
+                 WHERE server_id = ?1 AND name = ?2",
+            )
+            .map_err(|err| db_err("préparation de la lecture d'un outil MCP", err))?;
+        let mut rows = stmt
+            .query_map(params![server_id, name], mcp_tool_from_row)
+            .map_err(|err| db_err(format!("lecture de l'outil MCP {name}"), err))?;
+        rows.next()
+            .transpose()
+            .map_err(|err| db_err(format!("lecture de l'outil MCP {name}"), err))
+    }
+
+    /// Active ou désactive un outil MCP (jamais l'inverse : c'est un refus).
+    pub fn set_mcp_tool_enabled(&self, server_id: &str, name: &str, enabled: bool) -> IhResult<()> {
+        let conn = self.lock()?;
+        let touched = conn
+            .execute(
+                "UPDATE mcp_tools SET enabled = ?3 WHERE server_id = ?1 AND name = ?2",
+                params![server_id, name, enabled],
+            )
+            .map_err(|err| db_err(format!("mise à jour de l'outil MCP {name}"), err))?;
+        if touched == 0 {
+            return Err(IhError::NotFound(format!("outil MCP {server_id}/{name}")));
+        }
+        Ok(())
+    }
+
+    /// Enregistre un appel MCP terminé (ou refusé).
+    pub fn record_mcp_call(&self, call: &NewMcpCall) -> IhResult<McpCallRecord> {
+        require_non_empty("outil d'appel MCP", &call.tool_name)?;
+        validate_choice(
+            "appelant MCP",
+            &call.caller,
+            &["ui", "chat", "agent", "team", "automation"],
+        )?;
+        validate_choice(
+            "statut d'appel MCP",
+            &call.status,
+            &["completed", "failed", "denied", "approval_required"],
+        )?;
+        let arguments = encode_json("arguments d'appel MCP", &call.arguments)?;
+        let now = Utc::now();
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO mcp_calls
+                (server_id, tool_name, caller, caller_id, arguments, status, error,
+                 duration_ms, started_at, finished_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+            params![
+                call.server_id,
+                call.tool_name,
+                call.caller,
+                call.caller_id,
+                arguments,
+                call.status,
+                call.error,
+                call.duration_ms
+                    .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+                now,
+            ],
+        )
+        .map_err(|err| {
+            db_err(
+                format!("enregistrement de l'appel MCP {}", call.tool_name),
+                err,
+            )
+        })?;
+        let id = conn.last_insert_rowid();
+        Ok(McpCallRecord {
+            id,
+            server_id: call.server_id.clone(),
+            tool_name: call.tool_name.clone(),
+            caller: call.caller.clone(),
+            caller_id: call.caller_id.clone(),
+            arguments: call.arguments.clone(),
+            status: call.status.clone(),
+            error: call.error.clone(),
+            duration_ms: call.duration_ms,
+            started_at: now,
+            finished_at: Some(now),
+        })
+    }
+
+    /// Liste les appels MCP, du plus récent au plus ancien.
+    pub fn list_mcp_calls(
+        &self,
+        limit: u32,
+        server_id: Option<&str>,
+    ) -> IhResult<Vec<McpCallRecord>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, server_id, tool_name, caller, caller_id, arguments, status, error,
+                        duration_ms, started_at, finished_at
+                 FROM mcp_calls
+                 WHERE (?1 IS NULL OR server_id = ?1)
+                 ORDER BY id DESC
+                 LIMIT ?2",
+            )
+            .map_err(|err| db_err("préparation de la liste des appels MCP", err))?;
+        let rows = stmt
+            .query_map(params![server_id, i64::from(limit)], mcp_call_from_row)
+            .map_err(|err| db_err("lecture des appels MCP", err))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| db_err("lecture des appels MCP", err))
+    }
 }
 
 /// Applique les PRAGMA de connexion.
@@ -1296,5 +1641,59 @@ fn audit_from_row(row: &Row<'_>) -> rusqlite::Result<AuditEntry> {
         detail: row.get(3)?,
         decision: row.get(4)?,
         created_at: row.get(5)?,
+    })
+}
+
+fn mcp_server_from_row(row: &Row<'_>) -> rusqlite::Result<McpServerRecord> {
+    Ok(McpServerRecord {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        url: row.get(2)?,
+        transport: row.get(3)?,
+        headers: decode_json(row, 4, "en-têtes du serveur MCP")?,
+        timeout_secs: get_u32(row, 5, "délai du serveur MCP")?,
+        enabled: row.get(6)?,
+        allow_auto_approve: row.get(7)?,
+        has_secret: row.get(8)?,
+        last_status: row.get(9)?,
+        last_error: row.get(10)?,
+        last_connected_at: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
+    })
+}
+
+fn mcp_tool_from_row(row: &Row<'_>) -> rusqlite::Result<McpToolRecord> {
+    Ok(McpToolRecord {
+        server_id: row.get(0)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        input_schema: decode_json(row, 3, "schéma d'entrée MCP")?,
+        output_schema: match row.get::<_, Option<String>>(4)? {
+            Some(_) => Some(decode_json(row, 4, "schéma de sortie MCP")?),
+            None => None,
+        },
+        category: row.get(5)?,
+        risk: row.get(6)?,
+        enabled: row.get(7)?,
+        discovered_at: row.get(8)?,
+    })
+}
+
+fn mcp_call_from_row(row: &Row<'_>) -> rusqlite::Result<McpCallRecord> {
+    Ok(McpCallRecord {
+        id: row.get(0)?,
+        server_id: row.get(1)?,
+        tool_name: row.get(2)?,
+        caller: row.get(3)?,
+        caller_id: row.get(4)?,
+        arguments: decode_json(row, 5, "arguments d'appel MCP")?,
+        status: row.get(6)?,
+        error: row.get(7)?,
+        duration_ms: row
+            .get::<_, Option<i64>>(8)?
+            .map(|value| value.max(0) as u64),
+        started_at: row.get(9)?,
+        finished_at: row.get(10)?,
     })
 }

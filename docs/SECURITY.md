@@ -38,6 +38,13 @@ et un lien interne légitime.
 - La configuration ne contient qu'un booléen `has_secret`.
 - Si le trousseau est verrouillé, l'enregistrement échoue explicitement plutôt
   que d'écrire un secret sur disque.
+- **Aucune lecture du trousseau au démarrage ni dans les listes** : le statut
+  affiché vérifie seulement qu'une entrée peut être construite ; la liste des
+  fournisseurs (`has_secret`/`secret_stored`) et la liste des serveurs MCP
+  (`has_secret`) s'appuient sur des drapeaux persistés. Le déverrouillage
+  système n'est demandé qu'au premier usage réel d'un secret (envoi de
+  conversation avec clé, test de fournisseur, connexion/appel MCP authentifié)
+  ou via un test explicite (`probe`) — jamais en ouvrant une fenêtre.
 - Les journaux passent par `ih_core::redaction` (préfixes de clés connus,
   `Bearer`, `api_key=`, paramètres d'URL, clés AWS, champs JSON sensibles).
 

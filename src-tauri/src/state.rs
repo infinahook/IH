@@ -9,6 +9,7 @@ use ih_core::platform::PlatformInfo;
 use ih_core::{AppPaths, IhError, IhResult, ResourcePolicy};
 use ih_extensions::mcp::McpClient;
 use ih_i18n::I18n;
+use ih_mcp::McpSession;
 use ih_security::approval::ApprovalRegistry;
 use ih_security::secrets::{KeyringSecretStore, SecretStore, SecretStoreStatus};
 use ih_store::Store;
@@ -50,6 +51,10 @@ pub struct AppState {
     pub supervisor: Arc<AgentSupervisor>,
     pub pty: Mutex<HashMap<String, PtyEntry>>,
     pub mcp: Mutex<HashMap<String, McpClient>>,
+    /// Sessions MCP distantes (Streamable HTTP / SSE), sérialisées par un
+    /// mutex asynchrone : une session est retirée le temps d'un appel puis
+    /// remise en place, ce qui évite tout accès concurrent.
+    pub mcp_sessions: tokio::sync::Mutex<HashMap<String, McpSession>>,
     /// Tours de chat en cours, annulables par identifiant de requête.
     pub chat: Arc<Mutex<HashMap<String, Canceller>>>,
     pub i18n: RwLock<I18n>,
@@ -163,6 +168,7 @@ impl AppState {
             supervisor,
             pty: Mutex::new(HashMap::new()),
             mcp: Mutex::new(HashMap::new()),
+            mcp_sessions: tokio::sync::Mutex::new(HashMap::new()),
             chat: Arc::new(Mutex::new(HashMap::new())),
             platform: PlatformInfo::detect(),
             update_status: Mutex::new(UpdateStatus {

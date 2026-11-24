@@ -549,6 +549,85 @@ export interface WorkflowRun {
   finished_at: string | null;
 }
 
+// ------------------------------------------------------------------ MCP
+
+export interface McpRemoteServer {
+  id: string;
+  name: string;
+  url: string;
+  transport: string;
+  timeout_secs: number;
+  enabled: boolean;
+  allow_auto_approve: boolean;
+  has_secret: boolean;
+  last_status: string;
+  last_error: string | null;
+  last_connected_at: string | null;
+  created_at: string;
+  updated_at: string;
+  tool_count: number;
+  connected: boolean;
+}
+
+export interface McpRemoteTool {
+  server_id: string;
+  name: string;
+  description: string;
+  input_schema: unknown;
+  output_schema?: unknown;
+  category: string;
+  risk: string;
+  enabled: boolean;
+  discovered_at: string;
+}
+
+export interface McpRemoteToolResult {
+  content: unknown[];
+  text: string;
+  structured?: unknown;
+  is_error: boolean;
+  truncated: boolean;
+}
+
+export interface McpRemoteCallOutcome {
+  status: string;
+  approval_id: string | null;
+  fingerprint: string | null;
+  result: McpRemoteToolResult | null;
+}
+
+export interface McpTestOutcome {
+  ok: boolean;
+  tool_count: number;
+  error: string | null;
+}
+
+export interface McpCallRecord {
+  id: number;
+  server_id: string;
+  tool_name: string;
+  caller: string;
+  caller_id: string | null;
+  arguments: unknown;
+  status: string;
+  error: string | null;
+  duration_ms: number | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface McpServerUpsert {
+  serverId?: string;
+  name: string;
+  url: string;
+  transport: string;
+  headers?: Record<string, string>;
+  timeoutSecs: number;
+  enabled: boolean;
+  allowAutoApprove: boolean;
+  token?: string;
+}
+
 // -------------------------------------------------------------- workspace
 
 /** Limites et exclusions du contexte projet, telles que le noyau les applique. */
@@ -927,6 +1006,65 @@ export const api = {
     disconnect: (serverId: string) => call<void>("mcp_disconnect", { id: serverId }),
   },
 
+  // serveurs MCP distants (Streamable HTTP / SSE)
+  mcpRemote: {
+    list: () => call<McpRemoteServer[]>("mcp_remote_servers_list"),
+    upsert: (server: McpServerUpsert) =>
+      call<McpRemoteServer>("mcp_server_upsert", {
+        serverId: server.serverId,
+        name: server.name,
+        url: server.url,
+        transport: server.transport,
+        headers: server.headers,
+        timeoutSecs: server.timeoutSecs,
+        enabled: server.enabled,
+        allowAutoApprove: server.allowAutoApprove,
+        token: server.token,
+      }),
+    remove: (serverId: string) => call<void>("mcp_server_delete", { id: serverId }),
+    setEnabled: (serverId: string, enabled: boolean) =>
+      call<McpRemoteServer>("mcp_server_set_enabled", { id: serverId, enabled }),
+    setSecret: (serverId: string, secret: string) =>
+      call<void>("mcp_server_set_secret", { id: serverId, secret }),
+    clearSecret: (serverId: string) =>
+      call<void>("mcp_server_clear_secret", { id: serverId }),
+    connect: (serverId: string) =>
+      call<McpRemoteTool[]>("mcp_server_connect", { id: serverId }),
+    disconnect: (serverId: string) =>
+      call<void>("mcp_server_disconnect", { id: serverId }),
+    test: (serverId: string) => call<McpTestOutcome>("mcp_server_test", { id: serverId }),
+    refreshTools: (serverId: string) =>
+      call<McpRemoteTool[]>("mcp_server_refresh_tools", { id: serverId }),
+    tools: (serverId?: string) =>
+      call<McpRemoteTool[]>("mcp_tools_list", { serverId }),
+    setToolEnabled: (serverId: string, name: string, enabled: boolean) =>
+      call<McpRemoteTool>("mcp_tool_set_enabled", { serverId, name, enabled }),
+    call: (request: {
+      serverId: string;
+      tool: string;
+      arguments: unknown;
+      caller?: string;
+      callerId?: string;
+      approvalId?: string;
+      role?: string;
+    }) => call<McpRemoteCallOutcome>("mcp_call", {
+      serverId: request.serverId,
+      tool: request.tool,
+      arguments: request.arguments,
+      caller: request.caller,
+      callerId: request.callerId,
+      approvalId: request.approvalId,
+      role: request.role,
+    }),
+    rolePermissions: () => call<Record<string, string[]>>("mcp_role_permissions_get"),
+    setRolePermissions: (role: string, tools: string[]) =>
+      call<Record<string, string[]>>("mcp_role_permissions_set", { role, tools }),
+    calls: (limit = 50, serverId?: string) =>
+      call<McpCallRecord[]>("mcp_calls_list", { limit, serverId }),
+    exportConfig: () => call<string>("mcp_export_config"),
+    agentConfig: (flavor: string) => call<string>("mcp_agent_config", { flavor }),
+  },
+
   // tâches
   tasks: {
     list: (projectId: string) => call<Task[]>("tasks_list", id(projectId)),
@@ -981,6 +1119,8 @@ export const api = {
       }),
     cancel: (requestId: string) => call<boolean>("chat_cancel", { requestId }),
     active: () => call<number>("chat_active"),
+    appendToolResult: (threadId: string, tool: string, status: string, content: string) =>
+      call<Message>("chat_append_tool_result", { threadId, tool, status, content }),
   },
 
   // historique

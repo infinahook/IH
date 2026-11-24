@@ -14,6 +14,7 @@ import { ModelsPage } from "./pages/ModelsPage";
 import { ProvidersPage } from "./pages/ProvidersPage";
 import { SkillsPage } from "./pages/SkillsPage";
 import { PluginsPage } from "./pages/PluginsPage";
+import { McpPage } from "./pages/McpPage";
 import { TerminalPage } from "./pages/TerminalPage";
 import { GitPage } from "./pages/GitPage";
 import { EditorPage } from "./pages/EditorPage";
@@ -34,6 +35,7 @@ const PAGES: Record<SectionId, ComponentType> = {
   providers: ProvidersPage,
   skills: SkillsPage,
   plugins: PluginsPage,
+  mcp: McpPage,
   terminal: TerminalPage,
   git: GitPage,
   editor: EditorPage,
