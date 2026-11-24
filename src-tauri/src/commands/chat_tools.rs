@@ -84,6 +84,21 @@ fn emit_card(handle: &AppHandle, phase: &str, call: &ChatToolCallRecord) {
     );
 }
 
+/// Budget d'appels restant pour ce tour (propositions invalides non comptées).
+pub fn remaining_call_budget(existing: &[ChatToolCallRecord]) -> usize {
+    MAX_CALLS_PER_TURN.saturating_sub(
+        existing
+            .iter()
+            .filter(|call| call.status != "invalid")
+            .count(),
+    )
+}
+
+/// Un cycle supplémentaire de tool calling est-il encore autorisé ?
+pub fn cycle_allowed(round: u32) -> bool {
+    round < MAX_TOOL_ROUNDS
+}
+
 /// Enregistre les propositions d'un tour et les présente à l'utilisateur.
 ///
 /// Renvoie les propositions **en attente de décision** (les propositions
@@ -100,12 +115,7 @@ pub fn propose_calls(
     catalog: &ChatToolCatalog,
 ) -> IhResult<Vec<ChatToolCallRecord>> {
     let existing = store.list_chat_tool_calls_for_request(request_id)?;
-    let mut budget = MAX_CALLS_PER_TURN.saturating_sub(
-        existing
-            .iter()
-            .filter(|call| call.status != "invalid")
-            .count(),
-    );
+    let mut budget = remaining_call_budget(&existing);
     let mut pending = Vec::new();
     for (position, call) in calls.iter().enumerate() {
         let over_budget = budget == 0 || position >= MAX_CALLS_PER_TURN;
@@ -449,7 +459,7 @@ pub fn continue_with(
         return Ok(false);
     }
     let round = calls.iter().map(|call| call.round).max().unwrap_or(0);
-    if round + 1 > MAX_TOOL_ROUNDS {
+    if !cycle_allowed(round) {
         let _ = deps.handle.emit(
             "ih://chat-error",
             serde_json::json!({
@@ -794,6 +804,53 @@ mod tests {
             store.decide_chat_tool_call(&call.id, "denied", None),
             Err(IhError::Conflict(_))
         ));
+    }
+
+    #[test]
+    fn le_budget_d_appels_par_tour_est_borne() {
+        let (store, thread, project) = setup();
+        let mut calls = Vec::new();
+        for index in 0..MAX_CALLS_PER_TURN + 2 {
+            calls.push(
+                store
+                    .insert_chat_tool_call(&NewChatToolCall {
+                        thread_id: thread.clone(),
+                        project_id: project.clone(),
+                        request_id: "req".into(),
+                        round: 0,
+                        provider_call_id: format!("call_{index}"),
+                        exposed_name: "a__echo".into(),
+                        server_id: "a".into(),
+                        tool: "echo".into(),
+                        risk: "low".into(),
+                        category: "read".into(),
+                        fingerprint: "f".repeat(64),
+                        arguments: serde_json::json!({}),
+                        raw_arguments: serde_json::json!({}),
+                        status: if index < 2 {
+                            "invalid".into()
+                        } else {
+                            "pending".into()
+                        },
+                        error: None,
+                    })
+                    .expect("insertion"),
+            );
+        }
+        // Les propositions invalides ne consomment pas de budget.
+        assert_eq!(
+            remaining_call_budget(&calls),
+            MAX_CALLS_PER_TURN.saturating_sub(calls.len() - 2)
+        );
+        assert_eq!(remaining_call_budget(&[]), MAX_CALLS_PER_TURN);
+    }
+
+    #[test]
+    fn les_cycles_de_continuation_sont_limites() {
+        assert!(cycle_allowed(0));
+        assert!(cycle_allowed(MAX_TOOL_ROUNDS - 1));
+        assert!(!cycle_allowed(MAX_TOOL_ROUNDS));
+        assert!(!cycle_allowed(MAX_TOOL_ROUNDS + 5));
     }
 
     #[test]

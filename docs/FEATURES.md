@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 391 tests Rust + 182 tests frontend, tous verts.
+Dernière vérification : 393 tests Rust + 182 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -127,10 +127,10 @@ Dernière vérification : 391 tests Rust + 182 tests frontend, tous verts.
 | `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
 | `ih-agent-mode` | 8 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
 | `ih-mcp` | 48 | schémas, politique URL, session unifiée ; **9 tests d'intégration Streamable HTTP**, **4 tests SSE** et **le cycle chat natif complet** (fournisseur simulé + serveur MCP local réel) |
-| `ih-desktop` | 11 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions |
-| **Rust total** | **391** | |
+| `ih-desktop` | 13 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions, **bornes d'appels et de cycles** |
+| **Rust total** | **393** | |
 | Frontend (`vitest`) | 182 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent, **MCP** |
-| **Total** | **573** | |
+| **Total** | **575** | |
 
 ## Vérifications manuelles effectuées
 

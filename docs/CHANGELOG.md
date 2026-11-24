@@ -27,8 +27,9 @@
   matérialise une **approbation à usage unique liée à l'empreinte** des
   paramètres, puis appelle `invoke_mcp_tool` — seul chemin d'exécution. Le
   résultat est renvoyé au modèle comme message `tool` et le tour reprend
-  (borné : 3 cycles, 6 appels par tour). Aucun chemin parallèle, aucune
-  reprise automatique après redémarrage.
+  (bornes **testées** : 3 cycles de continuation, 6 appels par tour, les
+  propositions invalides ne consommant pas de budget). Aucun chemin parallèle,
+  aucune reprise automatique après redémarrage.
 - **Persistance** (migration SQLite **v6**) : table `chat_tool_calls`
   (tour, cycle, identifiant d'appel fournisseur, nom exposé, serveur/outil
   réels, risque, catégorie, empreinte SHA-256, arguments redactés et argents
