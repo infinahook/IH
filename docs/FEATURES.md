@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 368 tests Rust + 181 tests frontend, tous verts.
+Dernière vérification : 391 tests Rust + 182 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -18,7 +18,7 @@ Dernière vérification : 368 tests Rust + 181 tests frontend, tous verts.
 | 4 | Fournisseurs IA cloud et locaux | ✅ | OpenAI-compatible (OpenAI, OpenRouter, custom), Anthropic, Gemini, Ollama ; chat, streaming SSE/NDJSON, modèles, santé. **Écran de conversation complet** : streaming temps réel, annulation, historique, sélection provider/modèle, réessai |
 | 5 | Gestionnaire de modèles | ✅ | Découverte réelle par API, modèle par défaut, activation par fournisseur, capacités seulement si exposées par l'API |
 | 6 | Skills : installation et mises à jour | ⚠️ | Installation depuis un dossier avec validation stricte du manifeste, empreinte SHA-256, vérification d'intégrité, activation, désinstallation. **Mise à jour depuis un registre distant : absente** |
-| 7 | Plugins MCP | ⚠️ | **Serveurs MCP natifs distants : Streamable HTTP et SSE historique** (transports réels, testés contre un serveur local), découverte d'outils, catalogue avec activation explicite, appels contrôlés par approbation liée à l'empreinte des paramètres, jeton au trousseau, anti-SSRF, tailles et délais bornés, historique et audit ; serveurs stdio existants conservés. **Reste : resources/prompts/sampling, tool use côté chat, injection automatique dans les CLI d'agents** |
+| 7 | Plugins MCP | ⚠️ | **Serveurs MCP natifs distants : Streamable HTTP et SSE historique** (transports réels, testés contre un serveur local), découverte d'outils, catalogue avec activation explicite, appels contrôlés par approbation liée à l'empreinte des paramètres, jeton au trousseau, anti-SSRF, tailles et délais bornés, historique et audit ; serveurs stdio existants conservés. **Tool calling natif livré en 0.6.2** (famille OpenAI-compatible : cartes dans la conversation, décision humaine, résultat réinjecté, continuations bornées). **Reste : resources/prompts/sampling, tool use natif pour Anthropic/Gemini/Ollama, injection automatique dans les CLI d'agents** |
 | 8 | Gestion des projets | ✅ | Ouverture par sélecteur de dossier, persistance, projets récents, retrait de liste **sans jamais supprimer le dossier** |
 | 9 | Éditeur de code | ✅ | CodeMirror 6 : coloration Rust/TS/JS/Python/JSON/TOML/Markdown/YAML/CSS/HTML, numéros de ligne, Ctrl+F, Ctrl+S, onglets, détection de conflit d'écriture |
 | 10 | Terminal Linux intégré | ⚠️ | PTY réel (`portable-pty`), saisie, redimensionnement, fermeture, filtrage ANSI/OSC. **Pas d'émulation VT complète** (curseur, écran alterné, IME) |
@@ -114,22 +114,23 @@ Dernière vérification : 368 tests Rust + 181 tests frontend, tous verts.
 | Suite | Nombre | Portée |
 |---|---|---|
 | `ih-core` | 38 | configuration, erreurs, événements, ressources, chemins, redaction, plateforme |
-| `ih-store` | 19 | migrations (v4 incluse), CRUD, cascade, pagination, concurrence, recherche, **MCP : catalogue et appels** |
-| `ih-security` | 41 | approbations (dont empreintes), expiration/rejeu, classification de risque, **politique réseau MCP (SSRF)**, trousseau |
-| `ih-providers` | 19 | 4 fournisseurs, SSE/NDJSON, erreurs 401, timeout, clé absente |
+| `ih-store` | 22 | migrations (**v4, v5 et v6**), CRUD, cascade, pagination, concurrence, recherche, **MCP : catalogue et appels**, **propositions d'outils du chat (transitions, reprise)** |
+| `ih-security` | 47 | approbations (dont empreintes), expiration/rejeu, classification de risque, **politique réseau MCP (SSRF)**, trousseau |
+| `ih-providers` | 28 | 4 fournisseurs, SSE/NDJSON, erreurs 401, timeout, clé absente, **tool calling natif (capacité, sérialisation, appels, streaming fragmenté)** |
 | `ih-agents` | 20 | adaptateurs, succès/échec, annulation, timeout, limite, sortie bornée |
 | `ih-extensions` | 27 | manifestes, empreinte, installation, prison, MCP stdio, serveur muet |
 | `ih-workspace` | 33 | Git, prison de chemins, PTY, **diff LCS**, métadonnées, écriture vérifiée |
 | `ih-orchestrator` | 23 | cycles, disponibilité, équipes, ordonnanceur, budget mémoire |
 | `ih-update` | 39 | signature Ed25519, digest, téléchargement, staging, rollback |
 | `ih-i18n` | 5 | parité FR/EN, repli, substitution |
-| `ih-chat` | 12 | streaming, annulation, historique borné, contexte injecté, erreurs, titre, recherche + **e2e Ollama réel** |
+| `ih-chat` | 19 | streaming, annulation, historique borné, contexte injecté, erreurs, titre, recherche, continueur d'outils + **e2e Ollama réel** |
 | `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
 | `ih-agent-mode` | 8 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
-| `ih-mcp` | 42 | schémas, politique URL, session unifiée ; **9 tests d'intégration Streamable HTTP** et **4 tests SSE** contre un vrai serveur MCP local |
-| **Rust total** | **368** | |
-| Frontend (`vitest`) | 181 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent, **MCP** |
-| **Total** | **530** | |
+| `ih-mcp` | 48 | schémas, politique URL, session unifiée ; **9 tests d'intégration Streamable HTTP**, **4 tests SSE** et **le cycle chat natif complet** (fournisseur simulé + serveur MCP local réel) |
+| `ih-desktop` | 11 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions |
+| **Rust total** | **391** | |
+| Frontend (`vitest`) | 182 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent, **MCP** |
+| **Total** | **573** | |
 
 ## Vérifications manuelles effectuées
 
@@ -140,6 +141,23 @@ Dernière vérification : 368 tests Rust + 181 tests frontend, tous verts.
   1 359 ms, texte partiel conservé en base avec `cancelled: true`).
   Captures : [chat-stream.png](screenshots/chat-stream.png),
   [chat-cancelled.png](screenshots/chat-cancelled.png).
+
+- **Tool calling MCP natif de bout en bout dans l'application réelle**
+  (profil isolé `IH_HOME`, trousseau de session déverrouillé, fenêtre réelle) :
+  serveur MCP local réel (`demo_server`, Streamable HTTP) + fournisseur OpenAI
+  simulé. Message **saisi dans le composeur** → le modèle demande
+  `demo__echo` → carte « En attente de décision » (aucune exécution :
+  `mcp_calls` vide, vérifié en base) → **approbation graphique** → exécution
+  réelle (`mcp_calls` : `demo/echo`, appelant `chat`, statut `completed`) →
+  résultat ajouté au fil → **continuation** → réponse finale persistée.
+  Un second cycle a validé le **refus graphique** (`denied`, aucun appel MCP)
+  et la continuation après décision. Captures :
+  [chat-tool-calls-pending.png](screenshots/chat-tool-calls-pending.png),
+  [chat-tool-calls-approved.png](screenshots/chat-tool-calls-approved.png).
+  Limite honnête de la recette : la frappe au clavier dans la webview dépend
+  du pilote X11 ; la saisie et les clics ont été validés ici, mais le scénario
+  multi-fenêtres complet (sélection de fil, changement de fournisseur) n'a pas
+  été rejoué graphiquement en 0.6.2.
 
 - `cargo clippy --workspace --all-targets -- -D warnings` : aucun avertissement.
 - `cargo fmt --all -- --check` : conforme.

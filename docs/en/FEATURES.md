@@ -6,7 +6,7 @@ This is the **honest** reference. Three statuses:
 - ⚠️ **partial**: genuinely works, but part of the need is uncovered — stated explicitly.
 - ❌ **missing**: not implemented. No UI button pretends otherwise.
 
-Last verified: 368 Rust tests + 181 frontend tests, all green.
+Last verified: 391 Rust tests + 182 frontend tests, all green.
 
 | # | Feature | Status | Detail |
 |---|---|---|---|
@@ -82,22 +82,23 @@ Last verified: 368 Rust tests + 181 frontend tests, all green.
 | Suite | Count | Scope |
 |---|---|---|
 | `ih-core` | 38 | config, errors, events, resources, paths, redaction, platform |
-| `ih-store` | 19 | migrations (incl. v4), CRUD, cascade, pagination, concurrency, search, **MCP catalog and calls** |
-| `ih-security` | 41 | approvals (fingerprint-bound), expiry/replay, risk classification, **MCP network policy (SSRF)**, keyring |
-| `ih-providers` | 19 | 4 providers, SSE/NDJSON, 401 errors, timeout, missing key |
+| `ih-store` | 22 | migrations (incl. **v4, v5 and v6**), CRUD, cascade, pagination, concurrency, search, **MCP catalog and calls**, **chat tool proposals (transitions, restart)** |
+| `ih-security` | 47 | approvals (fingerprint-bound), expiry/replay, risk classification, **MCP network policy (SSRF)**, keyring |
+| `ih-providers` | 28 | 4 providers, SSE/NDJSON, 401 errors, timeout, missing key, **native tool calling (capability, serialization, calls, fragmented streaming)** |
 | `ih-agents` | 20 | adapters, success/failure, cancel, timeout, limit, bounded output |
 | `ih-extensions` | 27 | manifests, digest, install, path jail, MCP stdio, silent server |
 | `ih-workspace` | 33 | Git, path jail, PTY, **LCS diff**, metadata, checked write |
 | `ih-orchestrator` | 23 | cycles, readiness, teams, scheduler, memory budget |
 | `ih-update` | 39 | Ed25519 signature, digest, download, staging, rollback |
 | `ih-i18n` | 5 | FR/EN parity, fallback, substitution |
-| `ih-chat` | 12 | streaming, cancellation, bounded history, injected context, errors, title, search + **real Ollama e2e** |
+| `ih-chat` | 19 | streaming, cancellation, bounded history, injected context, errors, title, search, tool continuation + **real Ollama e2e** |
 | `ih-context` | 23 | exclusions, secrets, truncation, budget, path jail, fuzzy mentions |
 | `ih-agent-mode` | 8 | worktree sandbox, change collection, adapter detection, action fingerprint |
-| `ih-mcp` | 42 | schemas, URL policy, unified session; **9 Streamable HTTP integration tests** and **4 SSE integration tests** against a real local MCP server |
-| **Rust total** | **368** | |
-| Frontend (`vitest`) | 181 | i18n, formatting, ANSI, Git, file tree, chat, layout, mentions, tabs, diff, agent, **MCP** |
-| **Total** | **530** | |
+| `ih-mcp` | 48 | schemas, URL policy, unified session; **9 Streamable HTTP integration tests**, **4 SSE tests** and **the full native chat cycle** (simulated provider + real local MCP server) |
+| `ih-desktop` | 11 | IPC commands: exposed tool catalog (names, collisions, schemas, budgets), chat tool proposals, decisions |
+| **Rust total** | **391** | |
+| Frontend (`vitest`) | 182 | i18n, formatting, ANSI, Git, file tree, chat, layout, mentions, tabs, diff, agent, **MCP** |
+| **Total** | **573** | |
 
 ## Manual verifications performed
 
@@ -108,6 +109,22 @@ Last verified: 368 Rust tests + 181 frontend tests, all green.
   1,359 ms, partial text kept in the database with `cancelled: true`).
   Screenshots: [chat-stream.png](../screenshots/chat-stream.png),
   [chat-cancelled.png](../screenshots/chat-cancelled.png).
+
+- **Native MCP tool calling end to end in the real application** (isolated
+  `IH_HOME` profile, unlocked session keyring, real window): real local MCP
+  server (`demo_server`, Streamable HTTP) + simulated OpenAI provider. Message
+  **typed in the composer** → the model requests `demo__echo` → "Awaiting
+  decision" card (no execution: `mcp_calls` empty, verified in the database)
+  → **graphical approval** → real execution (`mcp_calls`: `demo/echo`, caller
+  `chat`, status `completed`) → result appended to the thread →
+  **continuation** → final answer persisted. A second cycle validated
+  **graphical refusal** (`denied`, no MCP call) and the post-decision
+  continuation. Screenshots:
+  [chat-tool-calls-pending.png](../screenshots/chat-tool-calls-pending.png),
+  [chat-tool-calls-approved.png](../screenshots/chat-tool-calls-approved.png).
+  Honest limitation: typing into the WebView depends on the X11 pilot; typing
+  and clicks were validated here, but the full multi-window scenario (thread
+  selection, provider switching) was not replayed graphically in 0.6.2.
 
 - `cargo clippy --workspace --all-targets -- -D warnings`: no warnings.
 - `cargo fmt --all -- --check`: clean.
