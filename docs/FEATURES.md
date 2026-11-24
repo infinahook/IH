@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 367 tests Rust + 181 tests frontend, tous verts.
+Dernière vérification : 368 tests Rust + 181 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -127,7 +127,7 @@ Dernière vérification : 367 tests Rust + 181 tests frontend, tous verts.
 | `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
 | `ih-agent-mode` | 8 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
 | `ih-mcp` | 42 | schémas, politique URL, session unifiée ; **9 tests d'intégration Streamable HTTP** et **4 tests SSE** contre un vrai serveur MCP local |
-| **Rust total** | **367** | |
+| **Rust total** | **368** | |
 | Frontend (`vitest`) | 181 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent, **MCP** |
 | **Total** | **530** | |
 

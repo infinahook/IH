@@ -191,6 +191,25 @@ fn tools_to_records(server_id: &str, tools: &[ih_mcp::ToolInfo]) -> Vec<McpToolR
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Détail d'audit/approbation d'un appel, construit sur des arguments
+/// **redactés** (jamais de secret dans la table `audit` ni dans une demande
+/// d'approbation).
+fn format_call_detail(
+    server_name: &str,
+    server_url: &str,
+    tool: &str,
+    risk: &str,
+    category: &str,
+    arguments: &serde_json::Value,
+) -> String {
+    let redacted = ih_security::mcp::redact_arguments(arguments);
+    format!(
+        "Outil : {tool}\nServeur : {server_name} ({server_url})\nRisque : {risk}\nEffet : {category}\nParamètres : {}",
+        truncate(&serde_json::to_string(&redacted).unwrap_or_default(), 2000)
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 fn record_call(
     state: &AppState,
     server_id: &str,
@@ -218,7 +237,7 @@ fn record_call(
         caller_id: caller_id.map(String::from),
         arguments,
         status: status.to_string(),
-        error: error.map(|text| truncate(&text, MAX_ERROR_CHARS)),
+        error: error.map(|text| truncate(&ih_core::redaction::redact(&text), MAX_ERROR_CHARS)),
         duration_ms,
     });
     if let Err(error) = result {
@@ -797,13 +816,15 @@ pub async fn invoke_mcp_tool(state: &AppState, request: InvokeRequest) -> IhResu
         "Appel de l'outil MCP « {tool} » (serveur « {} »)",
         server.name
     );
-    let detail = format!(
-        "Outil : {tool}\nServeur : {} ({})\nRisque : {}\nEffet : {}\nParamètres : {}",
-        server.name,
-        server.url,
-        tool_record.risk,
-        tool_record.category,
-        truncate(&serde_json::to_string(&arguments).unwrap_or_default(), 2000)
+    // Le détail part dans l'audit (persisté) et dans la demande d'approbation :
+    // il ne doit jamais contenir un secret saisi comme argument.
+    let detail = format_call_detail(
+        &server.name,
+        &server.url,
+        &tool,
+        &tool_record.risk,
+        &tool_record.category,
+        &arguments,
     );
 
     match decide_mcp_call(risk, server.allow_auto_approve, caller) {
@@ -1083,4 +1104,28 @@ pub fn mcp_export_config(state: State<'_, AppState>) -> IhResult<String> {
         "note": "Secrets exclus : configurez le jeton dans IH ou dans le CLI lui-même."
     }))
     .unwrap_or_else(|_| "{}".into()))
+}
+
+#[cfg(test)]
+mod detail_tests {
+    use super::format_call_detail;
+    use serde_json::json;
+
+    #[test]
+    fn detail_audit_redacte_les_arguments_sensibles() {
+        let detail = format_call_detail(
+            "Serveur",
+            "https://mcp.exemple.com/mcp",
+            "call",
+            "low",
+            "read",
+            &json!({"path": "a.txt", "api_key": "sk-secret-123", "password": "x"}),
+        );
+        assert!(detail.contains("a.txt"), "{detail}");
+        assert!(
+            !detail.contains("sk-secret-123"),
+            "secret persisté : {detail}"
+        );
+        assert!(!detail.contains("password\":\"x"), "{detail}");
+    }
 }
