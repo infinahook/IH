@@ -115,7 +115,6 @@ fn check_bounds(value: &Value, _depth: usize) -> IhResult<()> {
     Ok(())
 }
 
-
 /// Vérifie que les arguments d'un appel respectent les contraintes
 /// structurelles du schéma : objet, propriétés typées simple, champs requis,
 /// `additionalProperties: false` respecté.
@@ -293,7 +292,8 @@ mod tests {
 
     #[test]
     fn argument_requis_manquant_refuse() {
-        let schema = json!({"type": "object", "properties": {"a": {"type": "string"}}, "required": ["a"]});
+        let schema =
+            json!({"type": "object", "properties": {"a": {"type": "string"}}, "required": ["a"]});
         let error = validate_arguments(&schema, &json!({})).unwrap_err();
         assert!(error.to_string().contains("requis"), "{error}");
     }

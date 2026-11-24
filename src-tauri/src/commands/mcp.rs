@@ -83,7 +83,9 @@ fn risk_from_str(value: &str) -> IhResult<RiskLevel> {
         "medium" => Ok(RiskLevel::Medium),
         "high" => Ok(RiskLevel::High),
         "critical" => Ok(RiskLevel::Critical),
-        other => Err(IhError::Invalid(format!("risque d'outil MCP inconnu : {other}"))),
+        other => Err(IhError::Invalid(format!(
+            "risque d'outil MCP inconnu : {other}"
+        ))),
     }
 }
 
@@ -121,9 +123,7 @@ fn server_config(state: &AppState, record: &McpServerRecord) -> IhResult<ServerC
 }
 
 fn set_status(state: &AppState, id: &str, status: &str, error: Option<&str>) {
-    let _ = state
-        .store
-        .set_mcp_server_status(id, status, error, None);
+    let _ = state.store.set_mcp_server_status(id, status, error, None);
     emit_event(
         state,
         "ih://mcp-status",
@@ -188,6 +188,7 @@ fn tools_to_records(server_id: &str, tools: &[ih_mcp::ToolInfo]) -> Vec<McpToolR
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn record_call(
     state: &AppState,
     server_id: &str,
@@ -248,7 +249,13 @@ fn tool_view(record: &McpToolRecord) -> McpToolView {
 
 #[tauri::command]
 pub async fn mcp_remote_servers_list(state: State<'_, AppState>) -> IhResult<Vec<McpServerView>> {
-    let sessions = state.mcp_sessions.lock().await.keys().cloned().collect::<Vec<_>>();
+    let sessions = state
+        .mcp_sessions
+        .lock()
+        .await
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
     let mut views = Vec::new();
     for record in state.store.list_mcp_servers()? {
         let has_secret = state
@@ -283,6 +290,7 @@ pub async fn mcp_remote_servers_list(state: State<'_, AppState>) -> IhResult<Vec
     Ok(views)
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn mcp_server_upsert(
     state: State<'_, AppState>,
@@ -329,7 +337,10 @@ pub async fn mcp_server_upsert(
 
     // Un serveur déjà connecté est déconnecté si son URL change.
     let previous = state.store.get_mcp_server(&id)?;
-    let url_changed = previous.as_ref().map(|record| record.url != url).unwrap_or(false);
+    let url_changed = previous
+        .as_ref()
+        .map(|record| record.url != url)
+        .unwrap_or(false);
     if url_changed {
         if let Some(session) = state.mcp_sessions.lock().await.remove(&id) {
             let _ = session.close().await;
@@ -346,8 +357,12 @@ pub async fn mcp_server_upsert(
         enabled,
         allow_auto_approve,
         last_status: prev_status(previous.as_ref(), enabled),
-        last_error: previous.as_ref().and_then(|record| record.last_error.clone()),
-        last_connected_at: previous.as_ref().and_then(|record| record.last_connected_at),
+        last_error: previous
+            .as_ref()
+            .and_then(|record| record.last_error.clone()),
+        last_connected_at: previous
+            .as_ref()
+            .and_then(|record| record.last_connected_at),
         created_at,
         updated_at: chrono::Utc::now(),
     };
@@ -492,10 +507,7 @@ pub async fn mcp_server_disconnect(state: State<'_, AppState>, id: String) -> Ih
 }
 
 #[tauri::command]
-pub async fn mcp_server_test(
-    state: State<'_, AppState>,
-    id: String,
-) -> IhResult<McpTestOutcome> {
+pub async fn mcp_server_test(state: State<'_, AppState>, id: String) -> IhResult<McpTestOutcome> {
     let record = state
         .store
         .get_mcp_server(&id)?
@@ -506,9 +518,12 @@ pub async fn mcp_server_test(
                 Ok(tools) => tools.len(),
                 Err(error) => {
                     let _ = session.close().await;
-                    let _ = state
-                        .store
-                        .set_mcp_server_status(&id, "error", Some(&truncate(&error.to_string(), MAX_ERROR_CHARS)), None);
+                    let _ = state.store.set_mcp_server_status(
+                        &id,
+                        "error",
+                        Some(&truncate(&error.to_string(), MAX_ERROR_CHARS)),
+                        None,
+                    );
                     return Ok(McpTestOutcome {
                         ok: false,
                         tool_count: 0,
@@ -584,7 +599,9 @@ pub fn mcp_tool_set_enabled(
     name: String,
     enabled: bool,
 ) -> IhResult<McpToolView> {
-    state.store.set_mcp_tool_enabled(&server_id, &name, enabled)?;
+    state
+        .store
+        .set_mcp_tool_enabled(&server_id, &name, enabled)?;
     let record = state
         .store
         .get_mcp_tool(&server_id, &name)?
@@ -599,6 +616,7 @@ pub fn mcp_tool_set_enabled(
 /// Vérifie le serveur (désactivé → refus), l'outil (désactivé → refus), les
 /// arguments (schéma), puis applique la décision : approbation interactive
 /// liée à l'empreinte, ou auto-approbation limitée aux lectures pré-autorisées.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn mcp_call(
     state: State<'_, AppState>,
@@ -609,7 +627,10 @@ pub async fn mcp_call(
     caller_id: Option<String>,
     approval_id: Option<String>,
 ) -> IhResult<McpCallOutcome> {
-    let caller = caller.as_deref().and_then(McpCaller::parse).unwrap_or(McpCaller::Ui);
+    let caller = caller
+        .as_deref()
+        .and_then(McpCaller::parse)
+        .unwrap_or(McpCaller::Ui);
     let server = state
         .store
         .get_mcp_server(&server_id)?
@@ -655,17 +676,17 @@ pub async fn mcp_call(
     validate_arguments(&tool_record.input_schema, &arguments)?;
     let risk = risk_from_str(&tool_record.risk)?;
     let fingerprint = mcp_call_fingerprint(&server_id, &tool, &arguments);
-    let summary = format!("Appel de l'outil MCP « {tool} » (serveur « {} »)", server.name);
+    let summary = format!(
+        "Appel de l'outil MCP « {tool} » (serveur « {} »)",
+        server.name
+    );
     let detail = format!(
         "Outil : {tool}\nServeur : {} ({})\nRisque : {}\nEffet : {}\nParamètres : {}",
         server.name,
         server.url,
         tool_record.risk,
         tool_record.category,
-        truncate(
-            &serde_json::to_string(&arguments).unwrap_or_default(),
-            2000
-        )
+        truncate(&serde_json::to_string(&arguments).unwrap_or_default(), 2000)
     );
 
     match decide_mcp_call(risk, server.allow_auto_approve, caller) {
@@ -751,7 +772,11 @@ pub async fn mcp_call(
     let result = session.call_tool(&tool, arguments.clone()).await;
     let alive = session.is_transport_alive();
     if alive {
-        state.mcp_sessions.lock().await.insert(server_id.clone(), session);
+        state
+            .mcp_sessions
+            .lock()
+            .await
+            .insert(server_id.clone(), session);
     } else {
         let _ = session.close().await;
     }

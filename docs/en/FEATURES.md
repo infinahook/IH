@@ -6,7 +6,7 @@ This is the **honest** reference. Three statuses:
 - ⚠️ **partial**: genuinely works, but part of the need is uncovered — stated explicitly.
 - ❌ **missing**: not implemented. No UI button pretends otherwise.
 
-Last verified: 256 Rust tests + 92 frontend tests, all green.
+Last verified: 349 Rust tests + 181 frontend tests, all green.
 
 | # | Feature | Status | Detail |
 |---|---|---|---|
@@ -16,7 +16,7 @@ Last verified: 256 Rust tests + 92 frontend tests, all green.
 | 4 | Cloud and local AI providers | ✅ | OpenAI-compatible (OpenAI, OpenRouter, custom), Anthropic, Gemini, Ollama; chat, SSE/NDJSON streaming, models, health. **Complete chat screen**: live streaming, cancellation, history, provider/model selection, retry |
 | 5 | Model manager | ✅ | Live API discovery, default model, per-provider enable/disable, capabilities only when the API exposes them |
 | 6 | Skills: install and updates | ⚠️ | Install from a folder with strict manifest validation, SHA-256 digest, integrity verification, enable, uninstall. **Update from a remote registry: missing** |
-| 7 | MCP plugins | ⚠️ | stdio servers, `initialize`, `tools/list`, `tools/call`, one-shot approval gating, no zombies. **No resources/prompts/sampling, no HTTP/SSE transport** |
+| 7 | MCP plugins | ⚠️ | **Native remote MCP servers: Streamable HTTP and legacy SSE** (real transports, tested against a local server), tool discovery, explicit per-tool enablement, calls gated by approvals bound to parameter fingerprints, keyring token, anti-SSRF, bounded sizes and timeouts, history and audit; existing stdio servers kept. **Remaining: resources/prompts/sampling, chat tool-use, automatic injection into agent CLIs** |
 | 8 | Project management | ✅ | Folder picker, persistence, recent projects, list removal **without ever deleting the folder** |
 | 9 | Code editor | ✅ | CodeMirror 6: Rust/TS/JS/Python/JSON/TOML/Markdown/YAML/CSS/HTML highlighting, line numbers, Ctrl+F, Ctrl+S, tabs, write-conflict detection |
 | 10 | Built-in Linux terminal | ⚠️ | Real PTY (`portable-pty`), input, resize, close, ANSI/OSC filtering. **No full VT emulation** (cursor, alternate screen, IME) |
@@ -67,7 +67,7 @@ Last verified: 256 Rust tests + 92 frontend tests, all green.
 3. **Visual Team Mode** (Lead/Worker/Reviewer): planned for 0.2.3.
 4. **CLI agent sessions fed back into chat threads**.
 5. **Remote skills registry** with update verification.
-6. **Non-stdio MCP** (HTTP/SSE, resources, prompts, sampling).
+6. **Extended MCP**: resources, prompts, sampling and model tool use — **HTTP/Streamable and SSE transports shipped in 0.6.1**.
 7. **Remote Git** (`push`, `pull`, `fetch`) and conflict resolution.
 8. **Active background automation scheduler**.
 9. **Audit page** exposed through IPC (storage exists).
@@ -81,21 +81,23 @@ Last verified: 256 Rust tests + 92 frontend tests, all green.
 
 | Suite | Count | Scope |
 |---|---|---|
-| `ih-core` | 30 | config, errors, events, resources, paths, redaction, platform |
-| `ih-store` | 15 | migrations, CRUD, cascade, pagination, concurrency, search |
-| `ih-security` | 19 | approvals, expiry/replay, risk classification, keyring |
-| `ih-providers` | 15 | 4 providers, SSE/NDJSON, 401 errors, timeout, missing key |
-| `ih-agents` | 13 | adapters, success/failure, cancel, timeout, limit, bounded output |
+| `ih-core` | 38 | config, errors, events, resources, paths, redaction, platform |
+| `ih-store` | 19 | migrations (incl. v4), CRUD, cascade, pagination, concurrency, search, **MCP catalog and calls** |
+| `ih-security` | 41 | approvals (fingerprint-bound), expiry/replay, risk classification, **MCP network policy (SSRF)**, keyring |
+| `ih-providers` | 19 | 4 providers, SSE/NDJSON, 401 errors, timeout, missing key |
+| `ih-agents` | 20 | adapters, success/failure, cancel, timeout, limit, bounded output |
 | `ih-extensions` | 27 | manifests, digest, install, path jail, MCP stdio, silent server |
+| `ih-workspace` | 33 | Git, path jail, PTY, **LCS diff**, metadata, checked write |
 | `ih-orchestrator` | 23 | cycles, readiness, teams, scheduler, memory budget |
 | `ih-update` | 39 | Ed25519 signature, digest, download, staging, rollback |
 | `ih-i18n` | 5 | FR/EN parity, fallback, substitution |
-| `ih-chat` | 11 | streaming, cancellation, bounded history, injected context, errors, title, search + **real Ollama e2e** |
+| `ih-chat` | 12 | streaming, cancellation, bounded history, injected context, errors, title, search + **real Ollama e2e** |
 | `ih-context` | 23 | exclusions, secrets, truncation, budget, path jail, fuzzy mentions |
-| `ih-workspace` | 33 | Git, path jail, PTY, **LCS diff**, metadata, checked write |
-| **Rust total** | **256** | |
-| Frontend (`vitest`) | 92 | i18n, formatting, ANSI, Git, file tree, chat, **layout, mentions, tabs, diff** |
-| **Total** | **348** | |
+| `ih-agent-mode` | 8 | worktree sandbox, change collection, adapter detection, action fingerprint |
+| `ih-mcp` | 42 | schemas, URL policy, unified session; **9 Streamable HTTP integration tests** and **4 SSE integration tests** against a real local MCP server |
+| **Rust total** | **349** | |
+| Frontend (`vitest`) | 181 | i18n, formatting, ANSI, Git, file tree, chat, layout, mentions, tabs, diff, agent, **MCP** |
+| **Total** | **530** | |
 
 ## Manual verifications performed
 

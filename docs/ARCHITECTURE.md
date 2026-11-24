@@ -53,6 +53,15 @@
 | `ih-chat` | moteur de conversation : streaming, annulation, contexte injecté | annulation, historique borné, e2e Ollama réel |
 | `ih-context` | assemblage du contexte projet, exclusions, mentions `@` | exclusions, secrets, troncature, budget, prison de chemins |
 | `ih-i18n` | catalogues FR/EN partagés avec l'interface | parité stricte des clés |
+| `ih-mcp` | client MCP : transports réseau (Streamable HTTP via `rmcp`, SSE historique maison), validation de schéma et d'arguments, URL épinglée | SSRF, rebinding, redirections, tailles, délais, reconnexions |
+
+## Client MCP
+
+`ih-desktop` expose un point d'entrée unique (`mcp_call`) : serveur activé,
+outil activé, arguments validés, décision d'approbation (empreinte SHA-256 des
+paramètres, auto-approbation limitée aux lectures pré-autorisées), exécution
+via `ih-mcp`, historique et audit. Les jetons vivent dans le trousseau
+(`mcp:<id>`), jamais en base. Détail : [MCP.md](MCP.md).
 
 ## Flux d'une session d'agent
 

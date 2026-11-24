@@ -1,5 +1,57 @@
 # Journal des versions
 
+## 0.6.1 — MCP natif : Streamable HTTP et SSE
+
+### Ajouté
+- **Crate `ih-mcp`** : client MCP natif.
+  - Transport **Streamable HTTP** via `rmcp` 3.11 (SDK officiel,
+    Apache-2.0) : négociation, sessions `Mcp-Session-Id`, flux SSE de réponse,
+    reconnexions, expiration de session.
+  - Transport **SSE historique** (HTTP+SSE 2024-11-05) implémenté localement :
+    le SDK officiel l'a retiré. Flux borné, délais en envoi et en attente,
+    reconnexions contrôlées (repli exponentiel, abandon explicite).
+  - URL **épinglée** après résolution DNS (anti-rebinding), redirections non
+    suivies, proxys ignorés, en-têtes réservés refusés.
+  - Validation structurelle des schémas d'outils et des arguments.
+- **Sécurité** (`ih-security`) : politique réseau anti-SSRF (blocage métadonnées
+  cloud/link-local/CGNAT/réservées, revalidation des adresses résolues) ;
+  classification MCP (lecture/écriture/exécution/destructif/réseau) ;
+  décision d'appel (auto-approbation limitée aux lectures pré-autorisées) ;
+  empreinte canonique SHA-256 des paramètres ; approbations **liées à
+  l'empreinte** (`ask_with_fingerprint`, `consume_with_fingerprint`).
+- **Persistance** (migration SQLite v4) : `mcp_servers`, `mcp_tools`,
+  `mcp_calls` ; catalogue avec préservation des activations ; historique pour
+  l'observabilité ; cascade à la suppression. Aucun secret en base.
+- **IPC** : `mcp_call` (point d'entrée unique : serveur, outil, arguments,
+  permission, approbation, exécution, historique, audit), gestion complète des
+  serveurs (ajout/édition/suppression/activation/connexion/déconnexion/test/
+  rafraîchissement), catalogue d'outils, historique, export de configuration
+  sans secrets. Événements `ih://mcp-status`, `ih://mcp-discovered`,
+  `ih://mcp-call`.
+- **Interface** : section **Serveurs MCP** (transport, URL, délai, jeton
+  trousseau, en-têtes JSON, pré-autorisation), statuts lisibles, catalogue avec
+  risque et activation individuelle, appel avec approbation affichant serveur,
+  outil, paramètres, effet, risque et empreinte ; historique compact ; export.
+
+### Tests
+- `ih-mcp` : 29 tests unitaires + **9 tests d'intégration Streamable HTTP** et
+  **4 tests d'intégration SSE** contre un vrai serveur MCP local (JSON-RPC et
+  flux SSE réels, 127.0.0.1) : connexion, découverte, appels, erreurs serveur,
+  délai, réponse surdimensionnée, JSON invalide, schémas invalides exclus,
+  jeton exigé, redirection non suivie, reconnexion après coupure.
+- `ih-security` : URL/SSRF, classification, décision, empreintes, approbations
+  liées (42 tests).
+- `ih-store` : migration v4, CRUD serveurs, catalogue (préservation
+  d'activation, purge), historique et cascade (19 tests).
+- Frontend : helpers MCP (schéma, risques, troncature) ; i18n FR/EN en parité.
+
+### Limites assumées
+OAuth 2.1 non intégré ; appel d'outil proposé par le modèle (tool use) non
+câblé ; injection automatique dans les CLI d'agents et étapes MCP des
+automatisations non implémentées ; ressources/prompts/sampling MCP non exposés.
+Détail : [docs/MCP.md](MCP.md).
+
+
 ## 0.2.0 — AI Workspace · Chat
 
 ### Ajouté
