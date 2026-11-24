@@ -126,6 +126,7 @@ pub fn run() {
             commands::mcp::mcp_call,
             commands::mcp::mcp_calls_list,
             commands::mcp::mcp_export_config,
+            commands::mcp::mcp_agent_config,
             // skills & MCP stdio (legacy)
             commands::extensions::skills_list,
             commands::extensions::skill_install,

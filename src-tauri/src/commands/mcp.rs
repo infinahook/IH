@@ -9,6 +9,7 @@ use crate::state::AppState;
 use ih_core::{IhError, IhResult};
 use ih_mcp::http::build_custom_headers;
 use ih_mcp::schema::validate_arguments;
+use ih_mcp::{cli_config, CliFlavor, CliServer};
 use ih_mcp::{McpSession, McpTransport, ServerConfig};
 use ih_security::mcp::{
     decide_mcp_call, mcp_call_fingerprint, mcp_secret_account, McpCallDecision, McpCaller,
@@ -900,6 +901,34 @@ pub fn invoke_mcp_tool_blocking(
     receiver
         .recv()
         .map_err(|_| IhError::Internal("thread d'appel MCP interrompu".into()))?
+}
+
+/// Génère la configuration MCP d'un CLI d'agent (sans aucun secret).
+#[tauri::command]
+pub fn mcp_agent_config(state: State<'_, AppState>, flavor: String) -> IhResult<String> {
+    let flavor = CliFlavor::parse(&flavor)
+        .ok_or_else(|| IhError::Invalid("CLI d'agent inconnu (claude, gemini, opencode)".into()))?;
+    let mut servers = Vec::new();
+    for record in state.store.list_mcp_servers()? {
+        if !record.enabled {
+            continue;
+        }
+        let has_secret = state
+            .secrets
+            .get(&mcp_secret_account(&record.id))
+            .ok()
+            .flatten()
+            .is_some();
+        servers.push(CliServer {
+            id: record.id.clone(),
+            name: record.name.clone(),
+            url: record.url.clone(),
+            transport: transport_from_str(&record.transport)?,
+            headers: record.headers.clone(),
+            has_secret,
+        });
+    }
+    Ok(cli_config(flavor, &servers))
 }
 
 #[tauri::command]

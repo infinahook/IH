@@ -1465,6 +1465,9 @@
     "tools_refreshed": "Tools refreshed: {count}.",
     "invalid_json": "Invalid JSON: {message}",
     "object_required": "Arguments must be a JSON object.",
-    "name_url_required": "Enter a name and a URL."
+    "name_url_required": "Enter a name and a URL.",
+    "agent_config": "CLI config",
+    "agent_config_done": "Configuration for {flavor} generated (without secrets).",
+    "agent_flavor": "Agent CLI"
   }
 }

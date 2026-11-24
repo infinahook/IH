@@ -1057,6 +1057,7 @@ export const api = {
     calls: (limit = 50, serverId?: string) =>
       call<McpCallRecord[]>("mcp_calls_list", { limit, serverId }),
     exportConfig: () => call<string>("mcp_export_config"),
+    agentConfig: (flavor: string) => call<string>("mcp_agent_config", { flavor }),
   },
 
   // tâches

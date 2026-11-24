@@ -34,6 +34,9 @@
 - **Automatisations** : étapes « outil MCP » (`server_id`, `mcp_tool`,
   `arguments`) exécutées via le même point d'entrée, avec la règle de mode sans
   interaction (seules les lectures pré-autorisées s'exécutent).
+- **Agents / Team** : `mcp_agent_config` génère la configuration MCP des CLI
+  (Claude Code, Gemini CLI, OpenCode) sans secrets ; fichier non injecté
+  automatiquement (documenté).
 - **Interface** : section **Serveurs MCP** (transport, URL, délai, jeton
   trousseau, en-têtes JSON, pré-autorisation), statuts lisibles, catalogue avec
   risque et activation individuelle, appel avec approbation affichant serveur,

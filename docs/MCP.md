@@ -172,11 +172,22 @@ encore câblés : cette partie est **non validée** et documentée comme telle.
 ## Intégration Agent Mode et Team Mode
 
 Les agents d'IH sont des **CLI externes** (claude, codex, gemini, opencode) :
-ils ne peuvent pas appeler la couche MCP interne d'IH. L'intégration propre
-consiste à leur fournir la configuration MCP (serveur, URL, en-têtes) via
-`mcp_export_config` — **sans secrets** (le jeton est à configurer dans le CLI
-lui-même). L'injection automatique dans chaque CLI et la restriction des outils
-par rôle (Team) restent à faire ; aucune permission n'est accordée par défaut.
+ils ne peuvent pas appeler la couche MCP interne d'IH. IH fournit donc leur
+configuration MCP **sans aucun secret** :
+
+- `mcp_export_config` : objet générique `mcpServers` (URL, transport,
+  en-têtes, marqueur « jeton au trousseau ») ;
+- `mcp_agent_config(flavor)` (interface : sélecteur « Config CLI ») : variante
+  par CLI — `claude` (type `http`/`sse`), `gemini` (même forme), `opencode`
+  (`type: remote`) — générée et testée automatiquement, **sans le jeton** (le
+  CLI configure sa propre authentification).
+
+Le fichier n'est **pas injecté automatiquement** dans les sessions d'agent ni
+dans les rôles d'équipe : chaque CLI a son propre format et ses propres règles
+(et aucun CLI n'est installé sur la machine de validation). L'injection
+automatique par adaptateur et la **restriction des outils MCP par rôle**
+(Lead/Worker/Reviewer) restent à implémenter ; par défaut, aucun rôle ne reçoit
+de permission MCP.
 
 ## Intégration Automatisations
 
@@ -209,8 +220,9 @@ ces étapes sur le même exécuteur (le bridge synchrone est déjà en place).
    seulement).
 2. **Tool use côté modèle** : les modèles de chat ne proposent pas encore
    d'appel d'outil MCP ; l'invocation est explicite via l'interface.
-3. **Injections dans les CLI d'agents** : export manuel de configuration
-   uniquement.
+3. **Injections dans les CLI d'agents** : export manuel (`mcp_agent_config`)
+   uniquement ; aucune écriture automatique de fichier ni argument CLI ajouté
+   aux sessions d'agents, et pas de permissions MCP par rôle d'équipe.
 4. **Workflows** : étapes « outil MCP » disponibles à l'exécution manuelle ;
    l'intégration au planificateur d'arrière-plan suivra la fusion de 0.6.0.
 5. **MCP stdio** : toujours via `ih-extensions` (page Plugins), non migré dans

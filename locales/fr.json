@@ -1465,6 +1465,9 @@
     "tools_refreshed": "Outils rafraîchis : {count}.",
     "invalid_json": "JSON invalide : {message}",
     "object_required": "Les arguments doivent être un objet JSON.",
-    "name_url_required": "Saisissez un nom et une URL."
+    "name_url_required": "Saisissez un nom et une URL.",
+    "agent_config": "Config CLI",
+    "agent_config_done": "Configuration pour {flavor} générée (sans secrets).",
+    "agent_flavor": "CLI d'agent"
   }
 }

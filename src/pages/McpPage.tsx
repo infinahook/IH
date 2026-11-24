@@ -73,6 +73,7 @@ export function McpPage() {
   const [toDelete, setToDelete] = useState<McpRemoteServer | null>(null);
   const [busyServer, setBusyServer] = useState<string | null>(null);
   const [exported, setExported] = useState<string | null>(null);
+  const [cliFlavor, setCliFlavor] = useState("claude");
 
   const serverList = servers.data ?? [];
   const allTools = tools.data ?? [];
@@ -270,6 +271,14 @@ export function McpPage() {
     }
   };
 
+  const exportAgentConfig = async () => {
+    const config = await callAction.run(() => api.mcpRemote.agentConfig(cliFlavor));
+    if (config !== undefined && config !== null) {
+      setExported(config);
+      notify(t("mcp.agent_config_done", { flavor: cliFlavor }));
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -277,6 +286,20 @@ export function McpPage() {
         subtitle={t("mcp.subtitle")}
         actions={
           <div className="button-row compact">
+            <select
+              className="input"
+              aria-label={t("mcp.agent_flavor")}
+              value={cliFlavor}
+              onChange={(event) => setCliFlavor(event.target.value)}
+            >
+              <option value="claude">Claude Code</option>
+              <option value="gemini">Gemini CLI</option>
+              <option value="opencode">OpenCode</option>
+            </select>
+            <button type="button" className="ghost" onClick={() => void exportAgentConfig()}>
+              <Download size={15} aria-hidden="true" />
+              {t("mcp.agent_config")}
+            </button>
             <button type="button" className="ghost" onClick={() => void exportConfig()}>
               <Download size={15} aria-hidden="true" />
               {t("mcp.export_config")}

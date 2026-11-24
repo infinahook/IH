@@ -35,7 +35,8 @@ pub mod sse;
 pub mod streamable;
 
 pub use config::{
-    McpTransport, ServerConfig, DEFAULT_TIMEOUT, MAX_RESPONSE_BYTES, MAX_SSE_EVENT_BYTES,
+    cli_config, CliFlavor, CliServer, McpTransport, ServerConfig, DEFAULT_TIMEOUT,
+    MAX_RESPONSE_BYTES, MAX_SSE_EVENT_BYTES,
 };
 pub use schema::validate_tool_schema;
 pub use session::{McpSession, ToolCallResult, ToolInfo};

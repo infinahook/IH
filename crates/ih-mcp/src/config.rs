@@ -96,6 +96,170 @@ impl ServerConfig {
     }
 }
 
+/// CLI d'agent cible pour la génération de configuration MCP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CliFlavor {
+    /// Claude Code (`mcpServers` avec `type: http|sse`).
+    Claude,
+    /// Gemini CLI (`mcpServers` avec `url`).
+    Gemini,
+    /// OpenCode (`mcp` avec `type: remote`).
+    Opencode,
+}
+
+impl CliFlavor {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "claude" => Some(Self::Claude),
+            "gemini" => Some(Self::Gemini),
+            "opencode" => Some(Self::Opencode),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Gemini => "gemini",
+            Self::Opencode => "opencode",
+        }
+    }
+}
+
+/// Serveur exporté vers un CLI : aucune valeur secrète n'est incluse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliServer {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub transport: McpTransport,
+    pub headers: std::collections::BTreeMap<String, String>,
+    /// Jeton présent au trousseau (signalé, jamais exporté).
+    pub has_secret: bool,
+}
+
+/// Génère la configuration MCP d'un CLI d'agent.
+///
+/// Le format exact de chaque CLI a évolué plusieurs fois ; cette génération
+/// couvre le sous-ensemble documenté (URL HTTP/SSE, en-têtes non secrets) et
+/// **n'injecte jamais** de jeton : le CLI doit configurer lui-même son
+/// authentification. Le fichier généré n'est pas écrit par IH dans cette
+/// version : l'utilisateur le copie ou le passe en argument au CLI.
+pub fn cli_config(flavor: CliFlavor, servers: &[CliServer]) -> String {
+    let enabled: Vec<&CliServer> = servers.iter().collect();
+    let mut map = serde_json::Map::new();
+    match flavor {
+        CliFlavor::Claude | CliFlavor::Gemini => {
+            for server in &enabled {
+                let mut entry = serde_json::Map::new();
+                let transport = if server.transport == McpTransport::Sse {
+                    "sse"
+                } else {
+                    "http"
+                };
+                entry.insert("type".into(), serde_json::Value::String(transport.into()));
+                entry.insert("url".into(), serde_json::Value::String(server.url.clone()));
+                if !server.headers.is_empty() {
+                    let headers = server
+                        .headers
+                        .iter()
+                        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                        .collect::<serde_json::Map<_, _>>();
+                    entry.insert("headers".into(), serde_json::Value::Object(headers));
+                }
+                if server.has_secret {
+                    entry.insert(
+                        "auth".into(),
+                        serde_json::Value::String("bearer (trousseau, non exporté)".into()),
+                    );
+                }
+                map.insert(server.id.clone(), serde_json::Value::Object(entry));
+            }
+            serde_json::to_string_pretty(&serde_json::json!({ "mcpServers": map }))
+                .unwrap_or_default()
+        }
+        CliFlavor::Opencode => {
+            for server in &enabled {
+                let mut entry = serde_json::Map::new();
+                entry.insert("type".into(), serde_json::Value::String("remote".into()));
+                entry.insert("url".into(), serde_json::Value::String(server.url.clone()));
+                if !server.headers.is_empty() {
+                    let headers = server
+                        .headers
+                        .iter()
+                        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                        .collect::<serde_json::Map<_, _>>();
+                    entry.insert("headers".into(), serde_json::Value::Object(headers));
+                }
+                map.insert(server.id.clone(), serde_json::Value::Object(entry));
+            }
+            serde_json::to_string_pretty(&serde_json::json!({ "mcp": map })).unwrap_or_default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    fn server(id: &str, transport: McpTransport, secret: bool) -> CliServer {
+        let mut headers = std::collections::BTreeMap::new();
+        headers.insert("X-Tenant".into(), "ih".into());
+        CliServer {
+            id: id.into(),
+            name: format!("serveur {id}"),
+            url: format!("https://mcp.exemple.com/{id}"),
+            transport,
+            headers,
+            has_secret: secret,
+        }
+    }
+
+    #[test]
+    fn configuration_claude_json() {
+        let config = cli_config(
+            CliFlavor::Claude,
+            &[server("a", McpTransport::StreamableHttp, true)],
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(parsed["mcpServers"]["a"]["type"], "http");
+        assert_eq!(
+            parsed["mcpServers"]["a"]["url"],
+            "https://mcp.exemple.com/a"
+        );
+        assert_eq!(parsed["mcpServers"]["a"]["headers"]["X-Tenant"], "ih");
+        assert!(parsed["mcpServers"]["a"]["auth"].is_string());
+        // Aucun secret en clair : seul un marqueur est exporté.
+        assert!(!config.contains("Bearer "));
+    }
+
+    #[test]
+    fn transport_sse_marque_sse() {
+        let config = cli_config(CliFlavor::Claude, &[server("b", McpTransport::Sse, false)]);
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(parsed["mcpServers"]["b"]["type"], "sse");
+    }
+
+    #[test]
+    fn configuration_opencode_remote() {
+        let config = cli_config(
+            CliFlavor::Opencode,
+            &[server("c", McpTransport::StreamableHttp, false)],
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(parsed["mcp"]["c"]["type"], "remote");
+        assert_eq!(parsed["mcp"]["c"]["url"], "https://mcp.exemple.com/c");
+    }
+
+    #[test]
+    fn liste_vide_donne_un_objet_vide() {
+        let config = cli_config(CliFlavor::Gemini, &[]);
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert!(parsed["mcpServers"].as_object().unwrap().is_empty());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

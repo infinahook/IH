@@ -6,7 +6,7 @@ This is the **honest** reference. Three statuses:
 - ⚠️ **partial**: genuinely works, but part of the need is uncovered — stated explicitly.
 - ❌ **missing**: not implemented. No UI button pretends otherwise.
 
-Last verified: 349 Rust tests + 181 frontend tests, all green.
+Last verified: 353 Rust tests + 181 frontend tests, all green.
 
 | # | Feature | Status | Detail |
 |---|---|---|---|
@@ -95,7 +95,7 @@ Last verified: 349 Rust tests + 181 frontend tests, all green.
 | `ih-context` | 23 | exclusions, secrets, truncation, budget, path jail, fuzzy mentions |
 | `ih-agent-mode` | 8 | worktree sandbox, change collection, adapter detection, action fingerprint |
 | `ih-mcp` | 42 | schemas, URL policy, unified session; **9 Streamable HTTP integration tests** and **4 SSE integration tests** against a real local MCP server |
-| **Rust total** | **349** | |
+| **Rust total** | **353** | |
 | Frontend (`vitest`) | 181 | i18n, formatting, ANSI, Git, file tree, chat, layout, mentions, tabs, diff, agent, **MCP** |
 | **Total** | **530** | |
 
