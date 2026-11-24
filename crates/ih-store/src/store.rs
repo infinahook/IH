@@ -1158,8 +1158,8 @@ impl Store {
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, url, transport, headers, timeout_secs, enabled,
-                        allow_auto_approve, last_status, last_error, last_connected_at,
-                        created_at, updated_at
+                        allow_auto_approve, has_secret, last_status, last_error,
+                        last_connected_at, created_at, updated_at
                  FROM mcp_servers
                  ORDER BY created_at DESC, rowid DESC",
             )
@@ -1177,8 +1177,8 @@ impl Store {
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, url, transport, headers, timeout_secs, enabled,
-                        allow_auto_approve, last_status, last_error, last_connected_at,
-                        created_at, updated_at
+                        allow_auto_approve, has_secret, last_status, last_error,
+                        last_connected_at, created_at, updated_at
                  FROM mcp_servers
                  WHERE id = ?1",
             )
@@ -1212,9 +1212,9 @@ impl Store {
         conn.execute(
             "INSERT INTO mcp_servers
                 (id, name, url, transport, headers, timeout_secs, enabled,
-                 allow_auto_approve, last_status, last_error, last_connected_at,
-                 created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                 allow_auto_approve, has_secret, last_status, last_error,
+                 last_connected_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  url = excluded.url,
@@ -1223,6 +1223,7 @@ impl Store {
                  timeout_secs = excluded.timeout_secs,
                  enabled = excluded.enabled,
                  allow_auto_approve = excluded.allow_auto_approve,
+                 has_secret = excluded.has_secret,
                  last_status = excluded.last_status,
                  last_error = excluded.last_error,
                  last_connected_at = excluded.last_connected_at,
@@ -1236,6 +1237,7 @@ impl Store {
                 i64::from(server.timeout_secs),
                 server.enabled,
                 server.allow_auto_approve,
+                server.has_secret,
                 server.last_status,
                 server.last_error,
                 server.last_connected_at,
@@ -1652,11 +1654,12 @@ fn mcp_server_from_row(row: &Row<'_>) -> rusqlite::Result<McpServerRecord> {
         timeout_secs: get_u32(row, 5, "délai du serveur MCP")?,
         enabled: row.get(6)?,
         allow_auto_approve: row.get(7)?,
-        last_status: row.get(8)?,
-        last_error: row.get(9)?,
-        last_connected_at: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        has_secret: row.get(8)?,
+        last_status: row.get(9)?,
+        last_error: row.get(10)?,
+        last_connected_at: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
 

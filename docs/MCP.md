@@ -26,7 +26,7 @@ src/ (React) ── IPC typé ──▶ ih-desktop (Tauri 2)
                               │ sécurité         ── ih-security::net (SSRF,
                               │                    classification, empreintes)
                               ▼
-                          SQLite (ih-store, migration v4)
+                          SQLite (ih-store, migrations v4/v5)
                               │ mcp_servers · mcp_tools · mcp_calls
                               ▼
                           Trousseau (secrets) : mcp:<id>

@@ -61,7 +61,13 @@ pub async fn chat_send(
             "le fournisseur {provider_id} est désactivé"
         )));
     }
-    let secret = state.secrets.get(&provider_account(&provider_id))?;
+    // Le trousseau n'est lu que si une clé y est déclarée : une conversation
+    // locale (Ollama) ne doit pas déclencher de déverrouillage ni de prompt.
+    let secret = if provider_config.has_secret {
+        state.secrets.get(&provider_account(&provider_id))?
+    } else {
+        None
+    };
     // Échoue avant tout travail si la clé manque (fournisseur cloud).
     let provider = build_provider(&provider_config, secret)?;
 

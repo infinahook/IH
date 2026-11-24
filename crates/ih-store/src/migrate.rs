@@ -21,7 +21,7 @@ use rusqlite::Connection;
 use crate::util::db_err;
 
 /// Version de schéma attendue par ce crate.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// v1 — schéma initial.
 ///
@@ -270,6 +270,16 @@ CREATE INDEX idx_mcp_calls_started ON mcp_calls (started_at DESC);
 CREATE INDEX idx_mcp_calls_server ON mcp_calls (server_id, id DESC);
 "#;
 
+/// v5 — MCP : mémoriser l'existence d'un jeton sans jamais lire le trousseau.
+///
+/// `mcp_servers.has_secret` est un simple drapeau, comme `providers.has_secret`
+/// dans la configuration : il permet d'afficher « jeton configuré » sans
+/// solliciter le trousseau (qui déclencherait une demande de déverrouillage).
+pub(crate) const V5: &str = r#"
+ALTER TABLE mcp_servers ADD COLUMN has_secret INTEGER NOT NULL DEFAULT 0
+    CHECK (has_secret IN (0, 1));
+"#;
+
 /// Applique les migrations manquantes et renvoie la version courante.
 pub(crate) fn migrate(conn: &mut Connection) -> IhResult<()> {
     let current: i64 = conn
@@ -338,6 +348,19 @@ pub(crate) fn migrate(conn: &mut Connection) -> IhResult<()> {
         tx.commit()
             .map_err(|err| db_err("validation de la migration v4", err))?;
         tracing::info!(version = 4, "migration du schéma ih-store appliquée");
+    }
+
+    if current < 5 {
+        let tx = conn
+            .transaction()
+            .map_err(|err| db_err("début de la migration v5", err))?;
+        tx.execute_batch(V5)
+            .map_err(|err| db_err("application de la migration v5", err))?;
+        tx.pragma_update(None, "user_version", 5_i64)
+            .map_err(|err| db_err("écriture de user_version = 5", err))?;
+        tx.commit()
+            .map_err(|err| db_err("validation de la migration v5", err))?;
+        tracing::info!(version = 5, "migration du schéma ih-store appliquée");
     }
 
     Ok(())

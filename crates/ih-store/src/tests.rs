@@ -857,6 +857,7 @@ fn new_mcp_server(id: &str) -> McpServerRecord {
         timeout_secs: 30,
         enabled: true,
         allow_auto_approve: false,
+        has_secret: false,
         last_status: "disconnected".into(),
         last_error: None,
         last_connected_at: None,
@@ -883,7 +884,7 @@ fn new_mcp_tool(server_id: &str, name: &str, risk: &str) -> McpToolRecord {
 fn mcp_serveurs_crud_et_etat() {
     let db = TempDb::new();
     let store = Store::open(&db.path()).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 4);
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
 
     let mut server = new_mcp_server("srv-1");
     store.upsert_mcp_server(&server).unwrap();

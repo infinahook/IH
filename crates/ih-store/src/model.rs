@@ -264,6 +264,9 @@ pub struct McpServerRecord {
     /// Pré-autorisation explicite : seules les lectures peuvent être
     /// auto-approuvées ; tout le reste exige une approbation interactive.
     pub allow_auto_approve: bool,
+    /// Un jeton existe-t-il au trousseau ? Drapeau persisté, jamais relu du
+    /// trousseau à l'affichage (le déverrouillage n'est demandé qu'à l'usage).
+    pub has_secret: bool,
     /// `disconnected`, `connecting`, `connected`, `error`.
     pub last_status: String,
     pub last_error: Option<String>,

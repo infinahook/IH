@@ -65,9 +65,12 @@
 
 ### Corrigé
 - Le trousseau système n'est plus sollicité au démarrage : le statut ne lit
-  plus d'entrée sonde (ce qui déclenchait la demande de mot de passe du
-  trousseau à chaque ouverture d'IH). Le déverrouillage n'est demandé qu'au
-  premier usage réel d'un secret, via `probe` pour un test explicite.
+  plus d'entrée sonde ; la liste des fournisseurs n'effectue plus de lecture
+  (drapeau `has_secret` persisté), et l'existence d'un jeton MCP est désormais
+  un drapeau en base (migration v5, `mcp_servers.has_secret`). Le chat local
+  (Ollama) ne lit plus le trousseau. Le déverrouillage n'est demandé qu'au
+  premier usage réel d'un secret (conversation avec clé, test de fournisseur,
+  connexion/appel MCP authentifié).
 
 ### Limites assumées
 OAuth 2.1 non intégré ; appel d'outil proposé par le modèle (tool use) non

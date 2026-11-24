@@ -322,12 +322,7 @@ pub async fn mcp_remote_servers_list(state: State<'_, AppState>) -> IhResult<Vec
         .collect::<Vec<_>>();
     let mut views = Vec::new();
     for record in state.store.list_mcp_servers()? {
-        let has_secret = state
-            .secrets
-            .get(&mcp_secret_account(&record.id))
-            .ok()
-            .flatten()
-            .is_some();
+        let has_secret = record.has_secret;
         let tool_count = state
             .store
             .list_mcp_tools(Some(&record.id))
@@ -394,14 +389,18 @@ pub async fn mcp_server_upsert(
         None => (format!("mcp-{}", uuid::Uuid::new_v4()), chrono::Utc::now()),
     };
 
+    // Un serveur déjà connecté est déconnecté si son URL change.
+    let previous = state.store.get_mcp_server(&id)?;
+    let mut has_secret = previous
+        .as_ref()
+        .map(|record| record.has_secret)
+        .unwrap_or(false);
     if let Some(token) = &token {
         if !token.trim().is_empty() {
             state.secrets.set(&mcp_secret_account(&id), token)?;
+            has_secret = true;
         }
     }
-
-    // Un serveur déjà connecté est déconnecté si son URL change.
-    let previous = state.store.get_mcp_server(&id)?;
     let url_changed = previous
         .as_ref()
         .map(|record| record.url != url)
@@ -421,6 +420,7 @@ pub async fn mcp_server_upsert(
         timeout_secs,
         enabled,
         allow_auto_approve,
+        has_secret,
         last_status: prev_status(previous.as_ref(), enabled),
         last_error: previous
             .as_ref()
@@ -433,12 +433,6 @@ pub async fn mcp_server_upsert(
     };
     state.store.upsert_mcp_server(&record)?;
 
-    let has_secret = state
-        .secrets
-        .get(&mcp_secret_account(&id))
-        .ok()
-        .flatten()
-        .is_some();
     Ok(McpServerView {
         id: record.id.clone(),
         name: record.name.clone(),
@@ -516,16 +510,25 @@ pub fn mcp_server_set_secret(
     id: String,
     secret: String,
 ) -> IhResult<()> {
-    state
+    let mut record = state
         .store
         .get_mcp_server(&id)?
         .ok_or_else(|| IhError::NotFound(format!("serveur MCP {id}")))?;
-    state.secrets.set(&mcp_secret_account(&id), &secret)
+    state.secrets.set(&mcp_secret_account(&id), &secret)?;
+    record.has_secret = true;
+    record.updated_at = chrono::Utc::now();
+    state.store.upsert_mcp_server(&record)
 }
 
 #[tauri::command]
 pub fn mcp_server_clear_secret(state: State<'_, AppState>, id: String) -> IhResult<()> {
-    state.secrets.delete(&mcp_secret_account(&id))
+    state.secrets.delete(&mcp_secret_account(&id))?;
+    if let Some(mut record) = state.store.get_mcp_server(&id)? {
+        record.has_secret = false;
+        record.updated_at = chrono::Utc::now();
+        state.store.upsert_mcp_server(&record)?;
+    }
+    Ok(())
 }
 
 /// Connexion manuelle : ouvre la session, découvre et met en catalogue les
@@ -1018,12 +1021,7 @@ pub fn mcp_agent_config(state: State<'_, AppState>, flavor: String) -> IhResult<
         if !record.enabled {
             continue;
         }
-        let has_secret = state
-            .secrets
-            .get(&mcp_secret_account(&record.id))
-            .ok()
-            .flatten()
-            .is_some();
+        let has_secret = record.has_secret;
         servers.push(CliServer {
             id: record.id.clone(),
             name: record.name.clone(),
@@ -1070,13 +1068,7 @@ pub fn mcp_export_config(state: State<'_, AppState>) -> IhResult<String> {
                 "url": record.url,
                 "transport": record.transport,
                 "headers": headers,
-                "auth": if state
-                    .secrets
-                    .get(&mcp_secret_account(&record.id))
-                    .ok()
-                    .flatten()
-                    .is_some()
-                {
+                "auth": if record.has_secret {
                     "bearer (trousseau, non exporté)"
                 } else {
                     "none"
