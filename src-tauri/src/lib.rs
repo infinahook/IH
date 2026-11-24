@@ -110,7 +110,23 @@ pub fn run() {
             // mode équipe
             commands::team::team_request_approval,
             commands::team::team_run,
-            // skills & MCP
+            // MCP distant (Streamable HTTP / SSE)
+            commands::mcp::mcp_remote_servers_list,
+            commands::mcp::mcp_server_upsert,
+            commands::mcp::mcp_server_delete,
+            commands::mcp::mcp_server_set_enabled,
+            commands::mcp::mcp_server_set_secret,
+            commands::mcp::mcp_server_clear_secret,
+            commands::mcp::mcp_server_connect,
+            commands::mcp::mcp_server_disconnect,
+            commands::mcp::mcp_server_test,
+            commands::mcp::mcp_server_refresh_tools,
+            commands::mcp::mcp_tools_list,
+            commands::mcp::mcp_tool_set_enabled,
+            commands::mcp::mcp_call,
+            commands::mcp::mcp_calls_list,
+            commands::mcp::mcp_export_config,
+            // skills & MCP stdio (legacy)
             commands::extensions::skills_list,
             commands::extensions::skill_install,
             commands::extensions::skill_verify,

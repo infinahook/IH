@@ -2176,6 +2176,7 @@ dependencies = [
  "ih-core",
  "ih-extensions",
  "ih-i18n",
+ "ih-mcp",
  "ih-orchestrator",
  "ih-providers",
  "ih-security",

@@ -111,6 +111,18 @@ impl McpSession {
         }
     }
 
+    /// Indique si la session peut encore servir un appel.
+    ///
+    /// Streamable HTTP est reconstruit à la demande par `rmcp` (sessions et
+    /// reconnexions gérées) ; en SSE, le flux peut être interrompu et la
+    /// session doit alors être fermée et reconnectée.
+    pub fn is_transport_alive(&self) -> bool {
+        match self {
+            Self::Streamable(_) => true,
+            Self::Sse(session) => session.is_connected(),
+        }
+    }
+
     /// Découvre les outils du serveur. Les schémas invalides sont exclus.
     pub async fn list_tools(&mut self) -> IhResult<Vec<ToolInfo>> {
         match self {

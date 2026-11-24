@@ -235,6 +235,17 @@ pub enum McpCaller {
 }
 
 impl McpCaller {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "ui" => Some(Self::Ui),
+            "chat" => Some(Self::Chat),
+            "agent" => Some(Self::Agent),
+            "team" => Some(Self::Team),
+            "automation" => Some(Self::Automation),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Ui => "ui",

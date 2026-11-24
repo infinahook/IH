@@ -7,6 +7,7 @@ export type SectionId =
   | "providers"
   | "skills"
   | "plugins"
+  | "mcp"
   | "terminal"
   | "git"
   | "editor"
@@ -23,7 +24,7 @@ export interface SectionDefinition {
   labelKey: string;
 }
 
-/** Les 18 sections réelles de l'application, dans l'ordre de la barre latérale. */
+/** Les 19 sections réelles de l'application, dans l'ordre de la barre latérale. */
 export const SECTIONS: readonly SectionDefinition[] = [
   { id: "chat", labelKey: "nav.chat" },
   { id: "overview", labelKey: "nav.overview" },
@@ -33,6 +34,7 @@ export const SECTIONS: readonly SectionDefinition[] = [
   { id: "providers", labelKey: "nav.providers" },
   { id: "skills", labelKey: "nav.skills" },
   { id: "plugins", labelKey: "nav.plugins" },
+  { id: "mcp", labelKey: "nav.mcp" },
   { id: "terminal", labelKey: "nav.terminal" },
   { id: "git", labelKey: "nav.git" },
   { id: "editor", labelKey: "nav.editor" },

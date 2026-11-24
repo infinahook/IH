@@ -115,6 +115,93 @@ fn check_bounds(value: &Value, _depth: usize) -> IhResult<()> {
     Ok(())
 }
 
+
+/// Vérifie que les arguments d'un appel respectent les contraintes
+/// structurelles du schéma : objet, propriétés typées simple, champs requis,
+/// `additionalProperties: false` respecté.
+///
+/// La validation reste volontairement partielle (sous-ensemble JSON Schema) :
+/// elle attrape les erreurs évidentes avant tout appel réseau, sans prétendre
+/// remplacer un validateur complet.
+pub fn validate_arguments(schema: &Value, arguments: &Value) -> IhResult<()> {
+    let args = arguments.as_object().ok_or_else(|| {
+        IhError::Invalid("les arguments d'un outil MCP doivent être un objet JSON".into())
+    })?;
+    let properties = schema.get("properties").and_then(Value::as_object);
+
+    if let Some(required) = schema.get("required").and_then(Value::as_array) {
+        for entry in required {
+            let name = entry.as_str().unwrap_or_default();
+            if !args.contains_key(name) {
+                return Err(IhError::Invalid(format!(
+                    "argument requis manquant : {name}"
+                )));
+            }
+        }
+    }
+
+    if let Some(properties) = properties {
+        for (name, value) in args {
+            let Some(property) = properties.get(name) else {
+                continue;
+            };
+            let Some(kind) = property.get("type").and_then(Value::as_str) else {
+                continue;
+            };
+            if value.is_null() {
+                continue;
+            }
+            if !matches_type(kind, value) {
+                return Err(IhError::Invalid(format!(
+                    "argument « {name} » de type {kind} attendu, reçu : {}",
+                    json_type(value)
+                )));
+            }
+        }
+    }
+
+    if schema.get("additionalProperties").and_then(Value::as_bool) == Some(false) {
+        if let Some(properties) = properties {
+            for key in args.keys() {
+                if !properties.contains_key(key) {
+                    return Err(IhError::Invalid(format!(
+                        "argument inattendu refusé par le schéma : {key}"
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn matches_type(kind: &str, value: &Value) -> bool {
+    match kind {
+        "string" => value.is_string(),
+        "number" => value.is_number(),
+        "integer" => {
+            value.is_i64()
+                || value.is_u64()
+                || value.as_f64().map(|n| n.fract() == 0.0).unwrap_or(false)
+        }
+        "boolean" => value.is_boolean(),
+        "array" => value.is_array(),
+        "object" => value.is_object(),
+        "null" => value.is_null(),
+        _ => true,
+    }
+}
+
+fn json_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +278,50 @@ mod tests {
             current = current.get_mut("properties").unwrap().get_mut("n").unwrap();
         }
         assert!(validate_tool_schema(&schema).is_err());
+    }
+
+    #[test]
+    fn arguments_valides_acceptes() {
+        let schema = json!({
+            "type": "object",
+            "properties": {"a": {"type": "integer"}, "b": {"type": "string"}},
+            "required": ["a"]
+        });
+        validate_arguments(&schema, &json!({"a": 3, "b": "x"})).unwrap();
+        validate_arguments(&schema, &json!({"a": 3})).unwrap();
+    }
+
+    #[test]
+    fn argument_requis_manquant_refuse() {
+        let schema = json!({"type": "object", "properties": {"a": {"type": "string"}}, "required": ["a"]});
+        let error = validate_arguments(&schema, &json!({})).unwrap_err();
+        assert!(error.to_string().contains("requis"), "{error}");
+    }
+
+    #[test]
+    fn type_d_argument_invalide_refuse() {
+        let schema = json!({"type": "object", "properties": {"a": {"type": "integer"}}});
+        let error = validate_arguments(&schema, &json!({"a": "trois"})).unwrap_err();
+        assert!(error.to_string().contains("integer"), "{error}");
+        validate_arguments(&schema, &json!({"a": 3.0})).unwrap();
+        validate_arguments(&schema, &json!({"a": null})).unwrap();
+    }
+
+    #[test]
+    fn arguments_non_objets_refuses() {
+        let schema = json!({"type": "object"});
+        assert!(validate_arguments(&schema, &json!([1, 2])).is_err());
+    }
+
+    #[test]
+    fn additional_properties_false_applique() {
+        let schema = json!({
+            "type": "object",
+            "properties": {"a": {"type": "string"}},
+            "additionalProperties": false
+        });
+        assert!(validate_arguments(&schema, &json!({"a": "x", "b": 1})).is_err());
+        validate_arguments(&schema, &json!({"a": "x"})).unwrap();
     }
 
     #[test]
