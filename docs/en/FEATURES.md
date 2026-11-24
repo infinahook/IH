@@ -25,7 +25,7 @@ Last verified: 349 Rust tests + 181 frontend tests, all green.
 | 13 | Task orchestrator | ✅ | Deterministic plan creation, persistence, state transitions, cycle detection, blocking on failed dependency |
 | 14 | Per-project persistent memory | ✅ | Project/global scope, tags, search, delete, bounded injected context preview |
 | 15 | Permissions and security | ✅ | One-shot category-bound approvals with TTL, risk classification, path jail, keyring-only secrets |
-| 16 | Automations and workflows | ⚠️ | Creation (interval ≥ 5 min, agent+prompt steps), real manual execution, run history. **No background scheduler firing on its own**, no workflow edit/delete in the UI |
+| 16 | Automations and workflows | ⚠️ | Creation (interval ≥ 5 min, agent+prompt steps **or MCP tool steps**), real manual execution, run history; MCP steps go through IH's guard (server/tool enabled, arguments validated, non-interactive mode limited to pre-approved reads). **No background scheduler firing on its own**, no workflow edit/delete in the UI |
 | 17 | Conversation and task history | ✅ | Threads, paginated messages, delete, downloadable JSON export |
 | 18 | French and English UI | ✅ | 800 keys FR and EN, parity enforced by a Rust test and a frontend test, immediate switching |
 | 19 | Complete settings | ✅ | Theme, language, resource limits, log level, update channel and interval, auto-download. Validated on the Rust side |

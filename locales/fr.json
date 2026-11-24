@@ -878,7 +878,7 @@
     "name": "Nom",
     "interval_hint": "Minimum 5 minutes.",
     "steps_json": "Étapes (JSON)",
-    "steps_hint": "Tableau d'objets { \"agent_id\": \"…\", \"prompt\": \"…\" }.",
+    "steps_hint": "Tableau d'étapes : { \"agent_id\": \"…\", \"prompt\": \"…\" } pour un agent, ou { \"server_id\": \"…\", \"mcp_tool\": \"…\", \"arguments\": {…} } pour un outil MCP (mode sans interaction : seules les lectures pré-autorisées s'exécutent).",
     "no_workflows": "Aucun workflow.",
     "created": "Workflow créé.",
     "run_result": "Exécution : {status}",

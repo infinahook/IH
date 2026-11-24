@@ -28,6 +28,12 @@
   rafraîchissement), catalogue d'outils, historique, export de configuration
   sans secrets. Événements `ih://mcp-status`, `ih://mcp-discovered`,
   `ih://mcp-call`.
+- **Conversation** : bouton « Outils MCP » dans le composeur, panneau d'appel
+  contrôlé (approbation liée aux paramètres) et insertion du résultat dans le
+  message ; partagé avec la page MCP.
+- **Automatisations** : étapes « outil MCP » (`server_id`, `mcp_tool`,
+  `arguments`) exécutées via le même point d'entrée, avec la règle de mode sans
+  interaction (seules les lectures pré-autorisées s'exécutent).
 - **Interface** : section **Serveurs MCP** (transport, URL, délai, jeton
   trousseau, en-têtes JSON, pré-autorisation), statuts lisibles, catalogue avec
   risque et activation individuelle, appel avec approbation affichant serveur,

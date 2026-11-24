@@ -180,11 +180,19 @@ par rôle (Team) restent à faire ; aucune permission n'est accordée par défau
 
 ## Intégration Automatisations
 
-Le planificateur d'automatisations d'IH (0.6.0) n'appelle pas encore d'outils
-MCP : les étapes de workflow sont des prompts d'agents. La règle de sécurité
-reste : une exécution sans interaction (pré-autorisée explicitement) ne peut
-concerner qu'une **lecture** ; un workflow ne peut jamais contourner
-l'approbation, et un workflow désactivé ne déclenche rien.
+Les étapes de workflow acceptent deux formes : un prompt d'agent
+(`agent_id` + `prompt`) ou un **appel d'outil MCP**
+(`server_id` + `mcp_tool` + `arguments`). L'appel d'outil passe par le même
+point d'entrée (`invoke_mcp_tool`) : serveur et outil doivent être activés,
+arguments validés, et la règle d'approbation s'applique avec
+`caller = automation`. En mode sans interaction, seule une **lecture**
+(risque bas) d'un serveur pré-autorisé s'exécute : toute étape « écriture » ou
+plus échoue en `approval_required` et fait échouer le workflow, avec trace.
+
+Le journal de workflow (`workflow_runs.detail`) conserve le statut de chaque
+étape MCP ; l'historique des appels (`mcp_calls`) porte `caller=automation` et
+l'identifiant du workflow. Le planificateur d'arrière-plan (0.6.0) branchera
+ces étapes sur le même exécuteur (le bridge synchrone est déjà en place).
 
 ## Observabilité
 
@@ -203,7 +211,8 @@ l'approbation, et un workflow désactivé ne déclenche rien.
    d'appel d'outil MCP ; l'invocation est explicite via l'interface.
 3. **Injections dans les CLI d'agents** : export manuel de configuration
    uniquement.
-4. **Workflows** : pas d'étape « appel d'outil MCP » dans le planificateur.
+4. **Workflows** : étapes « outil MCP » disponibles à l'exécution manuelle ;
+   l'intégration au planificateur d'arrière-plan suivra la fusion de 0.6.0.
 5. **MCP stdio** : toujours via `ih-extensions` (page Plugins), non migré dans
    `ih-mcp`.
 6. **Ressources, prompts, sampling** MCP : non exposés (seuls les outils).

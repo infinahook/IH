@@ -878,7 +878,7 @@
     "name": "Name",
     "interval_hint": "Minimum 5 minutes.",
     "steps_json": "Steps (JSON)",
-    "steps_hint": "Array of objects { \"agent_id\": \"…\", \"prompt\": \"…\" }.",
+    "steps_hint": "Step array: { \"agent_id\": \"…\", \"prompt\": \"…\" } for an agent, or { \"server_id\": \"…\", \"mcp_tool\": \"…\", \"arguments\": {…} } for an MCP tool (non-interactive: only pre-approved reads run).",
     "no_workflows": "No workflow.",
     "created": "Workflow created.",
     "run_result": "Run: {status}",

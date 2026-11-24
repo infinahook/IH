@@ -19,7 +19,7 @@ use ih_store::{McpServerRecord, McpToolRecord, NewAuditEntry, NewMcpCall};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 const MAX_ERROR_CHARS: usize = 600;
 const MAX_ARGUMENTS_BYTES: usize = 8 * 1024;
@@ -611,33 +611,39 @@ pub fn mcp_tool_set_enabled(
 
 // ------------------------------------------------------------- appel d'outil
 
+/// Demande d'exécution d'un outil MCP (IPC, conversation, automatisations).
+pub struct InvokeRequest {
+    pub server_id: String,
+    pub tool: String,
+    pub arguments: serde_json::Value,
+    pub caller: McpCaller,
+    pub caller_id: Option<String>,
+    pub approval_id: Option<String>,
+}
+
 /// Point d'entrée unique d'exécution d'un outil MCP.
 ///
 /// Vérifie le serveur (désactivé → refus), l'outil (désactivé → refus), les
 /// arguments (schéma), puis applique la décision : approbation interactive
 /// liée à l'empreinte, ou auto-approbation limitée aux lectures pré-autorisées.
-#[allow(clippy::too_many_arguments)]
-#[tauri::command]
-pub async fn mcp_call(
-    state: State<'_, AppState>,
-    server_id: String,
-    tool: String,
-    arguments: serde_json::Value,
-    caller: Option<String>,
-    caller_id: Option<String>,
-    approval_id: Option<String>,
-) -> IhResult<McpCallOutcome> {
-    let caller = caller
-        .as_deref()
-        .and_then(McpCaller::parse)
-        .unwrap_or(McpCaller::Ui);
+/// Utilisé par l'IPC, la conversation et les automatisations.
+pub async fn invoke_mcp_tool(state: &AppState, request: InvokeRequest) -> IhResult<McpCallOutcome> {
+    let InvokeRequest {
+        server_id,
+        tool,
+        arguments,
+        caller,
+        caller_id,
+        approval_id,
+    } = request;
+
     let server = state
         .store
         .get_mcp_server(&server_id)?
         .ok_or_else(|| IhError::NotFound(format!("serveur MCP {server_id}")))?;
     if !server.enabled {
         record_call(
-            &state,
+            state,
             &server_id,
             &tool,
             caller.as_str(),
@@ -659,7 +665,7 @@ pub async fn mcp_call(
         .ok_or_else(|| IhError::NotFound(format!("outil MCP {tool} inconnu")))?;
     if !tool_record.enabled {
         record_call(
-            &state,
+            state,
             &server_id,
             &tool,
             caller.as_str(),
@@ -698,7 +704,7 @@ pub async fn mcp_call(
                         .consume_with_fingerprint(id, "mcp_tool", &fingerprint)
                 {
                     record_call(
-                        &state,
+                        state,
                         &server_id,
                         &tool,
                         caller.as_str(),
@@ -710,7 +716,7 @@ pub async fn mcp_call(
                     );
                     return Err(error);
                 }
-                audit(&state, summary.clone(), detail.clone(), "approved");
+                audit(state, summary.clone(), detail.clone(), "approved");
             }
             None => {
                 let request = state.approvals.ask_with_fingerprint(
@@ -722,7 +728,7 @@ pub async fn mcp_call(
                 )?;
                 let approval_id = request.id.into_string();
                 record_call(
-                    &state,
+                    state,
                     &server_id,
                     &tool,
                     caller.as_str(),
@@ -733,7 +739,7 @@ pub async fn mcp_call(
                     None,
                 );
                 emit_event(
-                    &state,
+                    state,
                     "ih://mcp-call",
                     serde_json::json!({
                         "server_id": server_id,
@@ -751,14 +757,14 @@ pub async fn mcp_call(
             }
         },
         McpCallDecision::AutoApproved => {
-            audit(&state, summary.clone(), detail.clone(), "auto");
+            audit(state, summary.clone(), detail.clone(), "auto");
         }
     }
 
     // Exécution : session réutilisée ou ouverte à la demande.
     let started = Instant::now();
     emit_event(
-        &state,
+        state,
         "ih://mcp-call",
         serde_json::json!({ "server_id": server_id, "tool": tool, "phase": "started" }),
     );
@@ -766,7 +772,7 @@ pub async fn mcp_call(
         let mut registry = state.mcp_sessions.lock().await;
         match registry.remove(&server_id) {
             Some(existing) if existing.is_transport_alive() => existing,
-            _ => connect_server(&state, &server).await?,
+            _ => connect_server(state, &server).await?,
         }
     };
     let result = session.call_tool(&tool, arguments.clone()).await;
@@ -785,7 +791,7 @@ pub async fn mcp_call(
     match result {
         Ok(result) => {
             record_call(
-                &state,
+                state,
                 &server_id,
                 &tool,
                 caller.as_str(),
@@ -796,7 +802,7 @@ pub async fn mcp_call(
                 Some(duration_ms),
             );
             emit_event(
-                &state,
+                state,
                 "ih://mcp-call",
                 serde_json::json!({
                     "server_id": server_id,
@@ -816,7 +822,7 @@ pub async fn mcp_call(
         Err(error) => {
             let detail = error.to_string();
             record_call(
-                &state,
+                state,
                 &server_id,
                 &tool,
                 caller.as_str(),
@@ -827,7 +833,7 @@ pub async fn mcp_call(
                 Some(duration_ms),
             );
             emit_event(
-                &state,
+                state,
                 "ih://mcp-call",
                 serde_json::json!({
                     "server_id": server_id,
@@ -840,6 +846,58 @@ pub async fn mcp_call(
             Err(error)
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn mcp_call(
+    state: State<'_, AppState>,
+    server_id: String,
+    tool: String,
+    arguments: serde_json::Value,
+    caller: Option<String>,
+    caller_id: Option<String>,
+    approval_id: Option<String>,
+) -> IhResult<McpCallOutcome> {
+    let caller = caller
+        .as_deref()
+        .and_then(McpCaller::parse)
+        .unwrap_or(McpCaller::Ui);
+    invoke_mcp_tool(
+        &state,
+        InvokeRequest {
+            server_id,
+            tool,
+            arguments,
+            caller,
+            caller_id,
+            approval_id,
+        },
+    )
+    .await
+}
+
+/// Appel MCP synchrone pour les contextes non asynchrones (workflows).
+///
+/// L'appel est exécuté sur un thread dédié avec blocage sur le runtime Tauri :
+/// jamais de `block_on` depuis un contexte asynchrone, donc ni blocage du
+/// runtime ni de l'interface.
+pub fn invoke_mcp_tool_blocking(
+    state: &AppState,
+    request: InvokeRequest,
+) -> IhResult<McpCallOutcome> {
+    let app = state.app_handle.clone();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let outcome = tauri::async_runtime::block_on(async move {
+            let state = app.state::<AppState>();
+            invoke_mcp_tool(&state, request).await
+        });
+        let _ = sender.send(outcome);
+    });
+    receiver
+        .recv()
+        .map_err(|_| IhError::Internal("thread d'appel MCP interrompu".into()))?
 }
 
 #[tauri::command]
