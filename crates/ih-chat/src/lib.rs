@@ -17,7 +17,7 @@
 
 pub mod mcp_proposal;
 use ih_core::{IhError, IhResult, ThreadId};
-use ih_providers::{ChatMessage, ChatRequest, Provider, Usage};
+use ih_providers::{ChatMessage, ChatRequest, Provider, ToolCall, ToolDefinition, Usage};
 use ih_store::{NewMessage, Store};
 use serde_json::json;
 use std::time::Instant;
@@ -45,6 +45,12 @@ pub struct ChatTurn {
     /// Bloc de contexte projet déjà assemblé (fichiers réellement lus).
     /// Injecté dans le message système, jamais dans un message utilisateur.
     pub context: Option<String>,
+    /// Outils natifs proposés au modèle (vide : comportement classique).
+    pub tools: Vec<ToolDefinition>,
+    /// Cycle de continuation : aucun message utilisateur n'est ajouté ; la
+    /// requête repart de l'historique (assistant `tool_calls` + messages
+    /// `tool` inclus), pour renvoyer les résultats au modèle.
+    pub continuation: bool,
 }
 
 impl ChatTurn {
@@ -64,6 +70,21 @@ impl ChatTurn {
             max_tokens: None,
             history_limit: 40,
             context: None,
+            tools: Vec::new(),
+            continuation: false,
+        }
+    }
+
+    /// Tour de continuation après exécution d'outils : jamais de nouveau
+    /// message utilisateur, historique complet réinjecté.
+    pub fn continuation(
+        thread_id: ThreadId,
+        provider_id: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
+        Self {
+            continuation: true,
+            ..Self::new(thread_id, provider_id, model, "")
         }
     }
 
@@ -82,6 +103,8 @@ pub struct ChatOutcome {
     pub cancelled: bool,
     pub finish_reason: Option<String>,
     pub elapsed_ms: u64,
+    /// Appels d'outils demandés par le modèle (vide sinon).
+    pub tool_calls: Vec<ToolCall>,
 }
 
 /// Émetteur d'annulation (conservé par l'appelant, par exemple une commande
@@ -122,7 +145,7 @@ pub async fn run_turn(
     cancel: CancelToken,
     on_delta: &mut (dyn for<'a> FnMut(&'a str) + Send),
 ) -> IhResult<ChatOutcome> {
-    if turn.prompt.trim().is_empty() {
+    if !turn.continuation && turn.prompt.trim().is_empty() {
         return Err(IhError::Invalid("message vide".into()));
     }
     let thread = store
@@ -134,31 +157,29 @@ pub async fn run_turn(
     let start = history.len().saturating_sub(turn.effective_history());
     let mut messages: Vec<ChatMessage> = history[start..]
         .iter()
-        .filter(|m| m.role == "user" || m.role == "assistant")
-        .map(|m| ChatMessage {
-            role: m.role.clone(),
-            content: m.content.clone(),
-            tool_calls: Vec::new(),
-            tool_call_id: None,
-        })
+        .filter_map(history_message)
         .collect();
 
-    let user_message = store.append_message(&NewMessage {
-        thread_id: turn.thread_id.clone(),
-        role: "user".into(),
-        content: turn.prompt.clone(),
-        metadata: Some(json!({
-            "provider": turn.provider_id,
-            "model": turn.model,
-        })),
-    })?;
-
-    messages.push(ChatMessage {
-        role: "user".into(),
-        content: turn.prompt.clone(),
-        tool_calls: Vec::new(),
-        tool_call_id: None,
-    });
+    let user_message = if turn.continuation {
+        None
+    } else {
+        let message = store.append_message(&NewMessage {
+            thread_id: turn.thread_id.clone(),
+            role: "user".into(),
+            content: turn.prompt.clone(),
+            metadata: Some(json!({
+                "provider": turn.provider_id,
+                "model": turn.model,
+            })),
+        })?;
+        messages.push(ChatMessage {
+            role: "user".into(),
+            content: turn.prompt.clone(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+        });
+        Some(message)
+    };
 
     let request = ChatRequest {
         model: turn.model.clone(),
@@ -166,7 +187,7 @@ pub async fn run_turn(
         system: merge_system(&turn.system, &turn.context),
         temperature: turn.temperature,
         max_tokens: turn.max_tokens,
-        tools: Vec::new(),
+        tools: turn.tools.clone(),
     };
 
     let started = Instant::now();
@@ -174,6 +195,7 @@ pub async fn run_turn(
     let mut cancelled = false;
     let mut usage = Usage::default();
     let mut finish_reason: Option<String> = None;
+    let mut tool_calls: Vec<ToolCall> = Vec::new();
     let mut truncation_notified = false;
 
     // Le futur et le callback sont confinés dans ce bloc : la réponse est
@@ -211,24 +233,33 @@ pub async fn run_turn(
             }
             usage = response.usage;
             finish_reason = response.finish_reason;
+            tool_calls = response.tool_calls;
         }
+    }
+
+    // Les appels d'outils sont conservés dans les métadonnées du message
+    // assistant : le tour de continuation les rejoue tels quels au modèle,
+    // et l'exécution n'a lieu qu'après décision explicite de l'utilisateur.
+    let mut metadata = json!({
+        "provider": turn.provider_id,
+        "model": turn.model,
+        "cancelled": cancelled,
+        "usage": {
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
+        },
+        "finish_reason": finish_reason,
+        "elapsed_ms": started.elapsed().as_millis() as u64,
+    });
+    if !tool_calls.is_empty() {
+        metadata["tool_calls"] = json!(tool_calls);
     }
 
     let assistant_message = store.append_message(&NewMessage {
         thread_id: turn.thread_id.clone(),
         role: "assistant".into(),
         content: collected.clone(),
-        metadata: Some(json!({
-            "provider": turn.provider_id,
-            "model": turn.model,
-            "cancelled": cancelled,
-            "usage": {
-                "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens,
-            },
-            "finish_reason": finish_reason,
-            "elapsed_ms": started.elapsed().as_millis() as u64,
-        })),
+        metadata: Some(metadata),
     })?;
 
     if thread.title == DEFAULT_THREAD_TITLE || thread.title.trim().is_empty() {
@@ -237,14 +268,64 @@ pub async fn run_turn(
     }
 
     Ok(ChatOutcome {
-        user_message_id: user_message.id.into_string(),
+        user_message_id: user_message.map(|m| m.id.into_string()).unwrap_or_default(),
         assistant_message_id: assistant_message.id.into_string(),
         text: collected,
         usage,
         cancelled,
         finish_reason,
         elapsed_ms: started.elapsed().as_millis() as u64,
+        tool_calls,
     })
+}
+
+/// Reconstruit un message d'historique pour le fournisseur.
+///
+/// Les messages `tool` et les appels d'outils d'un assistant sont restitués
+/// depuis leurs métadonnées ; un message `tool` sans identifiant d'appel est
+/// ignoré (il ne pourrait pas être associé à une requête du modèle).
+fn history_message(message: &ih_store::Message) -> Option<ChatMessage> {
+    match message.role.as_str() {
+        "user" => Some(ChatMessage {
+            role: "user".into(),
+            content: message.content.clone(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+        }),
+        "assistant" => {
+            let tool_calls = message
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("tool_calls"))
+                .and_then(|calls| serde_json::from_value::<Vec<ToolCall>>(calls.clone()).ok())
+                .unwrap_or_default();
+            if message.content.trim().is_empty() && tool_calls.is_empty() {
+                return None;
+            }
+            Some(ChatMessage {
+                role: "assistant".into(),
+                content: message.content.clone(),
+                tool_calls,
+                tool_call_id: None,
+            })
+        }
+        "tool" => {
+            let tool_call_id = message
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("tool_call_id"))
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)?;
+            Some(ChatMessage {
+                role: "tool".into(),
+                content: message.content.clone(),
+                tool_calls: Vec::new(),
+                tool_call_id: Some(tool_call_id),
+            })
+        }
+        _ => None,
+    }
 }
 
 /// Concatène le message système et le contexte projet, sans perdre l'un ou l'autre.
