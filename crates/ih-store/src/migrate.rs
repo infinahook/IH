@@ -21,7 +21,7 @@ use rusqlite::Connection;
 use crate::util::db_err;
 
 /// Version de schéma attendue par ce crate.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// v1 — schéma initial.
 ///
@@ -280,6 +280,41 @@ ALTER TABLE mcp_servers ADD COLUMN has_secret INTEGER NOT NULL DEFAULT 0
     CHECK (has_secret IN (0, 1));
 "#;
 
+/// v6 — chat : appels d'outils MCP proposés par un modèle.
+///
+/// Chaque ligne est une **proposition** (arguments redactés pour l'audit) :
+/// la décision humaine et l'exécution sont tracées dans les colonnes de
+/// statut. Un redémarrage ne rejoue jamais une proposition restée `pending`.
+pub(crate) const V6: &str = r#"
+CREATE TABLE chat_tool_calls (
+    id                 TEXT PRIMARY KEY NOT NULL,
+    thread_id          TEXT NOT NULL REFERENCES threads (id) ON DELETE CASCADE,
+    project_id         TEXT NOT NULL,
+    request_id         TEXT NOT NULL,
+    round              INTEGER NOT NULL DEFAULT 0,
+    provider_call_id   TEXT NOT NULL,
+    exposed_name       TEXT NOT NULL,
+    server_id          TEXT NOT NULL,
+    tool               TEXT NOT NULL,
+    risk               TEXT NOT NULL,
+    category           TEXT NOT NULL,
+    fingerprint        TEXT NOT NULL,
+    arguments_redacted TEXT NOT NULL,
+    arguments_raw      TEXT NOT NULL,
+    status             TEXT NOT NULL CHECK (status IN
+        ('pending', 'denied', 'completed', 'failed', 'invalid', 'expired')),
+    error              TEXT,
+    result_text        TEXT,
+    approval_id        TEXT,
+    created_at         TEXT NOT NULL,
+    decided_at         TEXT,
+    finished_at        TEXT
+);
+
+CREATE INDEX idx_chat_tool_calls_thread ON chat_tool_calls (thread_id, created_at);
+CREATE INDEX idx_chat_tool_calls_request ON chat_tool_calls (request_id, status);
+"#;
+
 /// Applique les migrations manquantes et renvoie la version courante.
 pub(crate) fn migrate(conn: &mut Connection) -> IhResult<()> {
     let current: i64 = conn
@@ -361,6 +396,19 @@ pub(crate) fn migrate(conn: &mut Connection) -> IhResult<()> {
         tx.commit()
             .map_err(|err| db_err("validation de la migration v5", err))?;
         tracing::info!(version = 5, "migration du schéma ih-store appliquée");
+    }
+
+    if current < 6 {
+        let tx = conn
+            .transaction()
+            .map_err(|err| db_err("début de la migration v6", err))?;
+        tx.execute_batch(V6)
+            .map_err(|err| db_err("application de la migration v6", err))?;
+        tx.pragma_update(None, "user_version", 6_i64)
+            .map_err(|err| db_err("écriture de user_version = 6", err))?;
+        tx.commit()
+            .map_err(|err| db_err("validation de la migration v6", err))?;
+        tracing::info!(version = 6, "migration du schéma ih-store appliquée");
     }
 
     Ok(())

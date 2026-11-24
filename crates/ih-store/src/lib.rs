@@ -32,9 +32,9 @@ mod util;
 
 pub use migrate::SCHEMA_VERSION;
 pub use model::{
-    AgentEventRow, AgentSessionDetail, AuditEntry, InstalledExtension, McpCallRecord,
-    McpServerRecord, McpToolRecord, MemoryEntry, Message, NewAgentEvent, NewAuditEntry, NewMcpCall,
-    NewMemoryEntry, NewMessage, NewSession, NewTask, NewWorkflowRun, Project, SessionRow, Task,
-    Thread, Workflow, WorkflowRun,
+    AgentEventRow, AgentSessionDetail, AuditEntry, ChatToolCallRecord, InstalledExtension,
+    McpCallRecord, McpServerRecord, McpToolRecord, MemoryEntry, Message, NewAgentEvent,
+    NewAuditEntry, NewChatToolCall, NewMcpCall, NewMemoryEntry, NewMessage, NewSession, NewTask,
+    NewWorkflowRun, Project, SessionRow, Task, Thread, Workflow, WorkflowRun,
 };
 pub use store::Store;

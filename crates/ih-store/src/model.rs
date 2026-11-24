@@ -308,6 +308,63 @@ pub struct NewMcpCall {
     pub duration_ms: Option<u64>,
 }
 
+/// Proposition d'appel d'outil MCP émise par le modèle (chat natif).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NewChatToolCall {
+    pub thread_id: ThreadId,
+    pub project_id: ProjectId,
+    pub request_id: String,
+    /// Numéro du cycle de tool calling dans le tour (0 = premier).
+    pub round: u32,
+    /// Identifiant d'appel choisi par le fournisseur (associé au résultat).
+    pub provider_call_id: String,
+    /// Nom exposé au modèle (déjà normalisé par le catalogue).
+    pub exposed_name: String,
+    pub server_id: String,
+    pub tool: String,
+    pub risk: String,
+    pub category: String,
+    /// Empreinte des arguments exacts (engagement de l'approbation).
+    pub fingerprint: String,
+    /// Arguments **redactés** : jamais de secret persisté pour l'audit.
+    pub arguments: serde_json::Value,
+    /// Arguments exacts, utilisés seulement pour exécuter l'appel approuvé.
+    pub raw_arguments: serde_json::Value,
+    /// `pending`, `invalid` (validation schéma échouée)…
+    pub status: String,
+    pub error: Option<String>,
+}
+
+/// Proposition d'appel d'outil MCP persistée.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatToolCallRecord {
+    pub id: String,
+    pub thread_id: ThreadId,
+    pub project_id: ProjectId,
+    pub request_id: String,
+    pub round: u32,
+    pub provider_call_id: String,
+    pub exposed_name: String,
+    pub server_id: String,
+    pub tool: String,
+    pub risk: String,
+    pub category: String,
+    pub fingerprint: String,
+    /// Arguments redactés (copie sûre pour l'affichage et l'audit).
+    pub arguments: serde_json::Value,
+    /// Arguments exacts de la proposition (exécution du seul appel approuvé,
+    /// jamais renvoyés à l'interface).
+    pub raw_arguments: serde_json::Value,
+    /// `pending`, `denied`, `completed`, `failed`, `invalid`, `expired`.
+    pub status: String,
+    pub error: Option<String>,
+    pub result_text: Option<String>,
+    pub approval_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub decided_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+}
+
 /// Appel MCP persisté.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct McpCallRecord {

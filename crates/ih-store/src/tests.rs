@@ -1048,3 +1048,139 @@ fn assert_send_sync<T: Send + Sync>() {}
 fn store_est_send_et_sync() {
     assert_send_sync::<Store>();
 }
+
+// -------------------------------------------------------------------------
+// Appels d'outils proposés par un modèle (chat natif, migration v6)
+// -------------------------------------------------------------------------
+
+fn new_chat_tool_call(
+    thread: &Thread,
+    project: &Project,
+    request_id: &str,
+    status: &str,
+) -> NewChatToolCall {
+    NewChatToolCall {
+        thread_id: thread.id.clone(),
+        project_id: project.id.clone(),
+        request_id: request_id.to_owned(),
+        round: 0,
+        provider_call_id: "call_1".to_owned(),
+        exposed_name: "demo__echo".to_owned(),
+        server_id: "demo".to_owned(),
+        tool: "echo".to_owned(),
+        risk: "low".to_owned(),
+        category: "read".to_owned(),
+        fingerprint: "f".repeat(64),
+        arguments: json!({ "text": "[masqué]" }),
+        raw_arguments: json!({ "text": "valeur réelle" }),
+        status: status.to_owned(),
+        error: None,
+    }
+}
+
+#[test]
+fn chat_tool_call_proposition_et_lectures() {
+    let store = Store::open_in_memory().expect("base mémoire");
+    let project = seed_project(&store, "chat-tools");
+    let thread = store
+        .create_thread(&project.id, "Essai", None)
+        .expect("conversation");
+    let pending = store
+        .insert_chat_tool_call(&new_chat_tool_call(&thread, &project, "req-1", "pending"))
+        .expect("proposition pending");
+    assert_eq!(pending.status, "pending");
+    assert_eq!(pending.exposed_name, "demo__echo");
+    assert!(pending.decided_at.is_none());
+
+    let by_thread = store.list_chat_tool_calls(&thread.id).expect("liste");
+    assert_eq!(by_thread.len(), 1);
+    assert_eq!(by_thread[0].id, pending.id);
+    let by_request = store
+        .list_chat_tool_calls_for_request("req-1")
+        .expect("liste par tour");
+    assert_eq!(by_request.len(), 1);
+    assert_eq!(by_request[0].server_id, "demo");
+
+    let invalid = store
+        .insert_chat_tool_call(&new_chat_tool_call(&thread, &project, "req-1", "invalid"))
+        .expect("proposition invalid");
+    assert_eq!(invalid.status, "invalid");
+    assert!(store
+        .insert_chat_tool_call(&new_chat_tool_call(&thread, &project, "req-1", "completed"))
+        .is_err());
+    assert!(store
+        .list_chat_tool_calls(&ThreadId::new())
+        .expect("liste vide")
+        .is_empty());
+}
+
+#[test]
+fn chat_tool_call_decisions_et_transitions_verrouillees() {
+    let store = Store::open_in_memory().expect("base mémoire");
+    let project = seed_project(&store, "chat-tools");
+    let thread = store
+        .create_thread(&project.id, "Essai", None)
+        .expect("conversation");
+    let call = store
+        .insert_chat_tool_call(&new_chat_tool_call(&thread, &project, "req-1", "pending"))
+        .expect("proposition");
+
+    let denied = store
+        .decide_chat_tool_call(&call.id, "denied", None)
+        .expect("refus");
+    assert_eq!(denied.status, "denied");
+    assert!(denied.decided_at.is_some());
+    // Une proposition déjà décidée ne change plus.
+    assert!(matches!(
+        store.decide_chat_tool_call(&call.id, "invalid", None),
+        Err(IhError::Conflict(_))
+    ));
+
+    let finished = store
+        .finish_chat_tool_call(
+            &call.id,
+            "completed",
+            None,
+            Some("résultat"),
+            Some("appro-1"),
+        )
+        .expect("fin");
+    assert_eq!(finished.status, "completed");
+    assert_eq!(finished.result_text.as_deref(), Some("résultat"));
+    assert_eq!(finished.approval_id.as_deref(), Some("appro-1"));
+    assert!(finished.finished_at.is_some());
+    // Une proposition close ne se termine plus deux fois.
+    assert!(matches!(
+        store.finish_chat_tool_call(&call.id, "failed", None, None, None),
+        Err(IhError::Conflict(_))
+    ));
+}
+
+#[test]
+fn chat_tool_call_pending_n_est_pas_rejoue_apres_reouverture() {
+    let db = TempDb::new();
+    let project = {
+        let store = Store::open(&db.path()).expect("ouverture");
+        let project = seed_project(&store, "chat-tools");
+        let thread = store
+            .create_thread(&project.id, "Essai", None)
+            .expect("conversation");
+        store
+            .insert_chat_tool_call(&new_chat_tool_call(&thread, &project, "req-1", "pending"))
+            .expect("proposition");
+        store
+    };
+    drop(project);
+
+    // Nouvelle ouverture : la proposition reste en attente, jamais exécutée.
+    let store = Store::open(&db.path()).expect("réouverture");
+    let thread_id = store
+        .list_threads(&store.list_projects().unwrap()[0].id)
+        .unwrap()[0]
+        .id
+        .clone();
+    let calls = store.list_chat_tool_calls(&thread_id).expect("liste");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].status, "pending");
+    assert!(calls[0].finished_at.is_none());
+}
