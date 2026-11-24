@@ -12,6 +12,7 @@ import {
   AtSign,
   Ban,
   Bot,
+  Cable,
   FileCode2,
   MessageSquare,
   MessagesSquare,
@@ -100,6 +101,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { Field } from "../components/Field";
 import { FileExplorer } from "../components/FileExplorer";
 import { Modal } from "../components/Modal";
+import { McpCallPanel } from "../components/McpCallPanel";
 import { Notice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectGate } from "../components/ProjectGate";
@@ -623,6 +625,8 @@ export function ChatPage() {
   const sendAction = useAction();
   const cancelAction = useAction();
   const [prompt, setPrompt] = useState("");
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const [mcpResult, setMcpResult] = useState<string | null>(null);
   const [composerAlert, setComposerAlert] = useState<{
     tone: "warning" | "danger";
     text: string;
@@ -2017,6 +2021,18 @@ export function ChatPage() {
                       <AtSign size={13} aria-hidden="true" />
                       {t("chat.context")} · {chipPaths.length}
                     </button>
+                    <button
+                      type="button"
+                      className="ghost small"
+                      onClick={() => {
+                        setMcpResult(null);
+                        setMcpOpen(true);
+                      }}
+                      title={t("chat.mcp_hint")}
+                    >
+                      <Cable size={13} aria-hidden="true" />
+                      {t("chat.mcp_tools")}
+                    </button>
                     {prepareBusy ? (
                       <span className="small muted inline-status" role="status">
                         <Spinner />
@@ -2183,6 +2199,38 @@ export function ChatPage() {
             }}
           />
         </Field>
+      </Modal>
+
+      <Modal
+        open={mcpOpen}
+        title={t("chat.mcp_tools")}
+        onClose={() => setMcpOpen(false)}
+        size="wide"
+        footer={
+          mcpResult !== null ? (
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                setPrompt(mcpResult);
+                setMcpOpen(false);
+              }}
+            >
+              {t("chat.mcp_insert")}
+            </button>
+          ) : undefined
+        }
+      >
+        <p className="muted small">{t("chat.mcp_hint")}</p>
+        <McpCallPanel
+          caller="chat"
+          compact
+          onResult={(outcome) => {
+            if (outcome.result) {
+              setMcpResult(outcome.result.text);
+            }
+          }}
+        />
       </Modal>
 
       <ConfirmDialog

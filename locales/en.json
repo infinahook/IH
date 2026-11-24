@@ -212,7 +212,10 @@
     "show_secret": "Show key",
     "hide_secret": "Hide key",
     "local_provider_no_key": "A local provider (Ollama) does not require an API key.",
-    "use_model": "Use this model"
+    "use_model": "Use this model",
+    "mcp_tools": "MCP tools",
+    "mcp_hint": "MCP tools enabled in settings. Sensitive calls require a one-shot approval bound to the parameters.",
+    "mcp_insert": "Insert the reply into the message"
   },
   "status": {
     "ready": "Ready",

@@ -212,7 +212,10 @@
     "show_secret": "Afficher la clé",
     "hide_secret": "Masquer la clé",
     "local_provider_no_key": "Un fournisseur local (Ollama) ne nécessite pas de clé d'API.",
-    "use_model": "Utiliser ce modèle"
+    "use_model": "Utiliser ce modèle",
+    "mcp_tools": "Outils MCP",
+    "mcp_hint": "Outils MCP activés dans les paramètres. Les appels sensibles demandent une approbation à usage unique liée aux paramètres.",
+    "mcp_insert": "Insérer la réponse dans le message"
   },
   "status": {
     "ready": "Prêt",

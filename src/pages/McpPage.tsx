@@ -7,7 +7,6 @@ import {
   Plus,
   Power,
   RefreshCw,
-  ShieldAlert,
   Trash2,
   Wrench,
 } from "lucide-react";
@@ -15,11 +14,10 @@ import {
   AppError,
   api,
   type McpCallRecord,
-  type McpRemoteCallOutcome,
   type McpRemoteServer,
   type McpRemoteTool,
 } from "../lib/api";
-import { riskTone, schemaFields, statusTone, summarizeResult } from "../lib/mcp";
+import { riskTone, schemaFields, statusTone } from "../lib/mcp";
 import { formatDate } from "../lib/format";
 import { useAsync, useAction } from "../lib/hooks";
 import { useApp } from "../lib/store";
@@ -28,6 +26,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState, LoadingRow, Spinner } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Field } from "../components/Field";
+import { McpCallPanel, McpSecurityHint } from "../components/McpCallPanel";
 import { Notice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
 
@@ -57,14 +56,6 @@ const EMPTY_FORM: ServerForm = {
   allowAutoApprove: false,
 };
 
-interface PendingApproval {
-  approvalId: string;
-  fingerprint: string | null;
-  serverId: string;
-  tool: string;
-  args: unknown;
-}
-
 export function McpPage() {
   const { t, locale } = useApp();
   const servers = useAsync(() => api.mcpRemote.list(), []);
@@ -81,19 +72,12 @@ export function McpPage() {
   const [messageTone, setMessageTone] = useState<"success" | "warning">("success");
   const [toDelete, setToDelete] = useState<McpRemoteServer | null>(null);
   const [busyServer, setBusyServer] = useState<string | null>(null);
-  const [callServer, setCallServer] = useState("");
-  const [callToolName, setCallToolName] = useState("");
-  const [callArgs, setCallArgs] = useState("{}");
-  const [callResult, setCallResult] = useState<{ tool: string; result: NonNullable<McpRemoteCallOutcome["result"]> } | null>(null);
-  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [exported, setExported] = useState<string | null>(null);
 
   const serverList = servers.data ?? [];
   const allTools = tools.data ?? [];
   const toolsOf = (serverId: string): McpRemoteTool[] =>
     allTools.filter((tool) => tool.server_id === serverId);
-  const enabledTools = allTools.filter((tool) => tool.enabled);
-
   const notify = (text: string, tone: "success" | "warning" = "success") => {
     setMessageTone(tone);
     setMessage(text);
@@ -278,71 +262,6 @@ export function McpPage() {
     }
   };
 
-  const runTool = async (approvalId?: string) => {
-    if (!callServer || !callToolName) {
-      return;
-    }
-    let args: unknown;
-    try {
-      args = JSON.parse(callArgs);
-    } catch (reason) {
-      const detail = reason instanceof Error ? reason.message : String(reason);
-      notify(t("mcp.invalid_json", { message: detail }), "warning");
-      return;
-    }
-    if (typeof args !== "object" || args === null || Array.isArray(args)) {
-      notify(t("mcp.object_required"), "warning");
-      return;
-    }
-    const outcome = await callAction.run(() =>
-      api.mcpRemote.call({
-        serverId: callServer,
-        tool: callToolName,
-        arguments: args,
-        caller: "ui",
-        approvalId,
-      }),
-    );
-    calls.reload();
-    if (!outcome) {
-      return;
-    }
-    if (outcome.status === "approval_required" && outcome.approval_id) {
-      setPendingApproval({
-        approvalId: outcome.approval_id,
-        fingerprint: outcome.fingerprint,
-        serverId: callServer,
-        tool: callToolName,
-        args,
-      });
-      return;
-    }
-    if (outcome.result) {
-      setCallResult({ tool: callToolName, result: outcome.result });
-    }
-  };
-
-  const approveAndRun = async () => {
-    const pending = pendingApproval;
-    if (!pending) {
-      return;
-    }
-    const done = await callAction.run(async () => {
-      await api.approvalResolve(pending.approvalId, "approve");
-      return true;
-    });
-    setPendingApproval(null);
-    if (!done) {
-      return;
-    }
-    await runTool(pending.approvalId);
-  };
-
-  const cancelApproval = () => {
-    setPendingApproval(null);
-    notify(t("mcp.approval_cancelled"), "warning");
-  };
-
   const exportConfig = async () => {
     const config = await callAction.run(() => api.mcpRemote.exportConfig());
     if (config !== undefined && config !== null) {
@@ -350,15 +269,6 @@ export function McpPage() {
       notify(t("mcp.export_done"));
     }
   };
-
-  const approvalTool = pendingApproval
-    ? allTools.find(
-        (tool) => tool.server_id === pendingApproval.serverId && tool.name === pendingApproval.tool,
-      )
-    : undefined;
-  const approvalServer = pendingApproval
-    ? serverList.find((server) => server.id === pendingApproval.serverId)
-    : undefined;
 
   return (
     <>
@@ -675,84 +585,9 @@ export function McpPage() {
       <section className="card" aria-labelledby="mcp-call">
         <div className="section-heading">
           <h2 id="mcp-call">{t("mcp.call_title")}</h2>
-          <ShieldAlert size={17} aria-hidden="true" className="muted-icon" />
         </div>
-        <p className="muted small">{t("mcp.call_hint")}</p>
-        <div className="form-grid">
-          <Field label={t("mcp.server")} htmlFor="call-server">
-            <select
-              id="call-server"
-              className="input"
-              value={callServer}
-              onChange={(event) => {
-                setCallServer(event.target.value);
-                setCallToolName("");
-              }}
-            >
-              <option value="">—</option>
-              {serverList
-                .filter((server) => server.enabled)
-                .map((server) => (
-                  <option key={server.id} value={server.id}>
-                    {server.name}
-                  </option>
-                ))}
-            </select>
-          </Field>
-          <Field label={t("mcp.tool")} htmlFor="call-tool">
-            <select
-              id="call-tool"
-              className="input"
-              value={callToolName}
-              onChange={(event) => setCallToolName(event.target.value)}
-            >
-              <option value="">—</option>
-              {enabledTools
-                .filter((tool) => tool.server_id === callServer)
-                .map((tool) => (
-                  <option key={tool.name} value={tool.name}>
-                    {tool.name} ({t(`mcp.risk_${tool.risk}`, { defaultValue: tool.risk })})
-                  </option>
-                ))}
-            </select>
-          </Field>
-        </div>
-        <Field label={t("mcp.arguments")} htmlFor="call-args" hint={t("mcp.arguments_hint")}>
-          <textarea
-            id="call-args"
-            className="input textarea mono"
-            rows={4}
-            spellCheck={false}
-            value={callArgs}
-            onChange={(event) => setCallArgs(event.target.value)}
-          />
-        </Field>
-        <div className="button-row">
-          <button
-            type="button"
-            className="primary"
-            onClick={() => void runTool()}
-            disabled={callAction.busy || !callServer || !callToolName}
-            aria-busy={callAction.busy}
-          >
-            {callAction.busy ? <Spinner /> : <Play size={14} aria-hidden="true" />}
-            {t("mcp.call")}
-          </button>
-          {enabledTools.filter((tool) => tool.server_id === callServer).length === 0 && callServer ? (
-            <span className="muted small">{t("mcp.no_enabled_tools")}</span>
-          ) : null}
-        </div>
-        {callResult ? (
-          <Notice
-            tone={callResult.result.is_error ? "error" : "success"}
-            title={t("mcp.call_result", { tool: callResult.tool })}
-          >
-            <pre className="code-block">{summarizeResult(callResult.result.text)}</pre>
-            {callResult.result.truncated ? (
-              <p className="muted small">{t("mcp.result_truncated")}</p>
-            ) : null}
-          </Notice>
-        ) : null}
+        <McpSecurityHint />
+        <McpCallPanel caller="ui" />
       </section>
 
       <section className="card" aria-labelledby="mcp-history">
@@ -820,42 +655,6 @@ export function McpPage() {
           </details>
         ) : null}
       </section>
-
-      <ConfirmDialog
-        open={pendingApproval !== null}
-        title={t("mcp.approval_title")}
-        description={
-          <div>
-            <p>
-              <strong>{approvalServer?.name ?? pendingApproval?.serverId}</strong> ·{" "}
-              <strong>{pendingApproval?.tool}</strong>
-            </p>
-            <p className="small">{approvalTool?.description}</p>
-            <p className="small">
-              {t("mcp.risk")} :{" "}
-              <Badge tone={riskTone(approvalTool?.risk ?? "medium")}>
-                {t(`mcp.risk_${approvalTool?.risk ?? "medium"}`, {
-                  defaultValue: approvalTool?.risk ?? "medium",
-                })}
-              </Badge>{" "}
-              · {t("mcp.effect")} :{" "}
-              {t(`mcp.category_${approvalTool?.category ?? "write"}`, {
-                defaultValue: approvalTool?.category ?? "write",
-              })}
-            </p>
-            <p className="small mono">{t("mcp.fingerprint")} : {pendingApproval?.fingerprint}</p>
-            <pre className="code-block">
-              {JSON.stringify(pendingApproval?.args ?? {}, null, 2)}
-            </pre>
-            <p className="muted small">{t("mcp.approval_hint")}</p>
-          </div>
-        }
-        confirmLabel={t("mcp.approval_confirm")}
-        danger
-        busy={callAction.busy}
-        onConfirm={() => void approveAndRun()}
-        onCancel={cancelApproval}
-      />
 
       <ConfirmDialog
         open={toDelete !== null}
