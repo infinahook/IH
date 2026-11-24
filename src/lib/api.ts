@@ -522,6 +522,15 @@ export interface ChatAccepted {
   project_id: string;
   provider_id: string;
   model: string;
+  /** Vrai si le fournisseur accepte les cartes d'appel d'outils natives. */
+  native_tools: boolean;
+}
+
+/** Appel d'outil demandé par le modèle (identifiant du fournisseur). */
+export interface ChatToolCallRequest {
+  id: string;
+  name: string;
+  arguments: unknown;
 }
 
 /** Résultat final d'un tour de conversation, y compris annulé. */
@@ -533,6 +542,36 @@ export interface ChatOutcome {
   cancelled: boolean;
   finish_reason: string | null;
   elapsed_ms: number;
+  tool_calls?: ChatToolCallRequest[];
+}
+
+/** Proposition d'appel d'outil persistée (arguments déjà masqués). */
+export interface ChatToolCallView {
+  id: string;
+  request_id: string;
+  round: number;
+  provider_call_id: string;
+  exposed_name: string;
+  server_id: string;
+  tool: string;
+  risk: string;
+  category: string;
+  arguments: unknown;
+  status: string;
+  error: string | null;
+  result_text: string | null;
+  created_at: string;
+  decided_at: string | null;
+  finished_at: string | null;
+}
+
+/** Résultat d'une décision humaine sur une carte d'appel. */
+export interface ChatToolDecisionOutcome {
+  call_id: string;
+  status: string;
+  summary: string;
+  result_text: string | null;
+  continued: boolean;
 }
 
 export interface Workflow {
@@ -1127,6 +1166,10 @@ export const api = {
     active: () => call<number>("chat_active"),
     appendToolResult: (threadId: string, tool: string, status: string, content: string) =>
       call<Message>("chat_append_tool_result", { threadId, tool, status, content }),
+    toolCalls: (threadId: string) =>
+      call<ChatToolCallView[]>("chat_tool_calls_list", { threadId }),
+    toolDecide: (callId: string, decision: "approve" | "deny") =>
+      call<ChatToolDecisionOutcome>("chat_tool_decide", { callId, decision }),
   },
 
   // historique

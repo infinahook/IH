@@ -6,6 +6,7 @@ import {
   displayThreadTitle,
   filterThreads,
   formatRelativeTime,
+  maskSensitiveArguments,
   messageFromOutcome,
   readMessageMetadata,
   sortThreadsByUpdated,
@@ -241,6 +242,23 @@ describe("métadonnées et usage", () => {
     expect(metadata.cancelled).toBe(true);
     expect(metadata.provider).toBe("ollama");
     expect(metadata.usage).toEqual({ input_tokens: 11, output_tokens: 7 });
+  });
+
+  it("masque les arguments sensibles des cartes d'outil", () => {
+    const masked = maskSensitiveArguments({
+      text: "bonjour",
+      api_key: "sk-secret",
+      nested: { password: "motdepasse", bearer: "jeton", keep: 1 },
+      list: [{ token: "abc" }],
+    });
+    expect(masked).toEqual({
+      text: "bonjour",
+      api_key: "[masqué]",
+      nested: { password: "[masqué]", bearer: "[masqué]", keep: 1 },
+      list: [{ token: "[masqué]" }],
+    });
+    expect(maskSensitiveArguments("texte")).toBe("texte");
+    expect(maskSensitiveArguments(null)).toBeNull();
   });
 
   it("formate une date relative réelle", () => {
