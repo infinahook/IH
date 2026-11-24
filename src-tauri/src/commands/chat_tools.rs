@@ -353,6 +353,13 @@ pub async fn decide_call(
     state
         .approvals
         .resolve(&approval_id, ApprovalDecision::Approve)?;
+    // Réclamation atomique : une carte ne peut être exécutée qu'une fois,
+    // même en cas de double clic ou de course entre deux décisions.
+    if !state.store.claim_chat_tool_call(call_id, &approval_id)? {
+        return Err(IhError::Conflict(format!(
+            "l'appel d'outil {call_id} est déjà en cours d'exécution ou déjà décidé"
+        )));
+    }
 
     let outcome = invoke_mcp_tool(
         state,
@@ -369,6 +376,31 @@ pub async fn decide_call(
     .await;
 
     match outcome {
+        Ok(call) if call.status != "completed" => {
+            let message = format!("issue d'exécution inattendue : {}", call.status);
+            let record = state.store.finish_chat_tool_call(
+                call_id,
+                "failed",
+                Some(&message),
+                None,
+                Some(&approval_id),
+            )?;
+            append_tool_message(
+                state,
+                &record,
+                "failed",
+                "L'appel d'outil n'a pas produit de résultat exploitable.",
+            )?;
+            emit_card(&state.app_handle, "failed", &record);
+            let continued = maybe_continue(state, &record)?;
+            Ok(ChatToolDecisionOutcome {
+                call_id: record.id,
+                status: "failed".into(),
+                summary: message,
+                result_text: None,
+                continued,
+            })
+        }
         Ok(call) => {
             let result = call.result.unwrap_or(ih_mcp::ToolCallResult {
                 content: Vec::new(),

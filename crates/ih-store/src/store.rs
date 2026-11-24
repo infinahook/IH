@@ -106,6 +106,13 @@ impl Store {
         };
         {
             let mut conn = store.lock()?;
+            // Protection des données : avant toute migration, une copie
+            // cohérente (API backup de SQLite, compatible WAL) est écrite à
+            // côté de la base. Un échec de sauvegarde interrompt l'ouverture
+            // plutôt que de migrer sans filet.
+            if let Some(db_path) = store.path.as_deref() {
+                backup_before_migration(&conn, db_path)?;
+            }
             migrate::migrate(&mut conn)?;
         }
         Ok(store)
@@ -1620,7 +1627,7 @@ impl Store {
             conn.execute(
                 "UPDATE chat_tool_calls
                     SET status = ?2, error = ?3, decided_at = ?4
-                  WHERE id = ?1 AND status = 'pending'",
+                  WHERE id = ?1 AND status = 'pending' AND approval_id IS NULL",
                 params![id, status, error, now],
             )
             .map_err(|err| db_err(format!("décision de la proposition {id}"), err))?
@@ -1632,6 +1639,26 @@ impl Store {
         }
         self.get_chat_tool_call(id)?
             .ok_or_else(|| IhError::NotFound(format!("proposition d'outil {id}")))
+    }
+
+    /// Réclame atomiquement une proposition pour l'exécution approuvée.
+    ///
+    /// Le premier appelant qui pose une approbation gagne ; toute tentative
+    /// concurrente (double clic, seconde instance, rejeu) échoue : une carte
+    /// ne peut pas être exécutée deux fois. La décision `deny` est elle aussi
+    /// impossible après réclamation (`approval_id IS NULL` exigé).
+    pub fn claim_chat_tool_call(&self, id: &str, approval_id: &str) -> IhResult<bool> {
+        require_non_empty("approbation de proposition d'outil", approval_id)?;
+        let conn = self.lock()?;
+        let touched = conn
+            .execute(
+                "UPDATE chat_tool_calls
+                    SET approval_id = ?2
+                  WHERE id = ?1 AND status = 'pending' AND approval_id IS NULL",
+                params![id, approval_id],
+            )
+            .map_err(|err| db_err(format!("réclamation de la proposition {id}"), err))?;
+        Ok(touched > 0)
     }
 
     /// Clôt une proposition exécutée (ou dont l'exécution a échoué).
@@ -1646,7 +1673,7 @@ impl Store {
         validate_choice(
             "fin de proposition d'outil",
             status,
-            &["completed", "failed", "denied"],
+            &["completed", "failed"],
         )?;
         let now = Utc::now();
         let touched = {
@@ -1655,7 +1682,7 @@ impl Store {
                 "UPDATE chat_tool_calls
                     SET status = ?2, error = ?3, result_text = ?4, approval_id = COALESCE(?5, approval_id),
                         decided_at = COALESCE(decided_at, ?6), finished_at = ?6
-                  WHERE id = ?1 AND status IN ('pending', 'denied')",
+                  WHERE id = ?1 AND status = 'pending'",
                 params![id, status, error, result_text, approval_id, now],
             )
             .map_err(|err| db_err(format!("fin de la proposition {id}"), err))?
@@ -1707,6 +1734,50 @@ fn chat_tool_call_from_row(row: &Row<'_>) -> rusqlite::Result<ChatToolCallRecord
         decided_at: row.get(19)?,
         finished_at: row.get(20)?,
     })
+}
+
+/// Sauvegarde la base avant une migration de schéma, si nécessaire.
+///
+/// La copie utilise l'API `backup` de SQLite : elle est cohérente même quand
+/// la base est en mode WAL (contrairement à une simple copie du fichier
+/// principal, qui perdrait les transactions encore dans le WAL).
+///
+/// Chemin : `<base>.pre-v<ancienne version>-<horodatage>.bak`, à côté de la
+/// base. Aucun fichier n'est écrit si aucune migration n'est requise.
+fn backup_before_migration(conn: &Connection, db_path: &Path) -> IhResult<Option<PathBuf>> {
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|err| db_err("lecture de la version avant migration", err))?;
+    let version = u32::try_from(version).unwrap_or_default();
+    if version == 0 || version >= migrate::SCHEMA_VERSION {
+        return Ok(None);
+    }
+    let stamp = Utc::now().format("%Y%m%dT%H%M%S%.3f");
+    let file_name = db_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "ih.sqlite3".into());
+    let target = db_path.with_file_name(format!("{file_name}.pre-v{version}-{stamp}.bak"));
+    let mut destination = Connection::open(&target).map_err(|err| {
+        db_err(
+            format!("création de la sauvegarde {}", target.display()),
+            err,
+        )
+    })?;
+    {
+        let backup = rusqlite::backup::Backup::new(conn, &mut destination)
+            .map_err(|err| db_err("préparation de la sauvegarde avant migration", err))?;
+        backup
+            .run_to_completion(64, std::time::Duration::from_millis(10), None)
+            .map_err(|err| db_err("écriture de la sauvegarde avant migration", err))?;
+    }
+    drop(destination);
+    tracing::info!(
+        path = %target.display(),
+        version,
+        "sauvegarde de sécurité écrite avant migration"
+    );
+    Ok(Some(target))
 }
 
 /// Applique les PRAGMA de connexion.
