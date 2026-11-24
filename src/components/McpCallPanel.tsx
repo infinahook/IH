@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Play, ShieldAlert, Wrench } from "lucide-react";
 import { api, type McpRemoteCallOutcome, type McpRemoteServer, type McpRemoteTool } from "../lib/api";
 import { riskTone, schemaFields, summarizeResult } from "../lib/mcp";
@@ -44,6 +44,23 @@ export function McpCallPanel({
   const selectedTool = enabledTools.find(
     (tool) => tool.server_id === serverId && tool.name === toolName,
   );
+
+  // Pré-sélection quand il n'y a qu'un seul serveur / un seul outil : l'appel
+  // reste entièrement contrôlé (activation explicite préalable requise).
+  useEffect(() => {
+    if (serverId === "" && enabledServers.length === 1) {
+      setServerId(enabledServers[0].id);
+    }
+  }, [serverId, enabledServers]);
+
+  useEffect(() => {
+    if (serverId !== "" && toolName === "") {
+      const options = enabledTools.filter((tool) => tool.server_id === serverId);
+      if (options.length === 1) {
+        setToolName(options[0].name);
+      }
+    }
+  }, [serverId, toolName, enabledTools]);
 
   const parseArguments = (): unknown | null => {
     try {
