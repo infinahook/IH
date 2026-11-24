@@ -89,6 +89,8 @@ pub struct ProviderView {
     pub endpoint_path: Option<String>,
     pub headers_count: usize,
     pub streaming: bool,
+    /// Capacité tool calling natif déclarée par l'utilisateur.
+    pub supports_tools: bool,
     pub timeout_secs: u64,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
@@ -195,6 +197,9 @@ pub struct ProviderInput {
     pub timeout_secs: u64,
     #[serde(default = "default_true")]
     pub streaming: bool,
+    /// Déclaration explicite du support du tool calling natif.
+    #[serde(default)]
+    pub supports_tools: Option<bool>,
     #[serde(default)]
     pub temperature: Option<f32>,
     #[serde(default)]
@@ -249,6 +254,9 @@ fn apply_input(provider: &mut ProviderConfig, input: &ProviderInput) {
         .collect();
     provider.timeout_secs = input.timeout_secs;
     provider.streaming = input.streaming;
+    if let Some(supports_tools) = input.supports_tools {
+        provider.supports_tools = supports_tools;
+    }
     provider.temperature = input.temperature;
     provider.max_tokens = input.max_tokens;
     provider.default_model = input
@@ -298,6 +306,7 @@ fn providers_list_view(state: &AppState) -> IhResult<Vec<ProviderView>> {
             endpoint_path: p.endpoint_path.clone(),
             headers_count: p.headers.len(),
             streaming: p.streaming,
+            supports_tools: p.supports_tools,
             timeout_secs: p.timeout_secs,
             created_at: p.created_at.map(|d| d.to_rfc3339()),
             updated_at: p.updated_at.map(|d| d.to_rfc3339()),

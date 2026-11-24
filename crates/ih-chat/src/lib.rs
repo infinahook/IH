@@ -138,6 +138,8 @@ pub async fn run_turn(
         .map(|m| ChatMessage {
             role: m.role.clone(),
             content: m.content.clone(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
         })
         .collect();
 
@@ -154,6 +156,8 @@ pub async fn run_turn(
     messages.push(ChatMessage {
         role: "user".into(),
         content: turn.prompt.clone(),
+        tool_calls: Vec::new(),
+        tool_call_id: None,
     });
 
     let request = ChatRequest {
@@ -162,6 +166,7 @@ pub async fn run_turn(
         system: merge_system(&turn.system, &turn.context),
         temperature: turn.temperature,
         max_tokens: turn.max_tokens,
+        tools: Vec::new(),
     };
 
     let started = Instant::now();
@@ -379,6 +384,7 @@ mod tests {
                 usage: Usage::default(),
                 finish_reason: Some("stop".into()),
                 model: "fake-1".into(),
+                tool_calls: Vec::new(),
             })
         }
 
@@ -407,6 +413,7 @@ mod tests {
                 },
                 finish_reason: Some("stop".into()),
                 model: "fake-1".into(),
+                tool_calls: Vec::new(),
             })
         }
     }

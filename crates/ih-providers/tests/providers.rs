@@ -295,9 +295,12 @@ fn provider_config(id: &str, kind: ProviderKind, base_url: String) -> ProviderCo
 fn chat_request(model: &str, prompt: &str) -> ChatRequest {
     ChatRequest {
         model: model.into(),
+        tools: Vec::new(),
         messages: vec![ChatMessage {
             role: "user".into(),
             content: prompt.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
         }],
         system: Some("Tu es IH.".into()),
         temperature: Some(0.5),
@@ -846,4 +849,208 @@ fn redirection_non_suivie_pour_ne_pas_fuir_la_cle() {
     // `health` renvoie un rapport non-ok plutôt qu'une panique.
     assert!(result.is_ok());
     assert!(!result.unwrap().ok);
+}
+
+// ---------------------------------------------------------------------------
+// Tool calling natif : capacité déclarée, sérialisation, appels et streaming
+// ---------------------------------------------------------------------------
+
+fn openai_provider_tools(server: &FakeServer) -> Box<dyn Provider> {
+    let mut config = provider_config(
+        "openai",
+        ProviderKind::OpenaiCompatible,
+        format!("{}/v1", server.base_url()),
+    );
+    config.supports_tools = true;
+    build_provider(&config, Some("sk-test".into())).expect("fournisseur OpenAI avec outils")
+}
+
+fn tool_request(model: &str) -> ChatRequest {
+    let mut request = chat_request(model, "appelle echo");
+    request.tools = vec![ih_providers::ToolDefinition {
+        name: "ih_mcp__echo".into(),
+        description: "Écho d'un texte.".into(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"]
+        }),
+    }];
+    request
+}
+
+#[test]
+fn capacite_tools_declaree_pour_openai_compatible() {
+    let server = FakeServer::start(|_request| FakeResponse::json("{}"));
+    let sans = openai_provider(&server);
+    let avec = openai_provider_tools(&server);
+    assert!(!sans.supports_native_tools());
+    assert!(avec.supports_native_tools());
+    // Les familles non implémentées annoncent honnêtement l'absence de support.
+    let anthropic = AnthropicProvider::new(
+        &provider_config(
+            "anthropic",
+            ProviderKind::Anthropic,
+            "http://127.0.0.1:9".into(),
+        ),
+        Some("sk-ant".into()),
+    )
+    .expect("fournisseur anthropic");
+    assert!(!anthropic.supports_native_tools());
+}
+
+#[tokio::test]
+async fn openai_chat_recoit_les_outils_et_les_messages_tool() {
+    let server = FakeServer::start(|request| {
+        if request.method == "POST" && path_of(request) == "/v1/chat/completions" {
+            FakeResponse::json(
+                r#"{"model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_a","type":"function","function":{"name":"ih_mcp__echo","arguments":"{\"text\":\"bonjour\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":9,"completion_tokens":4}}"#,
+            )
+        } else {
+            FakeResponse::status(404, r#"{"error":{"message":"route inconnue"}}"#)
+        }
+    });
+    let provider = openai_provider_tools(&server);
+    let mut request = tool_request("gpt-4o-mini");
+    // Historique d'un cycle précédent : assistant avec tool_calls + message tool.
+    request.messages.push(ChatMessage {
+        role: "assistant".into(),
+        content: String::new(),
+        tool_calls: vec![ih_providers::ToolCall {
+            id: "call_prev".into(),
+            name: "ih_mcp__echo".into(),
+            arguments: serde_json::json!({"text": "déjà"}),
+        }],
+        tool_call_id: None,
+    });
+    request.messages.push(ChatMessage {
+        role: "tool".into(),
+        content: "déjà".into(),
+        tool_calls: Vec::new(),
+        tool_call_id: Some("call_prev".into()),
+    });
+    let response = provider.chat(request).await.expect("réponse du chat");
+
+    assert_eq!(response.tool_calls.len(), 1);
+    assert_eq!(response.tool_calls[0].id, "call_a");
+    assert_eq!(response.tool_calls[0].name, "ih_mcp__echo");
+    assert_eq!(response.tool_calls[0].arguments["text"], "bonjour");
+    assert_eq!(response.finish_reason.as_deref(), Some("tool_calls"));
+    assert!(response.text.is_empty());
+
+    let requests = server.requests();
+    let body: Value = serde_json::from_str(&requests[0].body).expect("corps JSON");
+    assert_eq!(body["tools"][0]["type"].as_str(), Some("function"));
+    assert_eq!(
+        body["tools"][0]["function"]["name"].as_str(),
+        Some("ih_mcp__echo")
+    );
+    assert_eq!(
+        body["tools"][0]["function"]["parameters"]["type"].as_str(),
+        Some("object")
+    );
+    // Message assistant : contenu nul + tool_calls sérialisés en texte JSON.
+    let assistant = &body["messages"][2];
+    assert_eq!(assistant["role"].as_str(), Some("assistant"));
+    assert!(assistant["content"].is_null());
+    assert_eq!(assistant["tool_calls"][0]["id"].as_str(), Some("call_prev"));
+    assert_eq!(
+        assistant["tool_calls"][0]["function"]["arguments"].as_str(),
+        Some("{\"text\":\"déjà\"}")
+    );
+    // Message tool : identifiant d'appel présent.
+    let tool = &body["messages"][3];
+    assert_eq!(tool["role"].as_str(), Some("tool"));
+    assert_eq!(tool["tool_call_id"].as_str(), Some("call_prev"));
+}
+
+#[tokio::test]
+async fn openai_refuse_les_outils_quand_la_capacite_est_desactivee() {
+    let server = FakeServer::start(|_request| FakeResponse::json("{}"));
+    let provider = openai_provider(&server);
+    let error = provider
+        .chat(tool_request("gpt-4o-mini"))
+        .await
+        .expect_err("outils sans capacité");
+    assert!(format!("{error}").contains("tool calling natif non activé"));
+    // Aucune requête n'est partie.
+    assert!(server.requests().is_empty());
+}
+
+#[tokio::test]
+async fn openai_streaming_accumule_les_appels_decoupes() {
+    let server = FakeServer::start(|request| {
+        if request.method == "POST" && path_of(request) == "/v1/chat/completions" {
+            FakeResponse::sse_chunks(vec![
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Je vérifie. \"}}]}\n\n".to_string(),
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"ih_mcp__echo\",\"arguments\":\"{\\\"te\"}}]}}]}\n\n".to_string(),
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"xt\\\":\\\"bo\"}}]}}]}\n\n".to_string(),
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"njour\\\"}\"}}]}}]}\n\n".to_string(),
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_b\",\"function\":{\"name\":\"ih_mcp__add\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":6}}\n\n".to_string(),
+                "data: [DONE]\n\n".to_string(),
+            ])
+        } else {
+            FakeResponse::status(404, r#"{"error":{"message":"route inconnue"}}"#)
+        }
+    });
+    let provider = openai_provider_tools(&server);
+    let mut deltas = Vec::new();
+    let response = provider
+        .chat_stream(tool_request("gpt-4o-mini"), &mut |delta| {
+            deltas.push(delta.to_string());
+        })
+        .await
+        .expect("flux avec outils");
+
+    assert_eq!(deltas, vec!["Je vérifie. ".to_string()]);
+    assert_eq!(response.finish_reason.as_deref(), Some("tool_calls"));
+    assert_eq!(response.tool_calls.len(), 2);
+    assert_eq!(response.tool_calls[0].id, "call_a");
+    assert_eq!(response.tool_calls[0].name, "ih_mcp__echo");
+    assert_eq!(response.tool_calls[0].arguments["text"], "bonjour");
+    assert_eq!(response.tool_calls[1].name, "ih_mcp__add");
+    assert_eq!(response.tool_calls[1].arguments, serde_json::json!({}));
+}
+
+#[tokio::test]
+async fn openai_streaming_arguments_invalides_erreur_explicite() {
+    let server = FakeServer::start(|request| {
+        if request.method == "POST" && path_of(request) == "/v1/chat/completions" {
+            FakeResponse::sse_chunks(vec![
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"ih_mcp__echo\",\"arguments\":\"{pas du json\"}}]}}]}\n\n".to_string(),
+                "data: [DONE]\n\n".to_string(),
+            ])
+        } else {
+            FakeResponse::status(404, r#"{"error":{"message":"route inconnue"}}"#)
+        }
+    });
+    let provider = openai_provider_tools(&server);
+    let error = provider
+        .chat_stream(tool_request("gpt-4o-mini"), &mut |_delta| {})
+        .await
+        .expect_err("JSON d'arguments invalide");
+    assert!(format!("{error}").contains("arguments d'outil invalides"));
+}
+
+#[tokio::test]
+async fn openai_chat_non_streaming_appel_fragmente_objet_json() {
+    // Certaines passerelles renvoient un objet JSON au lieu d'une chaîne.
+    let server = FakeServer::start(|request| {
+        if request.method == "POST" && path_of(request) == "/v1/chat/completions" {
+            FakeResponse::json(
+                r#"{"model":"m","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_x","type":"function","function":{"name":"ih_mcp__add","arguments":{"a":1,"b":2}}}]},"finish_reason":"tool_calls"}]}"#,
+            )
+        } else {
+            FakeResponse::status(404, r#"{"error":{"message":"route inconnue"}}"#)
+        }
+    });
+    let provider = openai_provider_tools(&server);
+    let response = provider
+        .chat(tool_request("m"))
+        .await
+        .expect("réponse du chat");
+    assert_eq!(
+        response.tool_calls[0].arguments,
+        serde_json::json!({"a":1,"b":2})
+    );
 }

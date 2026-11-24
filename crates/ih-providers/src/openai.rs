@@ -6,7 +6,10 @@ use crate::common::{
     parse_stream_json, require_secret, send, validate_base_url, validate_config,
 };
 use crate::stream::{stream_sse, StreamState};
-use crate::{ChatRequest, ChatResponse, HealthReport, ModelEntry, Provider, Usage};
+use crate::{
+    ChatMessage, ChatRequest, ChatResponse, HealthReport, ModelEntry, Provider, ToolCall,
+    ToolDefinition, Usage,
+};
 use async_trait::async_trait;
 use ih_core::config::{ProviderConfig, ProviderKind};
 use ih_core::{IhError, IhResult};
@@ -24,6 +27,7 @@ pub struct OpenAiCompatibleProvider {
     headers: Vec<(String, String)>,
     stream_enabled: bool,
     custom_chat_url: Option<String>,
+    supports_tools: bool,
 }
 
 impl std::fmt::Debug for OpenAiCompatibleProvider {
@@ -55,6 +59,7 @@ impl OpenAiCompatibleProvider {
                 .endpoint_path
                 .as_deref()
                 .map(|path| custom_endpoint_url(&config.base_url, path)),
+            supports_tools: config.supports_tools,
         })
     }
 
@@ -81,6 +86,57 @@ impl OpenAiCompatibleProvider {
     }
 }
 
+/// Message au format OpenAI (assistant avec `tool_calls`, message `tool`…).
+fn message_body(message: &ChatMessage) -> Value {
+    let mut body = json!({"role": message.role.as_str()});
+    if message.content.is_empty() && !message.tool_calls.is_empty() {
+        // Un assistant qui demande des outils n'a pas de contenu texte.
+        body["content"] = Value::Null;
+    } else {
+        body["content"] = json!(message.content.as_str());
+    }
+    if let Some(tool_call_id) = &message.tool_call_id {
+        body["tool_call_id"] = json!(tool_call_id);
+    }
+    if !message.tool_calls.is_empty() {
+        let calls = message
+            .tool_calls
+            .iter()
+            .map(|call| {
+                json!({
+                    "id": call.id.as_str(),
+                    "type": "function",
+                    "function": {
+                        "name": call.name.as_str(),
+                        "arguments": call.arguments.to_string(),
+                    },
+                })
+            })
+            .collect::<Vec<_>>();
+        body["tool_calls"] = json!(calls);
+    }
+    body
+}
+
+/// Outils proposés au modèle au format OpenAI.
+fn tools_payload(tools: &[ToolDefinition]) -> Value {
+    Value::Array(
+        tools
+            .iter()
+            .map(|tool| {
+                json!({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name.as_str(),
+                        "description": tool.description.as_str(),
+                        "parameters": tool.parameters.clone(),
+                    },
+                })
+            })
+            .collect(),
+    )
+}
+
 fn request_body(request: &ChatRequest, stream: bool) -> Value {
     let mut messages = Vec::with_capacity(request.messages.len() + 1);
     if let Some(system) = request
@@ -90,17 +146,15 @@ fn request_body(request: &ChatRequest, stream: bool) -> Value {
     {
         messages.push(json!({"role": "system", "content": system}));
     }
-    messages.extend(request.messages.iter().map(|message| {
-        json!({
-            "role": message.role.as_str(),
-            "content": message.content.as_str(),
-        })
-    }));
+    messages.extend(request.messages.iter().map(message_body));
     let mut body = json!({
         "model": request.model.as_str(),
         "messages": messages,
         "stream": stream,
     });
+    if !request.tools.is_empty() {
+        body["tools"] = tools_payload(&request.tools);
+    }
     if let Some(temperature) = request.temperature {
         body["temperature"] = json!(temperature);
     }
@@ -108,6 +162,30 @@ fn request_body(request: &ChatRequest, stream: bool) -> Value {
         body["max_tokens"] = json!(max_tokens);
     }
     body
+}
+
+/// Convertit les arguments d'un appel d'outil tels que reçus par le fournisseur
+/// (chaîne JSON, objet, ou absent) en valeur JSON validée.
+fn parse_tool_arguments(
+    provider_id: &str,
+    tool_name: &str,
+    raw: Option<&Value>,
+) -> IhResult<Value> {
+    match raw {
+        None | Some(Value::Null) => Ok(Value::Object(serde_json::Map::new())),
+        Some(Value::String(text)) => {
+            if text.trim().is_empty() {
+                Ok(Value::Object(serde_json::Map::new()))
+            } else {
+                serde_json::from_str(text).map_err(|error| {
+                    IhError::Provider(format!(
+                        "arguments d'outil invalides pour {provider_id} ({tool_name}) : {error}"
+                    ))
+                })
+            }
+        }
+        Some(value) => Ok(value.clone()),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -132,6 +210,24 @@ struct ChatChoice {
 struct ChatChoiceMessage {
     #[serde(default)]
     content: Option<Value>,
+    #[serde(default)]
+    tool_calls: Option<Vec<RawToolCall>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawToolCall {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<RawFunctionCall>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawFunctionCall {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<Value>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -164,6 +260,26 @@ struct StreamChoice {
 struct StreamDelta {
     #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<StreamToolCallDelta>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamToolCallDelta {
+    #[serde(default)]
+    index: Option<usize>,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<StreamFunctionDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamFunctionDelta {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -271,6 +387,10 @@ impl Provider for OpenAiCompatibleProvider {
         ProviderKind::OpenaiCompatible
     }
 
+    fn supports_native_tools(&self) -> bool {
+        self.supports_tools
+    }
+
     async fn list_models(&self) -> IhResult<Vec<ModelEntry>> {
         let builder = apply_headers(
             self.client.get(self.models_url()).bearer_auth(&self.secret),
@@ -293,6 +413,12 @@ impl Provider for OpenAiCompatibleProvider {
     }
 
     async fn chat(&self, request: ChatRequest) -> IhResult<ChatResponse> {
+        if !request.tools.is_empty() && !self.supports_tools {
+            return Err(IhError::Provider(format!(
+                "tool calling natif non activé pour {}",
+                self.id
+            )));
+        }
         let response = self.post_chat(&request, false).await?;
         let body = response
             .text()
@@ -308,10 +434,41 @@ impl Provider for OpenAiCompatibleProvider {
             message,
             finish_reason,
         } = choice;
-        let text = message
-            .and_then(|message| message.content)
-            .map(|content| content_text(&content))
-            .unwrap_or_default();
+        let (text, tool_calls) = match message {
+            Some(message) => {
+                let text = message
+                    .content
+                    .map(|content| content_text(&content))
+                    .unwrap_or_default();
+                let raw_calls = message.tool_calls.unwrap_or_default();
+                let mut tool_calls = Vec::with_capacity(raw_calls.len());
+                for raw in raw_calls {
+                    let function = raw.function.ok_or_else(|| {
+                        IhError::Provider(format!("appel d'outil sans fonction pour {}", self.id))
+                    })?;
+                    let name = function.name.unwrap_or_default();
+                    if name.is_empty() {
+                        return Err(IhError::Provider(format!(
+                            "appel d'outil sans nom pour {}",
+                            self.id
+                        )));
+                    }
+                    let id = raw
+                        .id
+                        .filter(|id| !id.is_empty())
+                        .unwrap_or_else(|| format!("call_{}", tool_calls.len()));
+                    let arguments =
+                        parse_tool_arguments(&self.id, &name, function.arguments.as_ref())?;
+                    tool_calls.push(ToolCall {
+                        id,
+                        name,
+                        arguments,
+                    });
+                }
+                (text, tool_calls)
+            }
+            None => (String::new(), Vec::new()),
+        };
         let usage = completion.usage.unwrap_or_default();
         let model = completion
             .model
@@ -325,6 +482,7 @@ impl Provider for OpenAiCompatibleProvider {
             },
             finish_reason,
             model,
+            tool_calls,
         })
     }
 
@@ -333,6 +491,12 @@ impl Provider for OpenAiCompatibleProvider {
         request: ChatRequest,
         on_delta: &mut (dyn for<'a> FnMut(&'a str) + Send),
     ) -> IhResult<ChatResponse> {
+        if !request.tools.is_empty() && !self.supports_tools {
+            return Err(IhError::Provider(format!(
+                "tool calling natif non activé pour {}",
+                self.id
+            )));
+        }
         if !self.stream_enabled {
             let response = self.chat(request).await?;
             on_delta(&response.text);
@@ -362,11 +526,26 @@ impl Provider for OpenAiCompatibleProvider {
                             on_delta(&content);
                         }
                     }
+                    for (position, call) in
+                        delta.tool_calls.unwrap_or_default().into_iter().enumerate()
+                    {
+                        let index = call.index.unwrap_or(position);
+                        let (name, arguments) = call
+                            .function
+                            .map(|function| (function.name, function.arguments))
+                            .unwrap_or((None, None));
+                        state.append_tool_call(
+                            index,
+                            call.id.as_deref(),
+                            name.as_deref(),
+                            arguments.as_deref(),
+                        );
+                    }
                 }
             }
             Ok(false)
         })
         .await?;
-        Ok(state.into_response())
+        state.into_response(&self.id)
     }
 }

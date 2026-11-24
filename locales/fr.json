@@ -560,7 +560,9 @@
     "models_section": "Modèles ({count})",
     "model_remove_title": "Supprimer le modèle",
     "detail_empty_title": "Aucun fournisseur sélectionné",
-    "detail_empty_description": "Choisissez un fournisseur dans la liste de gauche."
+    "detail_empty_description": "Choisissez un fournisseur dans la liste de gauche.",
+    "field_supports_tools_hint": "Déclare le support du tool calling natif (famille OpenAI-compatible). Désactivé : le chat garde le protocole texte et l'approbation manuelle.",
+    "field_supports_tools_unavailable": "Non disponible pour cette famille : le support natif est annoncé tel quel."
   },
   "skills": {
     "title": "Skills",

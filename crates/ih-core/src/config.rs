@@ -63,6 +63,10 @@ pub struct ProviderConfig {
     /// Un secret est présent dans le trousseau — jamais le secret lui-même.
     pub has_secret: bool,
     pub timeout_secs: u64,
+    /// Le fournisseur annonce le tool calling natif (capacité explicite,
+    /// jamais devinée). Désactivé par défaut : le chat garde son
+    /// comportement classique et le protocole texte reste disponible.
+    pub supports_tools: bool,
     /// Chemin complet de l'endpoint de chat, relatif à l'origine de `base_url`
     /// (ex. `/v1/chat/completions`). Absent : chemin standard du protocole.
     pub endpoint_path: Option<String>,
@@ -90,6 +94,7 @@ impl Default for ProviderConfig {
             models: Vec::new(),
             has_secret: false,
             timeout_secs: 120,
+            supports_tools: false,
             endpoint_path: None,
             headers: std::collections::BTreeMap::new(),
             streaming: true,

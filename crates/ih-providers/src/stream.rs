@@ -2,10 +2,12 @@
 //! NDJSON (Ollama), avec conservation des fragments partiels entre deux lectures.
 
 use crate::common::{merge_usage, network_error};
-use crate::{ChatResponse, Usage};
+use crate::{ChatResponse, ToolCall, Usage};
 use futures_util::StreamExt;
-use ih_core::IhResult;
+use ih_core::{IhError, IhResult};
 use reqwest::Response;
+use serde_json::Value;
+use std::collections::BTreeMap;
 
 /// Accumulateur de ligne : les chunks réseau peuvent couper n'importe où,
 /// y compris au milieu d'un caractère UTF-8.
@@ -166,6 +168,39 @@ where
     Ok(())
 }
 
+/// Accumulation d'un appel d'outil reçu fragment par fragment.
+#[derive(Debug, Default)]
+struct ToolCallBuffer {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+impl ToolCallBuffer {
+    fn into_tool_call(self, provider_id: &str) -> IhResult<ToolCall> {
+        if self.id.is_empty() || self.name.is_empty() {
+            return Err(IhError::Provider(format!(
+                "appel d'outil incomplet pour {provider_id} (identifiant ou nom manquant)"
+            )));
+        }
+        let arguments = if self.arguments.trim().is_empty() {
+            Value::Object(serde_json::Map::new())
+        } else {
+            serde_json::from_str(&self.arguments).map_err(|error| {
+                IhError::Provider(format!(
+                    "arguments d'outil invalides pour {provider_id} ({}) : {error}",
+                    self.name
+                ))
+            })?
+        };
+        Ok(ToolCall {
+            id: self.id,
+            name: self.name,
+            arguments,
+        })
+    }
+}
+
 /// État agrégé d'une réponse en streaming.
 #[derive(Debug)]
 pub(crate) struct StreamState {
@@ -173,6 +208,7 @@ pub(crate) struct StreamState {
     model: String,
     finish_reason: Option<String>,
     usage: Usage,
+    tool_calls: BTreeMap<usize, ToolCallBuffer>,
 }
 
 impl StreamState {
@@ -182,6 +218,7 @@ impl StreamState {
             model: model.to_string(),
             finish_reason: None,
             usage: Usage::default(),
+            tool_calls: BTreeMap::new(),
         }
     }
 
@@ -209,13 +246,41 @@ impl StreamState {
         }
     }
 
-    pub(crate) fn into_response(self) -> ChatResponse {
-        ChatResponse {
+    /// Accumule un fragment d'appel d'outil (identifiant du fournisseur,
+    /// nom éventuellement découpé, arguments en JSON fragmenté).
+    pub(crate) fn append_tool_call(
+        &mut self,
+        index: usize,
+        id: Option<&str>,
+        name: Option<&str>,
+        arguments: Option<&str>,
+    ) {
+        let buffer = self.tool_calls.entry(index).or_default();
+        if let Some(id) = id.filter(|id| !id.is_empty()) {
+            buffer.id = id.to_string();
+        }
+        if let Some(name) = name {
+            buffer.name.push_str(name);
+        }
+        if let Some(arguments) = arguments {
+            buffer.arguments.push_str(arguments);
+        }
+    }
+
+    /// Construit la réponse finale (les arguments d'outil sont validés JSON).
+    pub(crate) fn into_response(self, provider_id: &str) -> IhResult<ChatResponse> {
+        let tool_calls = self
+            .tool_calls
+            .into_values()
+            .map(|buffer| buffer.into_tool_call(provider_id))
+            .collect::<IhResult<Vec<_>>>()?;
+        Ok(ChatResponse {
             text: self.text,
             usage: self.usage,
             finish_reason: self.finish_reason,
             model: self.model,
-        }
+            tool_calls,
+        })
     }
 }
 
@@ -246,6 +311,34 @@ mod tests {
         let mut decoder = SseDecoder::default();
         assert!(decoder.push(&payload[..7]).is_empty());
         assert_eq!(decoder.push(&payload[7..]), vec!["é"]);
+    }
+
+    #[test]
+    fn stream_state_accumule_les_appels_do_outils() {
+        let mut state = StreamState::new("m");
+        state.append_tool_call(0, Some("call_1"), Some("echo"), Some("{\"text\":\"a"));
+        state.append_tool_call(0, None, None, Some("\"}"));
+        state.append_tool_call(1, Some("call_2"), Some("add"), Some("{}"));
+        let response = state.into_response("test").expect("appels valides");
+        assert_eq!(response.tool_calls.len(), 2);
+        assert_eq!(response.tool_calls[0].id, "call_1");
+        assert_eq!(response.tool_calls[0].arguments["text"], "a");
+        assert_eq!(response.tool_calls[1].name, "add");
+    }
+
+    #[test]
+    fn stream_state_refuse_des_arguments_json_invalides() {
+        let mut state = StreamState::new("m");
+        state.append_tool_call(0, Some("call_1"), Some("echo"), Some("{pas du json"));
+        let error = state.into_response("test").expect_err("JSON invalide");
+        assert!(format!("{error}").contains("arguments"));
+    }
+
+    #[test]
+    fn stream_state_refuse_un_appel_sans_nom() {
+        let mut state = StreamState::new("m");
+        state.append_tool_call(0, None, None, Some("{}"));
+        assert!(state.into_response("test").is_err());
     }
 
     #[test]

@@ -269,6 +269,7 @@ impl Provider for AnthropicProvider {
             },
             finish_reason: response.stop_reason,
             model,
+            tool_calls: Vec::new(),
         })
     }
 
@@ -325,6 +326,6 @@ impl Provider for AnthropicProvider {
             Ok(false)
         })
         .await?;
-        Ok(state.into_response())
+        state.into_response(&self.id)
     }
 }

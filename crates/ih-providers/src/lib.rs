@@ -33,11 +33,47 @@ pub use ih_core::{IhError, IhResult};
 
 use serde::{Deserialize, Serialize};
 
+/// Définition d'outil transmise à un fournisseur de tool calling natif.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolDefinition {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// Schéma JSON (objet) des paramètres de l'outil.
+    pub parameters: serde_json::Value,
+}
+
+/// Demande d'exécution d'outil émise par le modèle.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolCall {
+    /// Identifiant d'appel choisi par le fournisseur (associé au résultat).
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub arguments: serde_json::Value,
+}
+
+/// Résultat d'outil renvoyé au fournisseur.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolCallResult {
+    pub tool_call_id: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub is_error: bool,
+}
+
 /// Message de conversation, indépendant du fournisseur.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    /// Appels d'outils demandés par le modèle (message assistant).
+    #[serde(default)]
+    pub tool_calls: Vec<ToolCall>,
+    /// Identifiant de l'appel auquel ce message `tool` répond.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 /// Requête de conversation normalisée.
@@ -48,6 +84,9 @@ pub struct ChatRequest {
     pub system: Option<String>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
+    /// Outils natifs proposés au modèle (vide : comportement classique).
+    #[serde(default)]
+    pub tools: Vec<ToolDefinition>,
 }
 
 impl ChatRequest {
@@ -58,10 +97,13 @@ impl ChatRequest {
             messages: vec![ChatMessage {
                 role: "user".into(),
                 content: prompt.into(),
+                tool_calls: Vec::new(),
+                tool_call_id: None,
             }],
             system: None,
             temperature: None,
             max_tokens: None,
+            tools: Vec::new(),
         }
     }
 }
@@ -80,6 +122,9 @@ pub struct ChatResponse {
     pub usage: Usage,
     pub finish_reason: Option<String>,
     pub model: String,
+    /// Appels d'outils demandés par le modèle (vide sinon).
+    #[serde(default)]
+    pub tool_calls: Vec<ToolCall>,
 }
 
 /// Résultat d'une vérification de disponibilité.
@@ -98,6 +143,15 @@ pub trait Provider: Send + Sync {
 
     /// Famille d'API du fournisseur.
     fn kind(&self) -> ProviderKind;
+
+    /// Le fournisseur annonce-t-il le tool calling natif ?
+    ///
+    /// Capacité **déclarée** (configuration), jamais devinée : un endpoint
+    /// « compatible OpenAI » peut ne pas implémenter les outils. Défaut : non
+    /// (le chat garde alors son comportement classique).
+    fn supports_native_tools(&self) -> bool {
+        false
+    }
 
     /// Modèles réellement exposés par l'API.
     async fn list_models(&self) -> IhResult<Vec<ModelEntry>>;

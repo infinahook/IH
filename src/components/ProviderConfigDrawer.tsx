@@ -45,6 +45,7 @@ interface Draft {
   endpoint_path: string;
   timeout_secs: string;
   streaming: boolean;
+  supports_tools: boolean;
   temperature: string;
   max_tokens: string;
   headers: string;
@@ -59,6 +60,7 @@ function draftFrom(
     endpoint_path: provider?.endpoint_path ?? "",
     timeout_secs: String(provider?.timeout_secs ?? stored?.timeout_secs ?? 120),
     streaming: provider?.streaming ?? stored?.streaming ?? true,
+    supports_tools: provider?.supports_tools ?? stored?.supports_tools ?? false,
     temperature: stored?.temperature != null ? String(stored.temperature) : "",
     max_tokens: stored?.max_tokens != null ? String(stored.max_tokens) : "",
     headers: serializeHeaders(stored?.headers),
@@ -251,6 +253,7 @@ export function ProviderConfigDrawer({
         headers: parseHeadersSafe(draft.headers),
         timeout_secs: Number(draft.timeout_secs),
         streaming: draft.streaming,
+        supports_tools: draft.supports_tools,
         temperature: draft.temperature.trim() === "" ? null : Number(draft.temperature),
         max_tokens: draft.max_tokens.trim() === "" ? null : Number(draft.max_tokens),
         default_model: selected.default_model,
@@ -766,6 +769,20 @@ export function ProviderConfigDrawer({
                           onChange={(event) => patch({ streaming: event.target.checked })}
                         />
                         <span>{t("providers.field_streaming_hint")}</span>
+                      </label>
+                      <label className="checkbox-row drawer-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={draft.supports_tools}
+                          disabled={busy !== null || selected?.kind !== "openai_compatible"}
+                          onChange={(event) => patch({ supports_tools: event.target.checked })}
+                        />
+                        <span>
+                          {t("providers.field_supports_tools_hint")}
+                          {selected && selected.kind !== "openai_compatible"
+                            ? ` ${t("providers.field_supports_tools_unavailable")}`
+                            : ""}
+                        </span>
                       </label>
                     </div>
                     <label className="drawer-field">

@@ -560,7 +560,9 @@
     "models_section": "Models ({count})",
     "model_remove_title": "Delete model",
     "detail_empty_title": "No provider selected",
-    "detail_empty_description": "Choose a provider from the list on the left."
+    "detail_empty_description": "Choose a provider from the list on the left.",
+    "field_supports_tools_hint": "Declares native tool calling support (OpenAI-compatible family). When off, chat keeps the text protocol and manual approval.",
+    "field_supports_tools_unavailable": "Not available for this family: native support is announced as-is."
   },
   "skills": {
     "title": "Skills",

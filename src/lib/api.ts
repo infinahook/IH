@@ -184,6 +184,8 @@ export interface ProviderConfig {
   endpoint_path: string | null;
   headers: Record<string, string>;
   streaming: boolean;
+  /** Capacité tool calling natif déclarée pour ce fournisseur. */
+  supports_tools: boolean;
   temperature: number | null;
   max_tokens: number | null;
   custom: boolean;
@@ -364,6 +366,8 @@ export interface ProviderView {
   /** Nombre d'en-têtes configurés ; les valeurs ne sont jamais renvoyées. */
   headers_count: number;
   streaming: boolean;
+  /** Capacité tool calling natif déclarée pour ce fournisseur. */
+  supports_tools: boolean;
   timeout_secs: number;
   created_at: string | null;
   updated_at: string | null;
@@ -379,6 +383,8 @@ export interface ProviderInput {
   headers?: Record<string, string>;
   timeout_secs?: number;
   streaming?: boolean;
+  /** Déclaration explicite du tool calling natif (absente : inchangée). */
+  supports_tools?: boolean;
   temperature?: number | null;
   max_tokens?: number | null;
   default_model?: string | null;
