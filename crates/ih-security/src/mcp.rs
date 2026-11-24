@@ -376,6 +376,40 @@ mod role_tests {
     }
 }
 
+/// Redacte les arguments d'un appel avant de les **enregistrer** (historique,
+/// audit). L'exécution utilise les arguments d'origine ; seule la copie
+/// persistée est nettoyée : un argument nommé `api_key`, `token`, `secret`,
+/// `password`… ne doit jamais finir en clair dans SQLite ou un journal.
+pub fn redact_arguments(arguments: &serde_json::Value) -> serde_json::Value {
+    ih_core::redaction::redact_json(arguments)
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+
+    #[test]
+    fn redacte_les_cles_sensibles_sans_toucher_aux_autres() {
+        let redacted = redact_arguments(&serde_json::json!({
+            "path": "a.txt",
+            "api_key": "sk-1234567890abcdef",
+            "nested": {"password": "p@ssw0rd", "count": 3},
+            "items": [{"token": "secret-token-value"}]
+        }));
+        assert_eq!(redacted["path"], "a.txt");
+        assert_ne!(redacted["api_key"], "sk-1234567890abcdef");
+        assert_eq!(redacted["nested"]["count"], 3);
+        assert_ne!(redacted["nested"]["password"], "p@ssw0rd");
+        assert_ne!(redacted["items"][0]["token"], "secret-token-value");
+    }
+
+    #[test]
+    fn arguments_ordinaires_intacts() {
+        let value = serde_json::json!({"text": "bonjour", "a": 2, "b": 3});
+        assert_eq!(redact_arguments(&value), value);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

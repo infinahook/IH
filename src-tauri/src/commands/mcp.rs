@@ -202,7 +202,9 @@ fn record_call(
     error: Option<String>,
     duration_ms: Option<u64>,
 ) {
-    let mut arguments = arguments.clone();
+    // Les arguments exécutés peuvent contenir des clés sensibles saisies par
+    // l'utilisateur : la copie persistée est toujours redactée.
+    let mut arguments = ih_security::mcp::redact_arguments(arguments);
     if serde_json::to_string(&arguments)
         .map(|text| text.len() > MAX_ARGUMENTS_BYTES)
         .unwrap_or(false)

@@ -74,7 +74,8 @@ transport seulement :
 ### stdio local — hors de cette livraison
 
 Les serveurs stdio existants (`ih-extensions::mcp`, page Plugins) continuent de
-fonctionner. Leur migration vers `ih-mcp` (transport stdio unifié,
+fonctionner ; leur approbation est désormais liée à l'empreinte des paramètres
+et le risque est classé localement, comme pour les serveurs distants. Leur migration vers `ih-mcp` (transport stdio unifié,
 classification et approbations identiques) est prévue dans une version
 ultérieure ; aucune annonce contraire n'est faite dans l'interface.
 

@@ -10,6 +10,9 @@
 use ih_core::{IhError, IhResult};
 use serde_json::Value;
 
+/// Taille maximale des arguments acceptés pour exécution (256 Kio).
+pub const MAX_ARGUMENTS_BYTES: usize = 256 * 1024;
+
 /// Taille maximale d'un schéma d'entrée (512 Kio).
 pub const MAX_SCHEMA_BYTES: usize = 512 * 1024;
 /// Profondeur maximale d'imbrication du schéma.
@@ -123,6 +126,14 @@ fn check_bounds(value: &Value, _depth: usize) -> IhResult<()> {
 /// elle attrape les erreurs évidentes avant tout appel réseau, sans prétendre
 /// remplacer un validateur complet.
 pub fn validate_arguments(schema: &Value, arguments: &Value) -> IhResult<()> {
+    let size = serde_json::to_string(arguments)
+        .map(|text| text.len())
+        .unwrap_or(usize::MAX);
+    if size > MAX_ARGUMENTS_BYTES {
+        return Err(IhError::Invalid(format!(
+            "arguments MCP trop volumineux ({size} octets, limite {MAX_ARGUMENTS_BYTES})"
+        )));
+    }
     let args = arguments.as_object().ok_or_else(|| {
         IhError::Invalid("les arguments d'un outil MCP doivent être un objet JSON".into())
     })?;
@@ -305,6 +316,14 @@ mod tests {
         assert!(error.to_string().contains("integer"), "{error}");
         validate_arguments(&schema, &json!({"a": 3.0})).unwrap();
         validate_arguments(&schema, &json!({"a": null})).unwrap();
+    }
+
+    #[test]
+    fn arguments_trop_volumineux_refuses() {
+        let schema = json!({"type": "object", "properties": {"data": {"type": "string"}}});
+        let big = json!({"data": "x".repeat(super::MAX_ARGUMENTS_BYTES + 10)});
+        let error = validate_arguments(&schema, &big).unwrap_err();
+        assert!(error.to_string().contains("volumineux"), "{error}");
     }
 
     #[test]

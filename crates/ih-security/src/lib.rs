@@ -17,8 +17,8 @@ pub use approval::{
     ApprovalDecision, ApprovalRegistry, ApprovalRequest, ApprovalState, ApprovalTicket,
 };
 pub use mcp::{
-    decide_mcp_call, mcp_call_fingerprint, mcp_secret_account, role_permits, McpCallDecision,
-    McpCaller, McpToolCategory, McpToolHints, McpToolSafety,
+    decide_mcp_call, mcp_call_fingerprint, mcp_secret_account, redact_arguments, role_permits,
+    McpCallDecision, McpCaller, McpToolCategory, McpToolHints, McpToolSafety,
 };
 pub use net::{check_resolved, classify_ip, validate_url, HostClass, UrlPolicy, UrlTarget};
 pub use risk::{classify_command, CommandAssessment, RiskLevel};

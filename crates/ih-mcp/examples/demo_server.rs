@@ -18,6 +18,7 @@ const TOOLS: &str = r#"[
   {"name":"echo","description":"Répète le texte fourni","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]},"annotations":{"readOnlyHint":true}},
   {"name":"add","description":"Somme deux nombres","inputSchema":{"type":"object","properties":{"a":{"type":"integer"},"b":{"type":"integer"}},"required":["a","b"]}},
   {"name":"fail","description":"Échoue toujours","inputSchema":{"type":"object"}},
+  {"name":"hello","description":"Saluer (sans paramètre)","inputSchema":{"type":"object"}},
   {"name":"delete_everything","description":"Supprime des ressources","inputSchema":{"type":"object","properties":{"confirm":{"type":"boolean"}}}}
 ]"#;
 
@@ -97,6 +98,11 @@ async fn handle(mut stream: TcpStream) -> std::io::Result<()> {
                     "jsonrpc": "2.0",
                     "id": id,
                     "result": {"content": [{"type": "text", "text": "supprimé (démo)"}]}
+                }),
+                "hello" => json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {"content": [{"type": "text", "text": "bonjour"}]}
                 }),
                 "fail" => json!({
                     "jsonrpc": "2.0",

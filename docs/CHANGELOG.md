@@ -64,6 +64,14 @@
 - Frontend : helpers MCP (schéma, risques, troncature) ; i18n FR/EN en parité.
 
 ### Corrigé
+- **Revue de sécurité (avant merge 0.6.1)** — durcissements :
+  - arguments d'appel **redactés** avant persistance dans `mcp_calls` et dans
+    le détail d'audit/approbation (un argument nommé `api_key`, `token`,
+    `secret`, `password`… n'atteint plus SQLite en clair) ;
+  - borne de taille des arguments exécutés (256 Kio) avant toute exécution ;
+  - **serveurs MCP stdio (page Plugins)** : approbation désormais liée à
+    l'empreinte des paramètres (comme les serveurs distants), risque classé
+    localement au lieu d'un niveau figé, arguments obligatoirement un objet.
 - Le trousseau système n'est plus sollicité au démarrage : le statut ne lit
   plus d'entrée sonde ; la liste des fournisseurs n'effectue plus de lecture
   (drapeau `has_secret` persisté), et l'existence d'un jeton MCP est désormais

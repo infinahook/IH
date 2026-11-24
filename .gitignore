@@ -7,3 +7,6 @@ src-tauri/target/
 !.env.example
 *.log
 .DS_Store
+
+# binaires de paquets
+*.AppImage
