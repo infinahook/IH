@@ -269,6 +269,7 @@ pub async fn mcp_remote_servers_list(state: State<'_, AppState>) -> IhResult<Vec
             .list_mcp_tools(Some(&record.id))
             .map(|tools| tools.len())
             .unwrap_or(0);
+        tracing::debug!(server = %record.id, enabled = record.enabled, "serveur MCP listé");
         views.push(McpServerView {
             id: record.id.clone(),
             name: record.name.clone(),
@@ -470,6 +471,7 @@ pub async fn mcp_server_connect(
     state: State<'_, AppState>,
     id: String,
 ) -> IhResult<Vec<McpToolView>> {
+    tracing::debug!(server = %id, "commande mcp_server_connect");
     let record = state
         .store
         .get_mcp_server(&id)?

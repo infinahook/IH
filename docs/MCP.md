@@ -219,6 +219,10 @@ ces étapes sur le même exécuteur (le bridge synchrone est déjà en place).
 7. **Validation JSON Schema partielle** : objet, propriétés typées simples,
    champs requis, `additionalProperties: false` ; pas de `$ref` distant, pas de
    `oneOf` complet.
-8. **Plannificateur de tests GUI** : l'interface a été compilée et les
-   commandes câblées ; aucun parcours graphique automatisé n'a été exécuté
-   dans cette livraison (voir le rapport de la PR).
+8. **Validation graphique** : l'application a été lancée avec une base réelle
+   (migration v4) et la page MCP monte puis appelle l'IPC
+   (`mcp_remote_servers_list` retourne le serveur de démonstration, vérifié
+   dans les journaux). Le parcours de clic complet (connexion, appel,
+   approbation) n'a **pas** été automatisé : l'environnement de validation n'a
+   ni vision machine, ni OCR, ni bus d'accessibilité. Cette étape reste à
+   faire manuellement (ou avec une recette d'écran dédiée).
