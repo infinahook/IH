@@ -270,20 +270,7 @@ pub fn workflow_upsert(
     steps: serde_json::Value,
 ) -> IhResult<Workflow> {
     let project = ProjectId::parse(project_id)?;
-    if name.trim().is_empty() {
-        return Err(IhError::Invalid("nom de workflow vide".into()));
-    }
-    if interval_minutes < 5 {
-        return Err(IhError::Invalid(
-            "intervalle minimal d'automatisation : 5 minutes".into(),
-        ));
-    }
-    let steps_array = steps
-        .as_array()
-        .ok_or_else(|| IhError::Invalid("les étapes doivent être un tableau".into()))?;
-    if steps_array.is_empty() {
-        return Err(IhError::Invalid("workflow sans étape".into()));
-    }
+    validate_workflow(&name, interval_minutes, &steps)?;
     let workflow = Workflow {
         id: format!("wf-{}", uuid::Uuid::new_v4()),
         project_id: project,
@@ -299,22 +286,80 @@ pub fn workflow_upsert(
 }
 
 #[tauri::command]
+pub fn workflow_update(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    interval_minutes: u32,
+    steps: serde_json::Value,
+) -> IhResult<Workflow> {
+    let mut workflow = find_workflow(&state, &id)?;
+    validate_workflow(&name, interval_minutes, &steps)?;
+    workflow.name = name;
+    workflow.interval_minutes = interval_minutes;
+    workflow.steps = steps;
+    state.store.upsert_workflow(&workflow)?;
+    Ok(workflow)
+}
+
+#[tauri::command]
+pub fn workflow_set_enabled(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> IhResult<Workflow> {
+    let mut workflow = find_workflow(&state, &id)?;
+    workflow.enabled = enabled;
+    state.store.upsert_workflow(&workflow)?;
+    Ok(workflow)
+}
+
+#[tauri::command]
+pub fn workflow_delete(state: State<'_, AppState>, id: String) -> IhResult<()> {
+    state.store.delete_workflow(&id)
+}
+
+#[tauri::command]
 pub fn workflow_run_now(state: State<'_, AppState>, id: String) -> IhResult<WorkflowRun> {
-    let config = state.config_snapshot()?;
-    let mut target: Option<Workflow> = None;
-    for project in state.store.list_projects()? {
-        if let Some(found) = state
-            .store
-            .list_workflows(&project.id)?
-            .into_iter()
-            .find(|w| w.id == id)
-        {
-            target = Some(found);
-            break;
-        }
+    let workflow = find_workflow(&state, &id)?;
+    execute_workflow(&state, &workflow)
+}
+
+/// Valide les champs communs à la création et à la modification.
+fn validate_workflow(name: &str, interval_minutes: u32, steps: &serde_json::Value) -> IhResult<()> {
+    if name.trim().is_empty() {
+        return Err(IhError::Invalid("nom de workflow vide".into()));
     }
-    let workflow = target.ok_or_else(|| IhError::NotFound(format!("workflow {id}")))?;
-    let root = project_path(&state, workflow.project_id.as_str())?;
+    if interval_minutes < 5 {
+        return Err(IhError::Invalid(
+            "intervalle minimal d'automatisation : 5 minutes".into(),
+        ));
+    }
+    let steps_array = steps
+        .as_array()
+        .ok_or_else(|| IhError::Invalid("les étapes doivent être un tableau".into()))?;
+    if steps_array.is_empty() {
+        return Err(IhError::Invalid("workflow sans étape".into()));
+    }
+    Ok(())
+}
+
+/// Retrouve un workflow par identifiant, tous projets confondus.
+pub fn find_workflow(state: &AppState, id: &str) -> IhResult<Workflow> {
+    state
+        .store
+        .get_workflow(id)?
+        .ok_or_else(|| IhError::NotFound(format!("workflow {id}")))
+}
+
+/// Exécute réellement les étapes d'un workflow (agents supervisés, séquentiel,
+/// arrêt à la première étape non terminée) puis enregistre le run.
+///
+/// Partagé entre l'exécution manuelle (`workflow_run_now`) et le planificateur
+/// d'arrière-plan (`crate::automation`).
+pub fn execute_workflow(state: &AppState, workflow: &Workflow) -> IhResult<WorkflowRun> {
+    let config = state.config_snapshot()?;
+    let root = project_path(state, workflow.project_id.as_str())?;
 
     let steps = workflow.steps.as_array().cloned().unwrap_or_default();
     let mut detail = String::new();

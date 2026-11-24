@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
+Dernière vérification : 284 tests Rust + 185 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -27,7 +27,7 @@ Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
 | 13 | Orchestrateur de tâches | ✅ | Création de plan déterministe, persistance, transitions d'état, détection de cycle, blocage en cas d'échec d'une dépendance |
 | 14 | Mémoire persistante par projet | ✅ | Portée projet/globale, tags, recherche, suppression, aperçu du contexte injecté borné en octets |
 | 15 | Permissions et sécurité | ✅ | Approbations à usage unique liées à une catégorie, TTL, classification du risque, prison de chemins, secrets dans le trousseau uniquement |
-| 16 | Automatisations et workflows | ⚠️ | Création (intervalle ≥ 5 min, étapes agent+prompt), exécution manuelle réelle, historique des exécutions. **Pas de planificateur en arrière-plan qui déclenche seul**, pas d'édition/suppression de workflow dans l'UI |
+| 16 | Automatisations et workflows | ✅ | Création, édition, activation/désactivation et suppression ; **planificateur en arrière-plan** (balayage 30 s, première exécution un intervalle après création, workflows désactivés jamais planifiés) ; exécution manuelle et planifiée réellement supervisées ; historique ; événement `ih://workflow-run` |
 | 17 | Historique conversations et tâches | ✅ | Threads, messages paginés, suppression, export JSON téléchargeable |
 | 18 | Interface française et anglaise | ✅ | 800 clés FR et EN, parité vérifiée par test Rust et par test frontend, changement immédiat |
 | 19 | Paramètres complets | ✅ | Thème, langue, limites de ressources, niveau de logs, canal et intervalle de mise à jour, téléchargement automatique. Enregistrement validé côté Rust |
@@ -101,35 +101,33 @@ Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
 5. **Registre de skills distant** avec vérification de mise à jour.
 6. **MCP hors stdio** (HTTP/SSE, ressources, prompts, sampling).
 7. **Git distant** (`push`, `pull`, `fetch`) et résolution de conflits.
-8. **Planificateur d'automatisations** actif en arrière-plan.
-9. **Page d'audit** exposée par l'IPC (le stockage existe en base).
-10. ~~Fichier LICENSE~~ → **MIT** depuis 0.5.2 (voir `LICENSE`).
-11. **Arch sur machine physique** : la CI valide la compilation et les tests
+8. **Page d'audit** exposée par l'IPC (le stockage existe en base).
+9. ~~Fichier LICENSE~~ → **MIT** depuis 0.5.2 (voir `LICENSE`).
+10. **Arch sur machine physique** : la CI valide la compilation et les tests
     dans un conteneur `archlinux:latest`.
-12. **Repli de l'éditeur sur très gros fichiers** : au-delà de 2 Mio (limite
+11. **Repli de l'éditeur sur très gros fichiers** : au-delà de 2 Mio (limite
     configurable), le fichier n'est pas ouvert.
 
 ## Tests automatisés
 
 | Suite | Nombre | Portée |
 |---|---|---|
-| `ih-core` | 30 | configuration, erreurs, événements, ressources, chemins, redaction, plateforme |
-| `ih-store` | 16 | migrations (v3 incluse), CRUD, cascade, pagination, concurrence, recherche |
+| `ih-core` | 38 | configuration, erreurs, événements, ressources, chemins, redaction, plateforme |
+| `ih-store` | 18 | migrations (v3 incluse), CRUD, cascade, pagination, concurrence, recherche, **workflows dus/suppression** |
 | `ih-security` | 19 | approbations, expiration/rejeu, classification de risque, trousseau |
-| `ih-providers` | 15 | 4 fournisseurs, SSE/NDJSON, erreurs 401, timeout, clé absente |
-| `ih-agents` | 13 | adaptateurs, succès/échec, annulation, timeout, limite, sortie bornée |
+| `ih-providers` | 19 | 4 fournisseurs, SSE/NDJSON, erreurs 401, timeout, clé absente |
+| `ih-agents` | 20 | adaptateurs, succès/échec, annulation, timeout, limite, sortie bornée |
 | `ih-extensions` | 27 | manifestes, empreinte, installation, prison, MCP stdio, serveur muet |
-| `ih-workspace` | 22 | Git (statut, commit, worktrees), prison de chemins, PTY sans zombie |
 | `ih-orchestrator` | 23 | cycles, disponibilité, équipes, ordonnanceur, budget mémoire |
 | `ih-update` | 39 | signature Ed25519, digest, téléchargement, staging, rollback |
 | `ih-i18n` | 5 | parité FR/EN, repli, substitution |
-| `ih-chat` | 11 | streaming, annulation, historique borné, contexte injecté, erreurs, titre, recherche + **e2e Ollama réel** |
+| `ih-chat` | 12 | streaming, annulation, historique borné, contexte injecté, erreurs, titre, recherche + **e2e Ollama réel** |
 | `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
 | `ih-workspace` | 33 | Git, prison de chemins, PTY, **diff LCS**, métadonnées, écriture vérifiée |
-| `ih-agent-mode` | 5 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
-| **Rust total** | **270** | |
-| Frontend (`vitest`) | 143 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, **agent** |
-| **Total** | **392** | |
+| `ih-agent-mode` | 8 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
+| **Rust total** | **284** | |
+| Frontend (`vitest`) | 185 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent, **automatisations (analyse des étapes)** |
+| **Total** | **469** | |
 
 ## Vérifications manuelles effectuées
 
@@ -148,3 +146,8 @@ Dernière vérification : 270 tests Rust + 122 tests frontend, tous verts.
 - Chaîne de mise à jour de bout en bout : clé Ed25519 générée par `openssl`,
   manifeste signé, vérifié par `ih-update-verify` (succès), puis falsifié et
   rejeté (code 1).
+- **Planificateur d'automatisations observé dans l'application réelle** : un
+  workflow dû (intervalle écoulé, créé 10 min plus tôt) a été inséré en base,
+  l'application a été démarrée : au premier balayage, l'exécution a été
+  tentée, l'échec « agent introuvable » enregistré dans `workflow_runs`,
+  `last_run_at` avancé, et aucune relance pendant la fenêtre d'observation.

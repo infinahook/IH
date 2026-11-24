@@ -1,10 +1,23 @@
 import { useState } from "react";
-import { Clock, Play, Plus, RefreshCw, Sparkles, Workflow as WorkflowIcon } from "lucide-react";
+import {
+  Clock,
+  Pencil,
+  Play,
+  Plus,
+  Power,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+  Workflow as WorkflowIcon,
+} from "lucide-react";
 import { AppError, api, toAppError, type Workflow, type WorkflowRun } from "../lib/api";
+import { formatSteps, parseSteps } from "../lib/automation";
 import { formatDate } from "../lib/format";
 import { useAsync, useAction } from "../lib/hooks";
+import { useTauriEvent } from "../lib/events";
 import { useApp } from "../lib/store";
 import { Badge } from "../components/Badge";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState, LoadingRow, Spinner } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Field } from "../components/Field";
@@ -13,9 +26,14 @@ import { Notice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectGate } from "../components/ProjectGate";
 
-interface StepDefinition {
-  agent_id: string;
-  prompt: string;
+/** Charge émise par le planificateur d'arrière-plan (`ih://workflow-run`). */
+interface WorkflowRunEvent {
+  phase: "started" | "finished";
+  workflow_id: string;
+  project_id: string;
+  name: string;
+  run: WorkflowRun | null;
+  error: string | null;
 }
 
 export function AutomationPage() {
@@ -29,59 +47,50 @@ export function AutomationPage() {
   const agents = useAsync(() => api.agents.list(), []);
   const createAction = useAction();
   const runAction = useAction();
+  const toggleAction = useAction();
+  const deleteAction = useAction();
   const [form, setForm] = useState({ name: "", interval: "15", steps: "" });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [toDelete, setToDelete] = useState<Workflow | null>(null);
   const [stepsError, setStepsError] = useState<string | null>(null);
   const [formError, setFormError] = useState<AppError | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<"success" | "warning">("success");
   const [pendingRun, setPendingRun] = useState<string | null>(null);
+  const [runningWorkflows, setRunningWorkflows] = useState<Record<string, boolean>>({});
   const [runs, setRuns] = useState<Record<string, WorkflowRun[]>>({});
   const [runsBusy, setRunsBusy] = useState<string | null>(null);
   const [runsError, setRunsError] = useState<Record<string, AppError>>({});
   const [visibleRuns, setVisibleRuns] = useState<Record<string, boolean>>({});
   const [lastRun, setLastRun] = useState<Record<string, WorkflowRun>>({});
 
-  const parseSteps = (): StepDefinition[] | null => {
-    const raw = form.steps.trim();
-    if (raw.length === 0) {
-      setStepsError(t("automation.steps_required"));
+  const applyStepsInput = () => {
+    const parsed = parseSteps(form.steps);
+    if (parsed.steps === null) {
+      if (parsed.error === "invalid_json" && parsed.detail) {
+        setStepsError(t("automation.invalid_json", { message: parsed.detail }));
+      } else if (parsed.error) {
+        setStepsError(t(`automation.${parsed.error}`));
+      }
       return null;
     }
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed) || parsed.length === 0) {
-        setStepsError(t("automation.steps_required"));
-        return null;
-      }
-      const steps: StepDefinition[] = [];
-      for (const entry of parsed) {
-        if (typeof entry !== "object" || entry === null) {
-          setStepsError(t("automation.steps_hint"));
-          return null;
-        }
-        const candidate = entry as { agent_id?: unknown; prompt?: unknown };
-        if (typeof candidate.agent_id !== "string" || typeof candidate.prompt !== "string") {
-          setStepsError(t("automation.steps_hint"));
-          return null;
-        }
-        steps.push({ agent_id: candidate.agent_id, prompt: candidate.prompt });
-      }
-      setStepsError(null);
-      return steps;
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      setStepsError(t("automation.invalid_json", { message: detail }));
-      return null;
-    }
+    setStepsError(null);
+    return parsed.steps;
   };
 
-  const createWorkflow = async () => {
+  const resetForm = () => {
+    setEditingId(null);
+    setForm({ name: "", interval: form.interval, steps: "" });
+    setStepsError(null);
+  };
+
+  const submitWorkflow = async () => {
     if (!project) {
       return;
     }
     setMessage(null);
     setFormError(null);
-    const steps = parseSteps();
+    const steps = applyStepsInput();
     if (steps === null) {
       return;
     }
@@ -94,13 +103,64 @@ export function AutomationPage() {
       setFormError(new AppError("invalid_input", t("automation.name_required"), true));
       return;
     }
-    const created = await createAction.run(() =>
-      api.workflows.upsert(project.id, form.name.trim(), interval, steps),
+    const editing = editingId;
+    const saved = await createAction.run(() =>
+      editing
+        ? api.workflows.update(editing, form.name.trim(), interval, steps)
+        : api.workflows.upsert(project.id, form.name.trim(), interval, steps),
     );
-    if (created) {
+    if (saved) {
       setMessageTone("success");
-      setMessage(t("automation.workflow_created"));
-      setForm({ name: "", interval: form.interval, steps: "" });
+      setMessage(t(editing ? "automation.workflow_updated" : "automation.workflow_created"));
+      resetForm();
+      workflows.reload();
+    }
+  };
+
+  const startEdit = (workflow: Workflow) => {
+    setEditingId(workflow.id);
+    setStepsError(null);
+    setFormError(null);
+    setMessage(null);
+    setForm({
+      name: workflow.name,
+      interval: String(workflow.interval_minutes),
+      steps: formatSteps(workflow.steps),
+    });
+  };
+
+  const toggleEnabled = async (workflow: Workflow) => {
+    setMessage(null);
+    const updated = await toggleAction.run(() =>
+      api.workflows.setEnabled(workflow.id, !workflow.enabled),
+    );
+    if (updated) {
+      setMessageTone("success");
+      setMessage(
+        t(updated.enabled ? "automation.workflow_enabled" : "automation.workflow_disabled", {
+          name: updated.name,
+        }),
+      );
+      workflows.reload();
+    }
+  };
+
+  const confirmDelete = async () => {
+    const workflow = toDelete;
+    if (!workflow) {
+      return;
+    }
+    const done = await deleteAction.run(async () => {
+      await api.workflows.remove(workflow.id);
+      return true;
+    });
+    if (done) {
+      setToDelete(null);
+      if (editingId === workflow.id) {
+        resetForm();
+      }
+      setMessageTone("success");
+      setMessage(t("automation.workflow_deleted"));
       workflows.reload();
     }
   };
@@ -142,6 +202,48 @@ export function AutomationPage() {
     }
   };
 
+  const handleWorkflowEvent = (event: WorkflowRunEvent) => {
+    if (!project || event.project_id !== project.id) {
+      return;
+    }
+    if (event.phase === "started") {
+      setRunningWorkflows((previous) => ({ ...previous, [event.workflow_id]: true }));
+      return;
+    }
+    setRunningWorkflows((previous) => {
+      const next = { ...previous };
+      delete next[event.workflow_id];
+      return next;
+    });
+    if (event.run) {
+      const run = event.run;
+      setLastRun((previous) => ({ ...previous, [event.workflow_id]: run }));
+      setRuns((previous) => {
+        const history = previous[event.workflow_id] ?? [];
+        if (history.some((entry) => entry.id === run.id)) {
+          return previous;
+        }
+        return { ...previous, [event.workflow_id]: [run, ...history] };
+      });
+      setVisibleRuns((previous) => ({ ...previous, [event.workflow_id]: true }));
+      // Mise à jour en place du `last_run_at` : pas de rechargement complet.
+      workflows.setData((current) =>
+        (current ?? []).map((workflow) =>
+          workflow.id === event.workflow_id ? { ...workflow, last_run_at: run.finished_at } : workflow,
+        ),
+      );
+      setMessageTone(run.status === "completed" ? "success" : "warning");
+      setMessage(
+        t("automation.scheduled_run_result", { name: event.name, status: run.status }),
+      );
+    } else if (event.error) {
+      setMessageTone("warning");
+      setMessage(t("automation.scheduled_run_failed", { name: event.name, message: event.error }));
+    }
+  };
+
+  const workflowEventError = useTauriEvent<WorkflowRunEvent>("ih://workflow-run", handleWorkflowEvent);
+
   const insertTemplate = () => {
     const agent = (agents.data ?? []).find((entry) => entry.detected) ?? agents.data?.[0];
     if (!agent) {
@@ -163,6 +265,8 @@ export function AutomationPage() {
     );
   }
 
+  const editionBusy = createAction.busy || toggleAction.busy || deleteAction.busy;
+
   return (
     <>
       <PageHeader
@@ -178,16 +282,24 @@ export function AutomationPage() {
 
       {workflows.error ? <ErrorBanner error={workflows.error} onRetry={workflows.reload} /> : null}
       {agents.error ? <ErrorBanner error={agents.error} onRetry={agents.reload} /> : null}
+      {workflowEventError ? <ErrorBanner error={workflowEventError} /> : null}
       {createAction.error ? <ErrorBanner error={createAction.error} /> : null}
       {runAction.error ? <ErrorBanner error={runAction.error} /> : null}
+      {toggleAction.error ? <ErrorBanner error={toggleAction.error} /> : null}
+      {deleteAction.error ? <ErrorBanner error={deleteAction.error} /> : null}
       {formError ? <ErrorBanner error={formError} /> : null}
       {message ? <Notice tone={messageTone}>{message}</Notice> : null}
 
       <section className="card" aria-labelledby="automation-create">
         <div className="section-heading">
-          <h2 id="automation-create">{t("automation.new_workflow")}</h2>
+          <h2 id="automation-create">
+            {editingId ? t("automation.edit_workflow") : t("automation.new_workflow")}
+          </h2>
           <Sparkles size={17} aria-hidden="true" className="muted-icon" />
         </div>
+        {editingId ? (
+          <p className="muted small">{t("automation.editing_hint", { name: form.name })}</p>
+        ) : null}
         <div className="form-grid">
           <Field label={t("automation.name")} htmlFor="workflow-name" required>
             <input
@@ -243,15 +355,20 @@ export function AutomationPage() {
           >
             {t("automation.template")}
           </button>
+          {editingId ? (
+            <button type="button" className="ghost small" onClick={resetForm} disabled={editionBusy}>
+              {t("common.cancel")}
+            </button>
+          ) : null}
           <button
             type="button"
             className="primary"
-            onClick={() => void createWorkflow()}
-            disabled={createAction.busy}
+            onClick={() => void submitWorkflow()}
+            disabled={editionBusy}
             aria-busy={createAction.busy}
           >
             {createAction.busy ? <Spinner /> : <Plus size={14} aria-hidden="true" />}
-            {t("common.create")}
+            {editingId ? t("common.save") : t("common.create")}
           </button>
         </div>
       </section>
@@ -271,6 +388,7 @@ export function AutomationPage() {
             const run = lastRun[workflow.id];
             const history = runs[workflow.id] ?? [];
             const showHistory = visibleRuns[workflow.id] === true;
+            const scheduled = runningWorkflows[workflow.id] === true;
             return (
               <article className="card workflow-card" key={workflow.id}>
                 <header className="provider-header">
@@ -280,6 +398,7 @@ export function AutomationPage() {
                       <Badge tone={workflow.enabled ? "success" : "neutral"}>
                         {workflow.enabled ? t("automation.enabled_badge") : t("common.disabled")}
                       </Badge>
+                      {scheduled ? <Badge tone="warning">{t("automation.scheduled_running")}</Badge> : null}
                       <Badge tone="neutral">
                         <Clock size={11} aria-hidden="true" />
                         {workflow.interval_minutes} {t("automation.minutes")}
@@ -307,6 +426,33 @@ export function AutomationPage() {
                       {runAction.busy && pendingRun === workflow.id
                         ? t("automation.run_running")
                         : t("automation.run_now")}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost small"
+                      onClick={() => void toggleEnabled(workflow)}
+                      disabled={editionBusy}
+                    >
+                      <Power size={13} aria-hidden="true" />
+                      {workflow.enabled ? t("automation.disable") : t("automation.enable")}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost small"
+                      onClick={() => startEdit(workflow)}
+                      disabled={editionBusy}
+                    >
+                      <Pencil size={13} aria-hidden="true" />
+                      {t("common.edit")}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost small danger"
+                      onClick={() => setToDelete(workflow)}
+                      disabled={editionBusy}
+                    >
+                      <Trash2 size={13} aria-hidden="true" />
+                      {t("common.delete")}
                     </button>
                     <button
                       type="button"
@@ -384,6 +530,17 @@ export function AutomationPage() {
           })}
         </div>
       )}
+
+      <ConfirmDialog
+        open={toDelete !== null}
+        title={t("automation.delete_confirm_title", { name: toDelete?.name ?? "" })}
+        description={<p>{t("automation.delete_confirm_text")}</p>}
+        confirmLabel={t("common.delete")}
+        danger
+        busy={deleteAction.busy}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setToDelete(null)}
+      />
     </>
   );
 }

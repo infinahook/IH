@@ -1009,6 +1009,15 @@ export const api = {
       intervalMinutes: number,
       steps: unknown,
     ) => call<Workflow>("workflow_upsert", { projectId, name, intervalMinutes, steps }),
+    update: (
+      workflowId: string,
+      name: string,
+      intervalMinutes: number,
+      steps: unknown,
+    ) => call<Workflow>("workflow_update", { id: workflowId, name, intervalMinutes, steps }),
+    setEnabled: (workflowId: string, enabled: boolean) =>
+      call<Workflow>("workflow_set_enabled", { id: workflowId, enabled }),
+    remove: (workflowId: string) => call<void>("workflow_delete", { id: workflowId }),
     runNow: (workflowId: string) =>
       call<WorkflowRun>("workflow_run_now", { id: workflowId }),
     runs: (workflowId: string, limit = 20) =>

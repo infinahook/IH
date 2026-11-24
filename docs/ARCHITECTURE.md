@@ -54,6 +54,17 @@
 | `ih-context` | assemblage du contexte projet, exclusions, mentions `@` | exclusions, secrets, troncature, budget, prison de chemins |
 | `ih-i18n` | catalogues FR/EN partagés avec l'interface | parité stricte des clés |
 
+## Planificateur d'arrière-plan
+
+`src-tauri/src/automation.rs` démarre un balayage toutes les 30 s après le
+montage de l'état Tauri : `Store::due_workflows` décide quels workflows activés
+ont dépassé leur intervalle (référence : dernière exécution, sinon création),
+puis chaque exécution tourne dans son propre thread (`execute_workflow`, le même
+chemin que l'exécution manuelle) et émet `ih://workflow-run` en phase `started`
+puis `finished`. Un workflow déjà en cours n'est jamais relancé ; un échec
+antérieur à toute étape est enregistré comme `failed` pour que l'intervalle
+reparte.
+
 ## Flux d'une session d'agent
 
 1. L'interface appelle `agent_start(projectId, agentId, prompt)`.

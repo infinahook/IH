@@ -683,6 +683,84 @@ fn workflows_runs_et_mise_a_jour() {
     assert!(matches!(error, IhError::NotFound(_)), "{error:?}");
 }
 
+#[test]
+fn workflows_dus_selon_intervalle_et_etat() {
+    let store = Store::open_in_memory().unwrap();
+    let project = seed_project(&store, "dus");
+    let mut workflow = new_workflow(&project.id, "veille");
+    workflow.interval_minutes = 15;
+    store.upsert_workflow(&workflow).unwrap();
+
+    // Jamais exécuté : la référence est la création du workflow.
+    let seed = store.get_workflow(&workflow.id).unwrap().unwrap();
+    assert_eq!(seed.project_id, project.id);
+    assert!(!seed.is_due(seed.created_at + Duration::minutes(14)));
+    assert!(seed.is_due(seed.created_at + Duration::minutes(15)));
+    assert!(store
+        .due_workflows(seed.created_at + Duration::minutes(1))
+        .unwrap()
+        .is_empty());
+    let due = store
+        .due_workflows(seed.created_at + Duration::minutes(15))
+        .unwrap();
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].id, workflow.id);
+
+    // Une exécution recule la référence.
+    store
+        .record_workflow_run(&NewWorkflowRun {
+            workflow_id: workflow.id.clone(),
+            status: "success".into(),
+            detail: None,
+        })
+        .unwrap();
+    let refreshed = store.get_workflow(&workflow.id).unwrap().unwrap();
+    let last = refreshed.last_run_at.expect("last_run_at enregistré");
+    assert!(!refreshed.is_due(last + Duration::minutes(14)));
+    assert!(refreshed.is_due(last + Duration::minutes(15)));
+
+    // Un workflow désactivé n'est jamais dû, quel que soit l'intervalle écoulé.
+    let mut disabled = refreshed.clone();
+    disabled.enabled = false;
+    store.upsert_workflow(&disabled).unwrap();
+    let due = store.due_workflows(last + Duration::days(3)).unwrap();
+    assert!(
+        due.iter().all(|wf| wf.id != workflow.id),
+        "un workflow désactivé ne doit jamais être planifié"
+    );
+    assert!(store
+        .due_workflows(last + Duration::days(3))
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn workflow_supprime_avec_son_historique() {
+    let store = Store::open_in_memory().unwrap();
+    let project = seed_project(&store, "suppression");
+    let workflow = new_workflow(&project.id, "veille");
+    store.upsert_workflow(&workflow).unwrap();
+    store
+        .record_workflow_run(&NewWorkflowRun {
+            workflow_id: workflow.id.clone(),
+            status: "success".into(),
+            detail: Some("ok".into()),
+        })
+        .unwrap();
+    assert_eq!(store.list_workflow_runs(&workflow.id, 10).unwrap().len(), 1);
+
+    store.delete_workflow(&workflow.id).unwrap();
+    assert!(store.get_workflow(&workflow.id).unwrap().is_none());
+    assert!(store.list_workflows(&project.id).unwrap().is_empty());
+    assert!(store
+        .list_workflow_runs(&workflow.id, 10)
+        .unwrap()
+        .is_empty());
+
+    let error = store.delete_workflow(&workflow.id).unwrap_err();
+    assert!(matches!(error, IhError::NotFound(_)), "{error:?}");
+}
+
 // -------------------------------------------------------------------------
 // 8. Audit
 // -------------------------------------------------------------------------

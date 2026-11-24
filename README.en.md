@@ -40,7 +40,7 @@ Ubuntu/Debian and Arch Linux.
 | Tasks, teams, dependency graph, scheduler | ✅ |
 | Per-project persistent memory + bounded prompt injection | ✅ |
 | Approvals, risk classification, keyring secrets | ✅ |
-| Scheduled automations | ⚠️ manual execution only |
+| Scheduled automations | ✅ background scheduler, edit and delete |
 | Conversation history and export | ✅ |
 | FR/EN interface (800 keys, parity enforced) | ✅ |
 | Logging, diagnostics, exportable report | ✅ |
@@ -114,9 +114,9 @@ Checks run locally and in CI:
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace        # 270 tests
+cargo test --workspace        # 284 tests
 npm run typecheck
-npm test                      # 122 tests
+npm test                      # 185 tests
 npm run build
 ```
 
