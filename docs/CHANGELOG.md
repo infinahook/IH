@@ -63,6 +63,12 @@
   d'activation, purge), historique et cascade (19 tests).
 - Frontend : helpers MCP (schéma, risques, troncature) ; i18n FR/EN en parité.
 
+### Corrigé
+- Le trousseau système n'est plus sollicité au démarrage : le statut ne lit
+  plus d'entrée sonde (ce qui déclenchait la demande de mot de passe du
+  trousseau à chaque ouverture d'IH). Le déverrouillage n'est demandé qu'au
+  premier usage réel d'un secret, via `probe` pour un test explicite.
+
 ### Limites assumées
 OAuth 2.1 non intégré ; appel d'outil proposé par le modèle (tool use) non
 câblé ; injection automatique dans les CLI d'agents et étapes MCP des

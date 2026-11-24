@@ -79,6 +79,29 @@ impl SecretStore for KeyringSecretStore {
     }
 
     fn status(&self) -> SecretStoreStatus {
+        // Aucune lecture du trousseau ici : un `get_password` sur une entrée
+        // sonde déclenche le déverrouillage du trousseau système (demande de
+        // mot de passe) dès l'ouverture de l'application. La disponibilité se
+        // limite donc à vérifier qu'une entrée peut être construite ; le
+        // déverrouillage n'est demandé qu'au premier usage réel d'un secret
+        // (clé fournisseur, jeton MCP) ou via `probe`.
+        match keyring::Entry::new(&self.service, "ih-probe") {
+            Ok(_) => SecretStoreStatus::Available {
+                backend: "secret-service".into(),
+            },
+            Err(e) => SecretStoreStatus::Unavailable {
+                reason: e.to_string(),
+            },
+        }
+    }
+}
+
+impl KeyringSecretStore {
+    /// Vérifie l'accès réel au trousseau (lecture d'une entrée sonde).
+    ///
+    /// Cette opération peut demander le déverrouillage du trousseau : elle est
+    /// réservée au test explicite de l'utilisateur, jamais au démarrage.
+    pub fn probe(&self) -> SecretStoreStatus {
         match keyring::Entry::new(&self.service, "ih-probe") {
             Ok(entry) => match entry.get_password() {
                 Ok(_) | Err(keyring::Error::NoEntry) => SecretStoreStatus::Available {
@@ -172,6 +195,17 @@ mod tests {
     }
 
     #[test]
+    fn status_du_trousseau_sans_lecture_ni_panne() {
+        let store = KeyringSecretStore::new("dev.ih.desktop.test-probe");
+        // `status` ne doit pas toucher au trousseau (pas de demande de mot de
+        // passe au démarrage) : il se contente de vérifier l'entrée.
+        match store.status() {
+            SecretStoreStatus::Available { backend } => assert!(!backend.is_empty()),
+            SecretStoreStatus::Unavailable { reason } => assert!(!reason.is_empty()),
+        }
+    }
+
+    #[test]
     fn trousseau_ne_panique_jamais_et_ne_replie_pas_en_clair() {
         let store = KeyringSecretStore::new("dev.ih.desktop.test-probe");
         // Selon l'état du système, la lecture renvoie None ou une erreur
@@ -180,8 +214,7 @@ mod tests {
             Ok(value) => assert!(value.is_none()),
             Err(e) => assert!(!e.to_string().is_empty()),
         }
-        let status = store.status();
-        match status {
+        match store.probe() {
             SecretStoreStatus::Available { backend } => assert!(!backend.is_empty()),
             SecretStoreStatus::Unavailable { reason } => assert!(!reason.is_empty()),
         }

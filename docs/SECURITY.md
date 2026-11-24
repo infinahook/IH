@@ -38,6 +38,11 @@ et un lien interne légitime.
 - La configuration ne contient qu'un booléen `has_secret`.
 - Si le trousseau est verrouillé, l'enregistrement échoue explicitement plutôt
   que d'écrire un secret sur disque.
+- **Aucune lecture du trousseau au démarrage** : le statut affiché vérifie
+  seulement qu'une entrée peut être construite. Le déverrouillage système n'est
+  demandé qu'au premier usage réel d'un secret (clé fournisseur, jeton MCP) ou
+  via un test explicite (`probe`) — IH ne sollicite jamais le trousseau en
+  ouvrant une fenêtre ou en listant les projets.
 - Les journaux passent par `ih_core::redaction` (préfixes de clés connus,
   `Bearer`, `api_key=`, paramètres d'URL, clés AWS, champs JSON sensibles).
 
