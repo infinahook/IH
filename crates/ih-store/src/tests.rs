@@ -844,6 +844,200 @@ fn sessions_cycle_de_vie_et_suppression_du_thread() {
 }
 
 // -------------------------------------------------------------------------
+// 11b. MCP : serveurs, catalogue d'outils et appels
+// -------------------------------------------------------------------------
+
+fn new_mcp_server(id: &str) -> McpServerRecord {
+    McpServerRecord {
+        id: id.into(),
+        name: "Serveur test".into(),
+        url: "https://mcp.exemple.com/mcp".into(),
+        transport: "streamable_http".into(),
+        headers: std::collections::BTreeMap::new(),
+        timeout_secs: 30,
+        enabled: true,
+        allow_auto_approve: false,
+        last_status: "disconnected".into(),
+        last_error: None,
+        last_connected_at: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    }
+}
+
+fn new_mcp_tool(server_id: &str, name: &str, risk: &str) -> McpToolRecord {
+    McpToolRecord {
+        server_id: server_id.into(),
+        name: name.into(),
+        description: format!("outil {name}"),
+        input_schema: json!({"type": "object"}),
+        output_schema: None,
+        category: "read".into(),
+        risk: risk.into(),
+        enabled: false,
+        discovered_at: Utc::now(),
+    }
+}
+
+#[test]
+fn mcp_serveurs_crud_et_etat() {
+    let db = TempDb::new();
+    let store = Store::open(&db.path()).unwrap();
+    assert_eq!(store.schema_version().unwrap(), 4);
+
+    let mut server = new_mcp_server("srv-1");
+    store.upsert_mcp_server(&server).unwrap();
+    let listed = store.list_mcp_servers().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "Serveur test");
+    assert_eq!(listed[0].transport, "streamable_http");
+
+    // Mise à jour : created_at préservé, champs remplacés.
+    server.name = "Renommé".into();
+    server.timeout_secs = 60;
+    server.allow_auto_approve = true;
+    store.upsert_mcp_server(&server).unwrap();
+    let refreshed = store.get_mcp_server("srv-1").unwrap().unwrap();
+    assert_eq!(refreshed.name, "Renommé");
+    assert_eq!(refreshed.timeout_secs, 60);
+    assert!(refreshed.allow_auto_approve);
+
+    store
+        .set_mcp_server_status("srv-1", "connected", None, Some(Utc::now()))
+        .unwrap();
+    let refreshed = store.get_mcp_server("srv-1").unwrap().unwrap();
+    assert_eq!(refreshed.last_status, "connected");
+    assert!(refreshed.last_connected_at.is_some());
+
+    let error = store
+        .set_mcp_server_status("srv-1", "explosion", None, None)
+        .unwrap_err();
+    assert!(matches!(error, IhError::Invalid(_)), "{error:?}");
+
+    let mut bad = new_mcp_server("srv-bad");
+    bad.transport = "websocket".into();
+    assert!(store.upsert_mcp_server(&bad).is_err());
+    bad.transport = "sse".into();
+    bad.timeout_secs = 0;
+    assert!(store.upsert_mcp_server(&bad).is_err());
+
+    store.delete_mcp_server("srv-1").unwrap();
+    assert!(store.get_mcp_server("srv-1").unwrap().is_none());
+    assert!(store.delete_mcp_server("srv-1").is_err());
+}
+
+#[test]
+fn mcp_catalogue_preserve_activation_et_purge_les_outils_retires() {
+    let store = Store::open_in_memory().unwrap();
+    store.upsert_mcp_server(&new_mcp_server("srv")).unwrap();
+
+    store
+        .refresh_mcp_tools(
+            "srv",
+            &[
+                new_mcp_tool("srv", "read_file", "low"),
+                new_mcp_tool("srv", "delete_all", "critical"),
+            ],
+        )
+        .unwrap();
+    let tools = store.list_mcp_tools(Some("srv")).unwrap();
+    assert_eq!(tools.len(), 2);
+    assert!(tools.iter().all(|tool| !tool.enabled));
+
+    store
+        .set_mcp_tool_enabled("srv", "read_file", true)
+        .unwrap();
+    let error = store
+        .set_mcp_tool_enabled("srv", "inconnu", true)
+        .unwrap_err();
+    assert!(matches!(error, IhError::NotFound(_)), "{error:?}");
+
+    // Rafraîchissement : read_file garde son activation, delete_all disparaît.
+    store
+        .refresh_mcp_tools("srv", &[new_mcp_tool("srv", "read_file", "low")])
+        .unwrap();
+    let tools = store.list_mcp_tools(Some("srv")).unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "read_file");
+    assert!(tools[0].enabled, "l'activation doit être préservée");
+    let gone = store.get_mcp_tool("srv", "delete_all").unwrap();
+    assert!(gone.is_none());
+
+    // Un outil nouvellement apparu est désactivé par défaut.
+    store
+        .refresh_mcp_tools(
+            "srv",
+            &[
+                new_mcp_tool("srv", "read_file", "low"),
+                new_mcp_tool("srv", "send_mail", "medium"),
+            ],
+        )
+        .unwrap();
+    let tools = store.list_mcp_tools(Some("srv")).unwrap();
+    let mail = tools.iter().find(|tool| tool.name == "send_mail").unwrap();
+    assert!(!mail.enabled);
+}
+
+#[test]
+fn mcp_appels_historises_et_cascade() {
+    let store = Store::open_in_memory().unwrap();
+    store.upsert_mcp_server(&new_mcp_server("srv")).unwrap();
+
+    let first = store
+        .record_mcp_call(&NewMcpCall {
+            server_id: "srv".into(),
+            tool_name: "read_file".into(),
+            caller: "ui".into(),
+            caller_id: None,
+            arguments: json!({"path": "a.txt"}),
+            status: "completed".into(),
+            error: None,
+            duration_ms: Some(12),
+        })
+        .unwrap();
+    let second = store
+        .record_mcp_call(&NewMcpCall {
+            server_id: "srv".into(),
+            tool_name: "delete_all".into(),
+            caller: "automation".into(),
+            caller_id: Some("wf-1".into()),
+            arguments: json!({}),
+            status: "denied".into(),
+            error: Some("approbation absente".into()),
+            duration_ms: None,
+        })
+        .unwrap();
+    assert!(first.id < second.id);
+    assert_eq!(second.caller, "automation");
+    assert_eq!(second.caller_id.as_deref(), Some("wf-1"));
+    assert_eq!(second.error.as_deref(), Some("approbation absente"));
+
+    let all = store.list_mcp_calls(10, None).unwrap();
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].id, second.id);
+    let scoped = store.list_mcp_calls(10, Some("srv")).unwrap();
+    assert_eq!(scoped.len(), 2);
+
+    let error = store
+        .record_mcp_call(&NewMcpCall {
+            server_id: "srv".into(),
+            tool_name: "x".into(),
+            caller: "robot".into(),
+            caller_id: None,
+            arguments: json!({}),
+            status: "completed".into(),
+            error: None,
+            duration_ms: None,
+        })
+        .unwrap_err();
+    assert!(matches!(error, IhError::Invalid(_)), "{error:?}");
+
+    store.delete_mcp_server("srv").unwrap();
+    assert!(store.list_mcp_calls(10, None).unwrap().is_empty());
+    assert!(store.list_mcp_tools(Some("srv")).unwrap().is_empty());
+}
+
+// -------------------------------------------------------------------------
 // 12. Send + Sync pour l'état partagé Tauri
 // -------------------------------------------------------------------------
 

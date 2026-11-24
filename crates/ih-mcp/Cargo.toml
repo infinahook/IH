@@ -1,0 +1,24 @@
+[package]
+name = "ih-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Client MCP d'IH : Streamable HTTP et SSE historique, sécurisé"
+
+[dependencies]
+ih-core = { path = "../ih-core" }
+ih-security = { path = "../ih-security" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+mcp-reqwest.workspace = true
+futures-util.workspace = true
+bytes.workspace = true
+url.workspace = true
+http.workspace = true
+rmcp.workspace = true

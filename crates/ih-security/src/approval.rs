@@ -21,6 +21,7 @@ pub enum ApprovalState {
     Expired,
 }
 
+/// Demande d'approbation en attente ou résolue.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApprovalRequest {
     pub id: ApprovalId,
@@ -29,6 +30,11 @@ pub struct ApprovalRequest {
     pub summary: String,
     pub detail: String,
     pub risk: RiskLevel,
+    /// Empreinte des paramètres exacts de l'action (ex. appel d'outil MCP).
+    /// Quand elle est présente, l'approbation ne peut être consommée que pour
+    /// des paramètres dont l'empreinte correspond : une approbation ne vaut
+    /// jamais pour « un autre appel du même outil ».
+    pub fingerprint: Option<String>,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub state: ApprovalState,
@@ -92,6 +98,19 @@ impl ApprovalRegistry {
         detail: &str,
         risk: RiskLevel,
     ) -> IhResult<ApprovalRequest> {
+        self.ask_with_fingerprint(category, summary, detail, risk, None)
+    }
+
+    /// Crée une demande d'approbation liée à l'empreinte exacte des paramètres
+    /// de l'action : seule cette empreinte pourra consommer l'approbation.
+    pub fn ask_with_fingerprint(
+        &self,
+        category: &str,
+        summary: &str,
+        detail: &str,
+        risk: RiskLevel,
+        fingerprint: Option<String>,
+    ) -> IhResult<ApprovalRequest> {
         if category.trim().is_empty() || summary.trim().is_empty() {
             return Err(IhError::Invalid(
                 "une demande d'approbation exige une catégorie et un résumé".into(),
@@ -104,6 +123,7 @@ impl ApprovalRegistry {
             summary: summary.to_string(),
             detail: detail.to_string(),
             risk,
+            fingerprint,
             created_at: now,
             expires_at: now + self.ttl,
             state: ApprovalState::Pending,
@@ -138,37 +158,49 @@ impl ApprovalRegistry {
     }
 
     /// Consomme une approbation approuvée et renvoie le ticket d'exécution.
+    ///
+    /// Une approbation créée pour une empreinte de paramètres ne peut pas être
+    /// consommée sans cette empreinte : utiliser [`Self::consume_with_fingerprint`].
     pub fn consume(&self, id: &str, category: &str) -> IhResult<ApprovalTicket> {
         let mut guard = self.lock()?;
         let request = guard
             .get_mut(id)
             .ok_or_else(|| IhError::NotFound(format!("approbation {id}")))?;
-        let now = Utc::now();
-        if request.is_expired(now) {
-            request.state = ApprovalState::Expired;
-            return Err(IhError::Denied(format!("approbation {id} expirée")));
+        if request.fingerprint.is_some() {
+            return Err(IhError::Denied(format!(
+                "l'approbation {id} est liée à des paramètres précis : fournir l'empreinte"
+            )));
         }
-        match request.state {
-            ApprovalState::Approved => {
-                if request.category != category {
-                    return Err(IhError::Denied(format!(
-                        "l'approbation {id} concerne « {} » et non « {category} »",
-                        request.category
-                    )));
-                }
-                request.state = ApprovalState::Consumed;
-                Ok(ApprovalTicket {
-                    id: request.id.clone(),
-                    category: request.category.clone(),
-                })
+        consume_locked(request, category, id)
+    }
+
+    /// Consomme une approbation approuvée en vérifiant l'empreinte des
+    /// paramètres. Une empreinte différente, une approbation expirée, déjà
+    /// consommée ou refusée sont autant de refus explicites.
+    pub fn consume_with_fingerprint(
+        &self,
+        id: &str,
+        category: &str,
+        fingerprint: &str,
+    ) -> IhResult<ApprovalTicket> {
+        let mut guard = self.lock()?;
+        let request = guard
+            .get_mut(id)
+            .ok_or_else(|| IhError::NotFound(format!("approbation {id}")))?;
+        match &request.fingerprint {
+            Some(expected) if expected != fingerprint => {
+                return Err(IhError::Denied(format!(
+                    "l'approbation {id} a été accordée pour d'autres paramètres"
+                )));
             }
-            ApprovalState::Consumed => {
-                Err(IhError::Denied(format!("approbation {id} déjà consommée")))
+            None => {
+                return Err(IhError::Denied(format!(
+                    "l'approbation {id} n'est pas liée à des paramètres"
+                )));
             }
-            other => Err(IhError::Denied(format!(
-                "approbation {id} non utilisable ({other:?})"
-            ))),
+            _ => {}
         }
+        consume_locked(request, category, id)
     }
 
     pub fn list_pending(&self) -> IhResult<Vec<ApprovalRequest>> {
@@ -207,6 +239,38 @@ impl ApprovalRegistry {
         self.pending
             .lock()
             .map_err(|_| IhError::Internal("registre d'approbations empoisonné".into()))
+    }
+}
+
+/// Vérifie l'état/expiration puis marque l'approbation consommée.
+fn consume_locked(
+    request: &mut ApprovalRequest,
+    category: &str,
+    id: &str,
+) -> IhResult<ApprovalTicket> {
+    let now = Utc::now();
+    if request.is_expired(now) {
+        request.state = ApprovalState::Expired;
+        return Err(IhError::Denied(format!("approbation {id} expirée")));
+    }
+    match request.state {
+        ApprovalState::Approved => {
+            if request.category != category {
+                return Err(IhError::Denied(format!(
+                    "l'approbation {id} concerne « {} » et non « {category} »",
+                    request.category
+                )));
+            }
+            request.state = ApprovalState::Consumed;
+            Ok(ApprovalTicket {
+                id: request.id.clone(),
+                category: request.category.clone(),
+            })
+        }
+        ApprovalState::Consumed => Err(IhError::Denied(format!("approbation {id} déjà consommée"))),
+        other => Err(IhError::Denied(format!(
+            "approbation {id} non utilisable ({other:?})"
+        ))),
     }
 }
 
@@ -293,5 +357,48 @@ mod tests {
             reg.consume("apr-inconnu", "shell"),
             Err(IhError::NotFound(_))
         ));
+    }
+
+    #[test]
+    fn empreinte_consommee_seulement_pour_les_memes_parametres() {
+        let reg = ApprovalRegistry::default_ttl();
+        let req = reg
+            .ask_with_fingerprint(
+                "mcp_tool",
+                "Appel de l'outil MCP « write »",
+                "paramètres",
+                RiskLevel::High,
+                Some("f-123".into()),
+            )
+            .unwrap();
+        reg.resolve(req.id.as_str(), ApprovalDecision::Approve)
+            .unwrap();
+
+        // Sans empreinte : refus.
+        assert!(reg.consume(req.id.as_str(), "mcp_tool").is_err());
+        // Empreinte différente : refus, l'approbation reste utilisable.
+        assert!(reg
+            .consume_with_fingerprint(req.id.as_str(), "mcp_tool", "f-456")
+            .is_err());
+        // Bonne empreinte : succès une seule fois.
+        let ticket = reg
+            .consume_with_fingerprint(req.id.as_str(), "mcp_tool", "f-123")
+            .unwrap();
+        assert_eq!(ticket.id, req.id);
+        assert!(reg
+            .consume_with_fingerprint(req.id.as_str(), "mcp_tool", "f-123")
+            .is_err());
+    }
+
+    #[test]
+    fn empreinte_refusee_si_approbation_non_liee() {
+        let reg = ApprovalRegistry::default_ttl();
+        let req = reg.ask("shell", "ls", "ls", RiskLevel::Low).unwrap();
+        reg.resolve(req.id.as_str(), ApprovalDecision::Approve)
+            .unwrap();
+        assert!(reg
+            .consume_with_fingerprint(req.id.as_str(), "shell", "f-x")
+            .is_err());
+        assert!(reg.consume(req.id.as_str(), "shell").is_ok());
     }
 }
