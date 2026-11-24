@@ -99,6 +99,7 @@ pub fn run() {
             commands::chat::thread_rename,
             commands::chat::threads_search,
             commands::chat::chat_append_tool_result,
+            commands::mcp_tools::chat_tools_list,
             // mode agent
             commands::agent::agent_adapters,
             commands::agent::agent_session_request_approval,
