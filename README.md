@@ -41,7 +41,7 @@ Linux.
 | Tâches, équipes, graphe de dépendances, ordonnanceur | ✅ |
 | Mémoire persistante par projet + injection bornée dans les prompts | ✅ |
 | Approbations, classification du risque, secrets dans le trousseau | ✅ |
-| Automatisations planifiées | ⚠️ exécution manuelle seulement |
+| Automatisations planifiées | ✅ planificateur en arrière-plan, édition et suppression |
 | Historique des conversations et export | ✅ |
 | Interface FR/EN (800 clés, parité vérifiée) | ✅ |
 | Journalisation, diagnostic, rapport exportable | ✅ |
@@ -117,9 +117,9 @@ Vérifications exécutées en CI et localement :
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace        # 270 tests
+cargo test --workspace        # 284 tests
 npm run typecheck
-npm test                      # 122 tests
+npm test                      # 185 tests
 npm run build
 ```
 

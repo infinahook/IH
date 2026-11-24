@@ -202,6 +202,21 @@ pub struct Workflow {
     pub created_at: DateTime<Utc>,
 }
 
+impl Workflow {
+    /// Indique si une exécution planifiée est due à l'instant `now`.
+    ///
+    /// La référence est la dernière exécution connue ; à défaut, la création
+    /// du workflow (première exécution prévue un intervalle après la création,
+    /// pas au démarrage de l'application). L'état `enabled` n'est pas consulté
+    /// ici : le planificateur filtre lui-même les workflows désactivés via
+    /// [`crate::Store::due_workflows`].
+    pub fn is_due(&self, now: DateTime<Utc>) -> bool {
+        let base = self.last_run_at.unwrap_or(self.created_at);
+        let interval = chrono::Duration::minutes(i64::from(self.interval_minutes));
+        now >= base + interval
+    }
+}
+
 /// Exécution de workflow à enregistrer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NewWorkflowRun {

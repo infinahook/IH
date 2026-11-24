@@ -1104,6 +1104,60 @@ impl Store {
             .map_err(|err| db_err(format!("lecture des runs de {workflow_id}"), err))
     }
 
+    /// Lit un workflow par identifiant, quel que soit son projet.
+    pub fn get_workflow(&self, id: &str) -> IhResult<Option<Workflow>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, project_id, name, interval_minutes, enabled, steps, last_run_at,
+                        created_at
+                 FROM workflows
+                 WHERE id = ?1",
+            )
+            .map_err(|err| db_err("préparation de la lecture du workflow", err))?;
+        let mut rows = stmt
+            .query_map(params![id], workflow_from_row)
+            .map_err(|err| db_err(format!("lecture du workflow {id}"), err))?;
+        rows.next()
+            .transpose()
+            .map_err(|err| db_err(format!("lecture du workflow {id}"), err))
+    }
+
+    /// Workflows activés dont l'intervalle est écoulé à `now`, tous projets
+    /// confondus. Utilisé par le planificateur d'arrière-plan :
+    /// [`Workflow::is_due`] décide, l'ordre de création départage.
+    pub fn due_workflows(&self, now: DateTime<Utc>) -> IhResult<Vec<Workflow>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, project_id, name, interval_minutes, enabled, steps, last_run_at,
+                        created_at
+                 FROM workflows
+                 WHERE enabled = 1
+                 ORDER BY created_at ASC, rowid ASC",
+            )
+            .map_err(|err| db_err("préparation de la liste des workflows dus", err))?;
+        let rows = stmt
+            .query_map([], workflow_from_row)
+            .map_err(|err| db_err("lecture des workflows dus", err))?;
+        let workflows = rows
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| db_err("lecture des workflows dus", err))?;
+        Ok(workflows.into_iter().filter(|wf| wf.is_due(now)).collect())
+    }
+
+    /// Supprime un workflow et, par cascade, tout son historique d'exécutions.
+    pub fn delete_workflow(&self, id: &str) -> IhResult<()> {
+        let conn = self.lock()?;
+        let touched = conn
+            .execute("DELETE FROM workflows WHERE id = ?1", params![id])
+            .map_err(|err| db_err(format!("suppression du workflow {id}"), err))?;
+        if touched == 0 {
+            return Err(IhError::NotFound(format!("workflow {id}")));
+        }
+        Ok(())
+    }
+
     // ---------------------------------------------------------------------
     // Audit
     // ---------------------------------------------------------------------

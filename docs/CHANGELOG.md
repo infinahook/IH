@@ -1,6 +1,46 @@
 # Journal des versions
 
-## 0.2.0 — AI Workspace · Chat
+## 0.6.0 — Automatisations actives
+
+### Ajouté
+- **Planificateur d'automatisations en arrière-plan** (`src-tauri/src/automation.rs`) :
+  toutes les 30 s, les workflows **activés** dont l'intervalle est écoulé sont
+  exécutés hors du thread principal. La première exécution d'un workflow est
+  prévue un intervalle après sa création (pas au démarrage de l'application) ;
+  un workflow désactivé n'est jamais planifié.
+- Événement `ih://workflow-run` (phases `started` puis `finished`) : l'interface
+  suit l'exécution planifiée en temps réel, avec le run enregistré ou l'erreur.
+- Exécution partagée `execute_workflow` entre l'exécution manuelle
+  (`workflow_run_now`) et le planificateur : mêmes agents supervisés, même
+  enregistrement `workflow_runs`, même mise à jour de `last_run_at`.
+- Nouvelles commandes IPC : `workflow_update` (édition sans changer
+  d'identifiant), `workflow_set_enabled` (activation/désactivation) et
+  `workflow_delete` (suppression avec cascade de l'historique).
+- Sections **Automatisations** : édition d'un workflow (nom, intervalle,
+  étapes), bouton Activer/Désactiver, suppression avec confirmation, badge
+  « exécution planifiée en cours » et affichage du dernier run.
+
+### Corrigé
+- L'interface ne permettait ni d'éditer ni de supprimer un workflow, et le
+  formulaire ne distinguait pas création et modification (`workflow_upsert`
+  créait toujours un nouvel identifiant).
+- Une exécution invalide (étape sans agent, agent configuré absent) est
+  désormais enregistrée comme `failed` par le planificateur : l'intervalle
+  repart, le workflow n'est plus relancé à chaque balayage.
+
+### Tests
+- `ih-store` : `workflows_dus_selon_intervalle_et_etat` (référence
+  création/dernière exécution, désactivation, tous projets) et
+  `workflow_supprime_avec_son_historique` (get, delete, cascade, NotFound).
+- Frontend : `automation.test.ts` (analyse des étapes cf. validation Rust).
+
+### Limites assumées
+- Le planificateur tourne tant que l'application est ouverte : IH ne tourne pas
+  comme un service en arrière-plan hors session.
+- `enabled` n'est pas stocké dans l'événement : l'interface se resynchronise
+  par la commande `workflows_list`.
+
+## 0.5.2 — Team Mode : validation graphique et fiabilisation
 
 ### Ajouté
 - Crate `ih-chat` : moteur de conversation indépendant de Tauri.

@@ -6,7 +6,7 @@ This is the **honest** reference. Three statuses:
 - ⚠️ **partial**: genuinely works, but part of the need is uncovered — stated explicitly.
 - ❌ **missing**: not implemented. No UI button pretends otherwise.
 
-Last verified: 256 Rust tests + 92 frontend tests, all green.
+Last verified: 284 Rust tests + 185 frontend tests, all green.
 
 | # | Feature | Status | Detail |
 |---|---|---|---|
@@ -25,7 +25,7 @@ Last verified: 256 Rust tests + 92 frontend tests, all green.
 | 13 | Task orchestrator | ✅ | Deterministic plan creation, persistence, state transitions, cycle detection, blocking on failed dependency |
 | 14 | Per-project persistent memory | ✅ | Project/global scope, tags, search, delete, bounded injected context preview |
 | 15 | Permissions and security | ✅ | One-shot category-bound approvals with TTL, risk classification, path jail, keyring-only secrets |
-| 16 | Automations and workflows | ⚠️ | Creation (interval ≥ 5 min, agent+prompt steps), real manual execution, run history. **No background scheduler firing on its own**, no workflow edit/delete in the UI |
+| 16 | Automations and workflows | ✅ | Creation, editing, enable/disable and deletion; **background scheduler** (30 s sweep, first run one interval after creation, disabled workflows never scheduled); manual and scheduled runs truly supervised; run history; `ih://workflow-run` event |
 | 17 | Conversation and task history | ✅ | Threads, paginated messages, delete, downloadable JSON export |
 | 18 | French and English UI | ✅ | 800 keys FR and EN, parity enforced by a Rust test and a frontend test, immediate switching |
 | 19 | Complete settings | ✅ | Theme, language, resource limits, log level, update channel and interval, auto-download. Validated on the Rust side |
@@ -69,33 +69,33 @@ Last verified: 256 Rust tests + 92 frontend tests, all green.
 5. **Remote skills registry** with update verification.
 6. **Non-stdio MCP** (HTTP/SSE, resources, prompts, sampling).
 7. **Remote Git** (`push`, `pull`, `fetch`) and conflict resolution.
-8. **Active background automation scheduler**.
-9. **Audit page** exposed through IPC (storage exists).
-10. ~~LICENSE file~~ → **MIT** since 0.5.2 (see `LICENSE`).
-11. **Physical Arch machine**: CI validates build and tests inside an
+8. **Audit page** exposed through IPC (storage exists).
+9. ~~LICENSE file~~ → **MIT** since 0.5.2 (see `LICENSE`).
+10. **Physical Arch machine**: CI validates build and tests inside an
     `archlinux:latest` container.
-12. **Very large file fallback**: above 2 MiB (configurable limit) the file is
+11. **Very large file fallback**: above 2 MiB (configurable limit) the file is
     not opened.
 
 ## Automated tests
 
 | Suite | Count | Scope |
 |---|---|---|
-| `ih-core` | 30 | config, errors, events, resources, paths, redaction, platform |
-| `ih-store` | 15 | migrations, CRUD, cascade, pagination, concurrency, search |
+| `ih-core` | 38 | config, errors, events, resources, paths, redaction, platform |
+| `ih-store` | 18 | migrations, CRUD, cascade, pagination, concurrency, search, **due/delete workflows** |
 | `ih-security` | 19 | approvals, expiry/replay, risk classification, keyring |
-| `ih-providers` | 15 | 4 providers, SSE/NDJSON, 401 errors, timeout, missing key |
-| `ih-agents` | 13 | adapters, success/failure, cancel, timeout, limit, bounded output |
+| `ih-providers` | 19 | 4 providers, SSE/NDJSON, 401 errors, timeout, missing key |
+| `ih-agents` | 20 | adapters, success/failure, cancel, timeout, limit, bounded output |
 | `ih-extensions` | 27 | manifests, digest, install, path jail, MCP stdio, silent server |
 | `ih-orchestrator` | 23 | cycles, readiness, teams, scheduler, memory budget |
 | `ih-update` | 39 | Ed25519 signature, digest, download, staging, rollback |
 | `ih-i18n` | 5 | FR/EN parity, fallback, substitution |
-| `ih-chat` | 11 | streaming, cancellation, bounded history, injected context, errors, title, search + **real Ollama e2e** |
+| `ih-chat` | 12 | streaming, cancellation, bounded history, injected context, errors, title, search + **real Ollama e2e** |
 | `ih-context` | 23 | exclusions, secrets, truncation, budget, path jail, fuzzy mentions |
 | `ih-workspace` | 33 | Git, path jail, PTY, **LCS diff**, metadata, checked write |
-| **Rust total** | **256** | |
-| Frontend (`vitest`) | 92 | i18n, formatting, ANSI, Git, file tree, chat, **layout, mentions, tabs, diff** |
-| **Total** | **348** | |
+| `ih-agent-mode` | 8 | worktree sandbox, change collection, adapter detection, action fingerprint |
+| **Rust total** | **284** | |
+| Frontend (`vitest`) | 185 | i18n, formatting, ANSI, Git, file tree, chat, layout, mentions, tabs, diff, agent, **automations (step validation)** |
+| **Total** | **469** | |
 
 ## Manual verifications performed
 
@@ -113,3 +113,8 @@ Last verified: 256 Rust tests + 92 frontend tests, all green.
 - Tauri release build + `deb` and `AppImage` packages.
 - End-to-end update chain: Ed25519 key generated with `openssl`, manifest signed,
   verified by `ih-update-verify` (success), then tampered and rejected (exit 1).
+- **Background scheduler observed in the real application**: a due workflow
+  (interval elapsed, created 10 min earlier) was inserted into the database,
+  the application was started: on the first sweep the run was attempted, the
+  "agent not found" failure was recorded in `workflow_runs`, `last_run_at`
+  advanced, and there was no re-run during the observation window.

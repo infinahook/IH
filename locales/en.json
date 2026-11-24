@@ -901,7 +901,20 @@
     "run_running": "Run in progress…",
     "enabled_badge": "Active",
     "steps_count": "{count} step(s)",
-    "name_required": "Enter a workflow name."
+    "name_required": "Enter a workflow name.",
+    "edit_workflow": "Edit workflow",
+    "editing_hint": "Editing “{name}” — save or cancel.",
+    "workflow_updated": "Workflow updated.",
+    "workflow_deleted": "Workflow deleted.",
+    "workflow_enabled": "Workflow “{name}” enabled.",
+    "workflow_disabled": "Workflow “{name}” disabled.",
+    "enable": "Enable",
+    "disable": "Disable",
+    "delete_confirm_title": "Delete workflow “{name}”?",
+    "delete_confirm_text": "The workflow and its run history are permanently deleted.",
+    "scheduled_running": "Scheduled run in progress…",
+    "scheduled_run_result": "Scheduled run finished: {name} ({status}).",
+    "scheduled_run_failed": "Scheduled run of {name} failed: {message}"
   },
   "history": {
     "title": "History",

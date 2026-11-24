@@ -1,5 +1,6 @@
 //! Point d'entrée de la bibliothèque IH Desktop (Tauri).
 
+mod automation;
 mod commands;
 mod logging;
 mod state;
@@ -18,6 +19,8 @@ pub fn run() {
             let handle = app.handle().clone();
             let state = AppState::init(handle, paths)?;
             app.manage(state);
+            // Planificateur d'automatisations : démarre une fois l'état monté.
+            automation::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -139,6 +142,9 @@ pub fn run() {
             commands::ops::history_export,
             commands::ops::workflows_list,
             commands::ops::workflow_upsert,
+            commands::ops::workflow_update,
+            commands::ops::workflow_set_enabled,
+            commands::ops::workflow_delete,
             commands::ops::workflow_run_now,
             commands::ops::workflow_runs,
             commands::ops::app_version,

@@ -901,7 +901,20 @@
     "run_running": "Exécution en cours…",
     "enabled_badge": "Actif",
     "steps_count": "{count} étape(s)",
-    "name_required": "Saisissez un nom de workflow."
+    "name_required": "Saisissez un nom de workflow.",
+    "edit_workflow": "Modifier le workflow",
+    "editing_hint": "Vous modifiez « {name} » — enregistrez ou annulez.",
+    "workflow_updated": "Workflow mis à jour.",
+    "workflow_deleted": "Workflow supprimé.",
+    "workflow_enabled": "Workflow « {name} » activé.",
+    "workflow_disabled": "Workflow « {name} » désactivé.",
+    "enable": "Activer",
+    "disable": "Désactiver",
+    "delete_confirm_title": "Supprimer le workflow « {name} » ?",
+    "delete_confirm_text": "Le workflow et son historique d'exécutions sont supprimés définitivement.",
+    "scheduled_running": "Exécution planifiée en cours…",
+    "scheduled_run_result": "Exécution planifiée terminée : {name} ({status}).",
+    "scheduled_run_failed": "Exécution planifiée de {name} en échec : {message}"
   },
   "history": {
     "title": "Historique",

@@ -2042,7 +2042,7 @@ dependencies = [
 
 [[package]]
 name = "ih-agent-mode"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "ih-agents",
  "ih-core",
@@ -2057,7 +2057,7 @@ dependencies = [
 
 [[package]]
 name = "ih-agents"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "ih-core",
  "libc",
@@ -2069,7 +2069,7 @@ dependencies = [
 
 [[package]]
 name = "ih-chat"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2083,7 +2083,7 @@ dependencies = [
 
 [[package]]
 name = "ih-context"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "ih-core",
  "ih-workspace",
@@ -2095,7 +2095,7 @@ dependencies = [
 
 [[package]]
 name = "ih-core"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "hex",
@@ -2109,7 +2109,7 @@ dependencies = [
 
 [[package]]
 name = "ih-desktop"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "ih-agent-mode",
@@ -2141,7 +2141,7 @@ dependencies = [
 
 [[package]]
 name = "ih-extensions"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "hex",
@@ -2158,14 +2158,14 @@ dependencies = [
 
 [[package]]
 name = "ih-i18n"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "ih-orchestrator"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "ih-core",
  "serde",
@@ -2175,7 +2175,7 @@ dependencies = [
 
 [[package]]
 name = "ih-providers"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2193,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "ih-security"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "ih-core",
@@ -2206,7 +2206,7 @@ dependencies = [
 
 [[package]]
 name = "ih-store"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "ih-core",
@@ -2220,7 +2220,7 @@ dependencies = [
 
 [[package]]
 name = "ih-update"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "ed25519-dalek",
@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "ih-workspace"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "hex",
