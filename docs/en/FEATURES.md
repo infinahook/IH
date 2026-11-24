@@ -6,7 +6,7 @@ This is the **honest** reference. Three statuses:
 - ⚠️ **partial**: genuinely works, but part of the need is uncovered — stated explicitly.
 - ❌ **missing**: not implemented. No UI button pretends otherwise.
 
-Last verified: 393 Rust tests + 182 frontend tests, all green.
+Last verified: 396 Rust tests + 182 frontend tests, all green.
 
 | # | Feature | Status | Detail |
 |---|---|---|---|
@@ -82,7 +82,7 @@ Last verified: 393 Rust tests + 182 frontend tests, all green.
 | Suite | Count | Scope |
 |---|---|---|
 | `ih-core` | 38 | config, errors, events, resources, paths, redaction, platform |
-| `ih-store` | 22 | migrations (incl. **v4, v5 and v6**), CRUD, cascade, pagination, concurrency, search, **MCP catalog and calls**, **chat tool proposals (transitions, restart)** |
+| `ih-store` | 25 | migrations (incl. **v4, v5 and v6**), CRUD, cascade, pagination, concurrency, search, **MCP catalog and calls**, **chat tool proposals (transitions, atomic claim, restart)**, **consistent backup before migration** |
 | `ih-security` | 47 | approvals (fingerprint-bound), expiry/replay, risk classification, **MCP network policy (SSRF)**, keyring |
 | `ih-providers` | 28 | 4 providers, SSE/NDJSON, 401 errors, timeout, missing key, **native tool calling (capability, serialization, calls, fragmented streaming)** |
 | `ih-agents` | 20 | adapters, success/failure, cancel, timeout, limit, bounded output |
@@ -96,9 +96,9 @@ Last verified: 393 Rust tests + 182 frontend tests, all green.
 | `ih-agent-mode` | 8 | worktree sandbox, change collection, adapter detection, action fingerprint |
 | `ih-mcp` | 48 | schemas, URL policy, unified session; **9 Streamable HTTP integration tests**, **4 SSE tests** and **the full native chat cycle** (simulated provider + real local MCP server) |
 | `ih-desktop` | 13 | IPC commands: exposed tool catalog (names, collisions, schemas, budgets), chat tool proposals, decisions, **call and cycle bounds** |
-| **Rust total** | **393** | |
+| **Rust total** | **396** | |
 | Frontend (`vitest`) | 182 | i18n, formatting, ANSI, Git, file tree, chat, layout, mentions, tabs, diff, agent, **MCP** |
-| **Total** | **575** | |
+| **Total** | **578** | |
 
 ## Manual verifications performed
 
@@ -125,6 +125,11 @@ Last verified: 393 Rust tests + 182 frontend tests, all green.
   Honest limitation: typing into the WebView depends on the X11 pilot; typing
   and clicks were validated here, but the full multi-window scenario (thread
   selection, provider switching) was not replayed graphically in 0.6.2.
+
+- **Guarded backup** (`scripts/backup-profile.sh`) on an isolated WAL profile
+  with data only in the WAL: real profile refused without
+  `--allow-real-profile`, `.backup` copy verified (`integrity_check = ok`),
+  marker found in the copy, source untouched.
 
 - `cargo clippy --workspace --all-targets -- -D warnings`: no warnings.
 - `cargo fmt --all -- --check`: clean.

@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 393 tests Rust + 182 tests frontend, tous verts.
+Dernière vérification : 396 tests Rust + 182 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -26,7 +26,7 @@ Dernière vérification : 393 tests Rust + 182 tests frontend, tous verts.
 | 12 | Agents autonomes et équipes | ⚠️ | Graphe de tâches, rôles lead/worker/reviewer, dépendances, ordonnancement borné, exécution réelle des étapes. **Pas de boucle autonome auto-relancée** : le plan est créé puis exécuté sous contrôle utilisateur |
 | 13 | Orchestrateur de tâches | ✅ | Création de plan déterministe, persistance, transitions d'état, détection de cycle, blocage en cas d'échec d'une dépendance |
 | 14 | Mémoire persistante par projet | ✅ | Portée projet/globale, tags, recherche, suppression, aperçu du contexte injecté borné en octets |
-| 15 | Permissions et sécurité | ✅ | Approbations à usage unique liées à une catégorie, TTL, classification du risque, prison de chemins, secrets dans le trousseau uniquement |
+| 15 | Permissions et sécurité | ✅ | Approbations à usage unique liées à une catégorie, TTL, classification du risque, prison de chemins, secrets dans le trousseau uniquement ; **sauvegarde cohérente (WAL inclus) avant toute migration de schéma**, script de sauvegarde qui refuse le profil réel sauf autorisation explicite ([DATA_SAFETY.md](DATA_SAFETY.md)) |
 | 16 | Automatisations et workflows | ⚠️ | Création (intervalle ≥ 5 min, étapes agent+prompt **ou outil MCP**), exécution manuelle réelle, historique des exécutions ; les étapes MCP passent par le contrôle d'IH (serveur/outil activés, arguments validés, mode sans interaction limité aux lectures pré-autorisées). **Pas de planificateur en arrière-plan qui déclenche seul**, pas d'édition/suppression de workflow dans l'UI |
 | 17 | Historique conversations et tâches | ✅ | Threads, messages paginés, suppression, export JSON téléchargeable |
 | 18 | Interface française et anglaise | ✅ | 800 clés FR et EN, parité vérifiée par test Rust et par test frontend, changement immédiat |
@@ -114,7 +114,7 @@ Dernière vérification : 393 tests Rust + 182 tests frontend, tous verts.
 | Suite | Nombre | Portée |
 |---|---|---|
 | `ih-core` | 38 | configuration, erreurs, événements, ressources, chemins, redaction, plateforme |
-| `ih-store` | 22 | migrations (**v4, v5 et v6**), CRUD, cascade, pagination, concurrence, recherche, **MCP : catalogue et appels**, **propositions d'outils du chat (transitions, reprise)** |
+| `ih-store` | 25 | migrations (**v4, v5 et v6**), CRUD, cascade, pagination, concurrence, recherche, **MCP : catalogue et appels**, **propositions d'outils du chat (transitions, réclamation atomique, reprise)**, **sauvegarde cohérente avant migration** |
 | `ih-security` | 47 | approbations (dont empreintes), expiration/rejeu, classification de risque, **politique réseau MCP (SSRF)**, trousseau |
 | `ih-providers` | 28 | 4 fournisseurs, SSE/NDJSON, erreurs 401, timeout, clé absente, **tool calling natif (capacité, sérialisation, appels, streaming fragmenté)** |
 | `ih-agents` | 20 | adaptateurs, succès/échec, annulation, timeout, limite, sortie bornée |
@@ -128,9 +128,9 @@ Dernière vérification : 393 tests Rust + 182 tests frontend, tous verts.
 | `ih-agent-mode` | 8 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
 | `ih-mcp` | 48 | schémas, politique URL, session unifiée ; **9 tests d'intégration Streamable HTTP**, **4 tests SSE** et **le cycle chat natif complet** (fournisseur simulé + serveur MCP local réel) |
 | `ih-desktop` | 13 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions, **bornes d'appels et de cycles** |
-| **Rust total** | **393** | |
+| **Rust total** | **396** | |
 | Frontend (`vitest`) | 182 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent, **MCP** |
-| **Total** | **575** | |
+| **Total** | **578** | |
 
 ## Vérifications manuelles effectuées
 
@@ -158,6 +158,11 @@ Dernière vérification : 393 tests Rust + 182 tests frontend, tous verts.
   du pilote X11 ; la saisie et les clics ont été validés ici, mais le scénario
   multi-fenêtres complet (sélection de fil, changement de fournisseur) n'a pas
   été rejoué graphiquement en 0.6.2.
+
+- **Sauvegarde protégée** (`scripts/backup-profile.sh`) sur un profil isolé en
+  mode WAL avec données uniquement dans le WAL : refus du profil réel sans
+  `--allow-real-profile`, copie `.backup` conforme (`integrity_check = ok`),
+  marqueur retrouvé dans la copie, source intacte.
 
 - `cargo clippy --workspace --all-targets -- -D warnings` : aucun avertissement.
 - `cargo fmt --all -- --check` : conforme.

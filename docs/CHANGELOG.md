@@ -64,8 +64,16 @@
   ignorés), approbations à usage unique liées à l'empreinte, redaction des
   arguments et des erreurs, tailles et délais bornés, aucun secret au modèle.
 - Nouveau : le modèle ne peut jamais exécuter un outil sans décision humaine
-  explicite ; une carte ne s'exécute qu'une fois ; un événement de continuation
-  ne peut pas contourner la décision.
+  explicite ; une carte ne s'exécute qu'une fois (réclamation atomique en base
+  `claim_chat_tool_call`, une décision `deny` est refusée après réclamation) ;
+  un événement de continuation ne peut pas contourner la décision ; toute
+  issue d'exécution autre que `completed` est traitée comme un échec explicite.
+- **Protection des données locales** : sauvegarde cohérente (API backup SQLite,
+  WAL inclus) écrite automatiquement avant toute migration de schéma, un échec
+  interrompant l'ouverture plutôt que de migrer sans filet ; script
+  `scripts/backup-profile.sh` qui refuse le profil utilisateur réel sauf
+  autorisation explicite et vérifie l'intégrité de la copie ; post-mortem et
+  procédures dans [DATA_SAFETY.md](DATA_SAFETY.md).
 
 ## 0.6.1 — MCP natif : Streamable HTTP et SSE
 
