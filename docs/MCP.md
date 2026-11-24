@@ -164,10 +164,27 @@ testable localement : le serveur de test d'`ih-mcp` (voir
 
 ## Intégration Chat
 
-L'API `mcp_call` accepte `caller = "chat"` et l'historique distingue
-l'appelant. L'affichage des outils et l'appel depuis la conversation, ainsi que
-la proposition d'outil par le modèle (tool use des fournisseurs), ne sont pas
-encore câblés : cette partie est **non validée** et documentée comme telle.
+Trois niveaux, tous soumis à approbation :
+
+1. **Invocation explicite** — bouton « Outils MCP » dans le composeur, panneau
+   d'appel, insertion du résultat dans le message.
+2. **Proposition par le modèle (implémentée, sans tool use natif)** : les
+   outils réellement activés (serveur activé + outil activé) sont décrits dans
+   le prompt système (16 outils maximum, schéma borné). Le modèle peut proposer
+   un appel en terminant sa réponse par un bloc JSON étiqueté
+   `ih-mcp-call` : `{"server_id": …, "tool": …, "arguments": {…}}`.
+   IH **filtre** la proposition (seuls les couples serveur/outil de la liste
+   sont acceptés), l'affiche à l'utilisateur et exige une approbation liée à
+   l'empreinte des paramètres ; l'exécution passe par le point d'entrée unique
+   (`caller = "chat"`). Le résultat est ajouté au fil comme message `tool`.
+3. **Tool use natif des fournisseurs** (OpenAI `tools`, Anthropic `tool_use`) :
+   **absent** — le protocole texte ci-dessus remplace cette intégration. Le
+   résultat d'outil n'est pas renvoyé au modèle dans l'historique : le tour
+   suivant repart de la conversation (`user`/`assistant` seulement).
+
+Le modèle ne peut donc jamais exécuter un outil : le seul chemin d'exécution
+est le garde-fou Rust (serveur/outil activés, arguments validés, approbation
+consommée une fois).
 
 ## Intégration Agent Mode et Team Mode
 
@@ -218,8 +235,10 @@ ces étapes sur le même exécuteur (le bridge synchrone est déjà en place).
 
 1. **OAuth 2.1** : non intégré (jetons bearer et en-têtes personnalisés
    seulement).
-2. **Tool use côté modèle** : les modèles de chat ne proposent pas encore
-   d'appel d'outil MCP ; l'invocation est explicite via l'interface.
+2. **Tool use natif** : pas d'appel d'outil via l'API `tools` des
+   fournisseurs ; la proposition passe par le protocole texte `ih-mcp-call`
+   (filtré, approuvé, exécuté par le garde-fou) et le résultat n'est pas
+   réinjecté dans l'historique du modèle.
 3. **Injections dans les CLI d'agents** : export manuel (`mcp_agent_config`)
    uniquement ; aucune écriture automatique de fichier ni argument CLI ajouté
    aux sessions d'agents, et pas de permissions MCP par rôle d'équipe.

@@ -1114,6 +1114,8 @@ export const api = {
       }),
     cancel: (requestId: string) => call<boolean>("chat_cancel", { requestId }),
     active: () => call<number>("chat_active"),
+    appendToolResult: (threadId: string, tool: string, status: string, content: string) =>
+      call<Message>("chat_append_tool_result", { threadId, tool, status, content }),
   },
 
   // historique

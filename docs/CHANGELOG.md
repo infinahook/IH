@@ -31,6 +31,11 @@
 - **Conversation** : bouton « Outils MCP » dans le composeur, panneau d'appel
   contrôlé (approbation liée aux paramètres) et insertion du résultat dans le
   message ; partagé avec la page MCP.
+- **Proposition d'outil par le modèle** : les outils MCP activés sont décrits
+  dans le prompt système ; une proposition `ih-mcp-call` est filtrée (couples
+  serveur/outil autorisés), affichée avec son risque, puis exécutée seulement
+  après approbation ; le résultat est ajouté au fil comme message `tool`.
+  (Pas de tool use natif des fournisseurs ; résultat non réinjecté au modèle.)
 - **Automatisations** : étapes « outil MCP » (`server_id`, `mcp_tool`,
   `arguments`) exécutées via le même point d'entrée, avec la règle de mode sans
   interaction (seules les lectures pré-autorisées s'exécutent).

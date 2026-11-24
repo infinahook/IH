@@ -215,7 +215,15 @@
     "use_model": "Utiliser ce modèle",
     "mcp_tools": "Outils MCP",
     "mcp_hint": "Outils MCP activés dans les paramètres. Les appels sensibles demandent une approbation à usage unique liée aux paramètres.",
-    "mcp_insert": "Insérer la réponse dans le message"
+    "mcp_insert": "Insérer la réponse dans le message",
+    "mcp_proposal_title": "Outils MCP proposés",
+    "mcp_proposal_hint": "Le modèle propose d'appeler un outil MCP. Rien ne s'exécute sans votre approbation liée aux paramètres.",
+    "mcp_proposal_execute": "Exécuter avec approbation",
+    "mcp_proposal_risk": "Risque",
+    "mcp_proposal_arguments": "Paramètres",
+    "mcp_proposal_done": "Résultat de l'outil ajouté à la conversation.",
+    "mcp_proposal_failed": "Échec de l'appel : {message}",
+    "mcp_proposal_dismiss": "Ignorer"
   },
   "status": {
     "ready": "Prêt",

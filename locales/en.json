@@ -215,7 +215,15 @@
     "use_model": "Use this model",
     "mcp_tools": "MCP tools",
     "mcp_hint": "MCP tools enabled in settings. Sensitive calls require a one-shot approval bound to the parameters.",
-    "mcp_insert": "Insert the reply into the message"
+    "mcp_insert": "Insert the reply into the message",
+    "mcp_proposal_title": "Proposed MCP tools",
+    "mcp_proposal_hint": "The model suggests calling an MCP tool. Nothing runs without your parameter-bound approval.",
+    "mcp_proposal_execute": "Run with approval",
+    "mcp_proposal_risk": "Risk",
+    "mcp_proposal_arguments": "Parameters",
+    "mcp_proposal_done": "Tool result added to the conversation.",
+    "mcp_proposal_failed": "Call failed: {message}",
+    "mcp_proposal_dismiss": "Dismiss"
   },
   "status": {
     "ready": "Ready",

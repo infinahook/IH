@@ -15,6 +15,7 @@
 //! - l'historique injecté est borné (`history_limit`, plafonné à 200 messages) ;
 //! - la réponse est plafonnée en octets pour ne pas saturer la mémoire.
 
+pub mod mcp_proposal;
 use ih_core::{IhError, IhResult, ThreadId};
 use ih_providers::{ChatMessage, ChatRequest, Provider, Usage};
 use ih_store::{NewMessage, Store};

@@ -117,7 +117,7 @@ Vérifications exécutées en CI et localement :
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace        # 353 tests
+cargo test --workspace        # 360 tests
 npm run typecheck
 npm test                      # 181 tests
 npm run build

@@ -1,10 +1,11 @@
 //! Commandes de conversation : envoi avec streaming, annulation, historique.
 
 use crate::state::AppState;
-use ih_chat::{cancel_channel, run_turn, ChatTurn, DEFAULT_THREAD_TITLE};
+use ih_chat::{cancel_channel, mcp_proposal, run_turn, ChatTurn, DEFAULT_THREAD_TITLE};
 use ih_core::{IhError, IhResult, ProjectId, ThreadId};
 use ih_providers::build_provider;
 use ih_security::secrets::provider_account;
+use ih_store::{Message, NewMessage};
 use serde::Serialize;
 use tauri::{Emitter, State};
 
@@ -83,13 +84,22 @@ pub async fn chat_send(
             .create_thread(&project, DEFAULT_THREAD_TITLE, Some(&provider_id))?,
     };
 
+    // Outils MCP activés : proposés au modèle dans le prompt système, jamais
+    // exécutés par lui (l'approbation est exigée plus tard).
+    let mcp_tools = mcp_tools_addendum(&state);
     let mut turn = ChatTurn::new(
         thread.id.clone(),
         provider_id.clone(),
         model.clone(),
         prompt,
     );
-    turn.system = system;
+    turn.system = match (system, mcp_tools.as_ref().map(|(text, _)| text.clone())) {
+        (Some(system), Some(addendum)) => Some(format!("{system}\n\n{addendum}")),
+        (Some(system), None) => Some(system),
+        (None, Some(addendum)) => Some(addendum),
+        (None, None) => None,
+    };
+    let enabled_pairs = mcp_tools.map(|(_, pairs)| pairs).unwrap_or_default();
     if let Some(paths) = context_paths {
         if !paths.is_empty() {
             let config = state.config_snapshot()?;
@@ -147,6 +157,19 @@ pub async fn chat_send(
                         "outcome": outcome,
                     }),
                 );
+                if !outcome.cancelled && !enabled_pairs.is_empty() {
+                    let proposals = mcp_proposal::extract_proposals(&outcome.text, &enabled_pairs);
+                    if !proposals.is_empty() {
+                        let _ = handle.emit(
+                            "ih://chat-mcp-proposal",
+                            serde_json::json!({
+                                "request_id": request_for_task,
+                                "thread_id": thread_for_task,
+                                "proposals": proposals,
+                            }),
+                        );
+                    }
+                }
             }
             Err(error) => {
                 let _ = handle.emit(
@@ -201,6 +224,91 @@ pub fn chat_active(state: State<'_, AppState>) -> IhResult<usize> {
 }
 
 /// Renomme une conversation.
+/// Construit la description des outils MCP activés proposée au modèle, et la
+/// liste des couples (serveur, outil) autorisés pour filtrer les propositions.
+fn mcp_tools_addendum(state: &AppState) -> Option<(String, Vec<(String, String)>)> {
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    let mut lines: Vec<String> = Vec::new();
+    let mut budget = 8 * 1024usize;
+    let servers = state.store.list_mcp_servers().ok()?;
+    for server in servers.iter().filter(|server| server.enabled) {
+        let tools = match state.store.list_mcp_tools(Some(&server.id)) {
+            Ok(tools) => tools,
+            Err(_) => continue,
+        };
+        for tool in tools.into_iter().filter(|tool| tool.enabled) {
+            if pairs.len() >= 16 || budget < 200 {
+                break;
+            }
+            let schema = serde_json::to_string(&tool.input_schema).unwrap_or_default();
+            let line = format!(
+                "- {}/{} (risque {}): {} | schéma: {}",
+                server.id,
+                tool.name,
+                tool.risk,
+                truncate_text(&tool.description, 160),
+                truncate_text(&schema, 500)
+            );
+            budget = budget.saturating_sub(line.len() + 1);
+            pairs.push((server.id.clone(), tool.name.clone()));
+            lines.push(line);
+        }
+    }
+    if pairs.is_empty() {
+        return None;
+    }
+    let text = format!(
+        "Outils MCP réellement activés par l'utilisateur, proposables (tu ne peux pas les exécuter toi-même) :\n{}\n\nPour proposer un appel, termine ta réponse par un bloc de code JSON étiqueté ih-mcp-call : {{\"server_id\":\"…\",\"tool\":\"…\",\"arguments\":{{…}}}}. L'utilisateur devra approuver l'appel ; n'invente jamais d'outil hors de la liste.",
+        lines.join("\n")
+    );
+    Some((text, pairs))
+}
+
+fn truncate_text(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    text.chars().take(max).collect::<String>() + "…"
+}
+
+/// Ajoute au fil un message « outil » (résultat d'un appel MCP approuvé).
+///
+/// Le contenu est borné ; le statut est validé. Ce message n'est pas renvoyé au
+/// modèle dans l'historique — le tour suivant repart de la conversation.
+#[tauri::command]
+pub fn chat_append_tool_result(
+    state: State<'_, AppState>,
+    thread_id: String,
+    tool: String,
+    status: String,
+    content: String,
+) -> IhResult<Message> {
+    let thread = ThreadId::parse(thread_id)?;
+    state
+        .store
+        .get_thread(&thread)?
+        .ok_or_else(|| IhError::NotFound(format!("conversation {thread}")))?;
+    if tool.trim().is_empty() {
+        return Err(IhError::Invalid("outil MCP vide".into()));
+    }
+    if !matches!(status.as_str(), "completed" | "failed" | "denied") {
+        return Err(IhError::Invalid(format!(
+            "statut d'appel inconnu : {status}"
+        )));
+    }
+    let bounded = truncate_text(&content, 32 * 1024);
+    state.store.append_message(&NewMessage {
+        thread_id: thread,
+        role: "tool".into(),
+        content: bounded,
+        metadata: Some(serde_json::json!({
+            "source": "mcp",
+            "tool": tool.trim(),
+            "status": status,
+        })),
+    })
+}
+
 #[tauri::command]
 pub fn thread_rename(state: State<'_, AppState>, id: String, title: String) -> IhResult<()> {
     let id = ThreadId::parse(id)?;

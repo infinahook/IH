@@ -5006,3 +5006,38 @@ body,
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------- MCP */
+
+.mcp-server-card {
+  margin-bottom: 12px;
+}
+
+.mcp-server-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mcp-proposal-card {
+  border-color: var(--accent-border);
+  margin-bottom: 10px;
+}
+
+.mcp-proposal-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.mcp-proposal-row:first-child {
+  border-top: none;
+}
+
+.mcp-call pre.code-block {
+  max-height: 220px;
+  overflow: auto;
+}

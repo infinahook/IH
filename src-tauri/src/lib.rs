@@ -98,6 +98,7 @@ pub fn run() {
             commands::chat::chat_active,
             commands::chat::thread_rename,
             commands::chat::threads_search,
+            commands::chat::chat_append_tool_result,
             // mode agent
             commands::agent::agent_adapters,
             commands::agent::agent_session_request_approval,

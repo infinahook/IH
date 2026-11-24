@@ -125,14 +125,32 @@ pub fn probe_version(program: &Path) -> Option<String> {
             .unwrap_or_else(|| std::path::Path::new("."))
             .to_path_buf()
     };
-    let mut child = Command::new(program)
-        .arg("--version")
-        .current_dir(&neutral)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+    // `ETXTBSY` peut survenir transitoirement quand un autre test (ou un
+    // `fork` concurrent) détient encore le descripteur d'écriture du script :
+    // la sonde réessaie quelques instants au lieu d'abandonner la version.
+    let mut child = {
+        let mut spawned = None;
+        for attempt in 0..20 {
+            match Command::new(program)
+                .arg("--version")
+                .current_dir(&neutral)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(child) => {
+                    spawned = Some(child);
+                    break;
+                }
+                Err(error) if attempt < 19 && error.raw_os_error() == Some(26) => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(_) => break,
+            }
+        }
+        spawned?
+    };
 
     let started = Instant::now();
     loop {
