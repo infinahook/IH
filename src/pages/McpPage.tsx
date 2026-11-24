@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Cable,
   Download,
@@ -61,6 +61,13 @@ export function McpPage() {
   const servers = useAsync(() => api.mcpRemote.list(), []);
   const tools = useAsync(() => api.mcpRemote.tools(), []);
   const calls = useAsync(() => api.mcpRemote.calls(50), []);
+  const rolePerms = useAsync(() => api.mcpRemote.rolePermissions(), []);
+  const roleAction = useAction();
+  const [roleDraft, setRoleDraft] = useState<Record<string, string>>({
+    lead: "",
+    worker: "",
+    reviewer: "",
+  });
   const saveAction = useAction();
   const serverAction = useAction();
   const toolAction = useAction();
@@ -75,10 +82,43 @@ export function McpPage() {
   const [exported, setExported] = useState<string | null>(null);
   const [cliFlavor, setCliFlavor] = useState("claude");
 
+  const roleData = rolePerms.data;
+  useEffect(() => {
+    if (!roleData) {
+      return;
+    }
+    setRoleDraft({
+      lead: (roleData.lead ?? []).join("\n"),
+      worker: (roleData.worker ?? []).join("\n"),
+      reviewer: (roleData.reviewer ?? []).join("\n"),
+    });
+  }, [roleData]);
+
   const serverList = servers.data ?? [];
   const allTools = tools.data ?? [];
   const toolsOf = (serverId: string): McpRemoteTool[] =>
     allTools.filter((tool) => tool.server_id === serverId);
+  const parseRoleTools = (raw: string): string[] =>
+    raw
+      .split("\n")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+
+  const saveRole = async (role: string) => {
+    const updated = await roleAction.run(() =>
+      api.mcpRemote.setRolePermissions(role, parseRoleTools(roleDraft[role] ?? "")),
+    );
+    if (updated) {
+      setRoleDraft({
+        lead: (updated.lead ?? []).join("\n"),
+        worker: (updated.worker ?? []).join("\n"),
+        reviewer: (updated.reviewer ?? []).join("\n"),
+      });
+      notify(t("mcp.roles_saved", { role }));
+      rolePerms.reload();
+    }
+  };
+
   const notify = (text: string, tone: "success" | "warning" = "success") => {
     setMessageTone(tone);
     setMessage(text);
@@ -611,6 +651,46 @@ export function McpPage() {
         </div>
         <McpSecurityHint />
         <McpCallPanel caller="ui" />
+      </section>
+
+      <section className="card" aria-labelledby="mcp-roles">
+        <div className="section-heading">
+          <h2 id="mcp-roles">{t("mcp.team_roles")}</h2>
+        </div>
+        <p className="muted small">{t("mcp.team_roles_hint")}</p>
+        {roleAction.error ? <ErrorBanner error={roleAction.error} /> : null}
+        <div className="form-grid">
+          {(["lead", "worker", "reviewer"] as const).map((role) => (
+            <Field
+              key={role}
+              label={t(`mcp.role_${role}`)}
+              htmlFor={`mcp-role-${role}`}
+              hint={t("mcp.team_roles_format")}
+            >
+              <div className="button-row compact">
+                <textarea
+                  id={`mcp-role-${role}`}
+                  className="input textarea mono"
+                  rows={3}
+                  spellCheck={false}
+                  value={roleDraft[role]}
+                  placeholder="serveur/outil"
+                  onChange={(event) =>
+                    setRoleDraft((current) => ({ ...current, [role]: event.target.value }))
+                  }
+                />
+                <button
+                  type="button"
+                  className="ghost small"
+                  onClick={() => void saveRole(role)}
+                  disabled={roleAction.busy}
+                >
+                  {t("common.save")}
+                </button>
+              </div>
+            </Field>
+          ))}
+        </div>
       </section>
 
       <section className="card" aria-labelledby="mcp-history">

@@ -24,6 +24,7 @@ use tauri::{Emitter, Manager, State};
 
 const MAX_ERROR_CHARS: usize = 600;
 const MAX_ARGUMENTS_BYTES: usize = 8 * 1024;
+const ROLE_SETTINGS_KEY: &str = "mcp.role_permissions";
 
 // ------------------------------------------------------------------ vues IPC
 
@@ -230,6 +231,68 @@ fn audit(state: &AppState, summary: String, detail: String, decision: &str) {
         detail: Some(truncate(&detail, 2000)),
         decision: decision.to_string(),
     });
+}
+
+/// Permissions MCP par rôle d'équipe (stockées dans les réglages, sans secret).
+///
+/// Rôle absent : défaut global (outils activés). Liste vide : aucun outil.
+fn role_permissions(state: &AppState) -> std::collections::BTreeMap<String, Vec<String>> {
+    state
+        .store
+        .get_setting(ROLE_SETTINGS_KEY)
+        .ok()
+        .flatten()
+        .and_then(|raw| {
+            serde_json::from_str::<std::collections::BTreeMap<String, Vec<String>>>(&raw).ok()
+        })
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn mcp_role_permissions_get(state: State<'_, AppState>) -> IhResult<serde_json::Value> {
+    Ok(serde_json::json!(role_permissions(&state)))
+}
+
+/// Enregistre la liste des couples `serveur/outil` autorisés pour un rôle.
+#[tauri::command]
+pub fn mcp_role_permissions_set(
+    state: State<'_, AppState>,
+    role: String,
+    tools: Vec<String>,
+) -> IhResult<serde_json::Value> {
+    if !matches!(role.as_str(), "lead" | "worker" | "reviewer") {
+        return Err(IhError::Invalid(format!("rôle d'équipe inconnu : {role}")));
+    }
+    if tools.len() > 200 {
+        return Err(IhError::Limit(
+            "trop d'outils pour un rôle (200 max)".into(),
+        ));
+    }
+    let mut cleaned: Vec<String> = Vec::new();
+    for entry in tools {
+        let entry = entry.trim().to_string();
+        let Some((server, tool)) = entry.split_once('/') else {
+            return Err(IhError::Invalid(format!(
+                "couple serveur/outil attendu, reçu : {entry}"
+            )));
+        };
+        if server.is_empty() || tool.is_empty() || entry.len() > 300 {
+            return Err(IhError::Invalid(format!(
+                "couple serveur/outil invalide : {entry}"
+            )));
+        }
+        if !cleaned.contains(&entry) {
+            cleaned.push(entry);
+        }
+    }
+    let mut map = role_permissions(&state);
+    map.insert(role, cleaned);
+    state.store.set_setting(
+        ROLE_SETTINGS_KEY,
+        &serde_json::to_string(&map)
+            .map_err(|error| IhError::Internal(format!("sérialisation des rôles : {error}")))?,
+    )?;
+    Ok(serde_json::json!(map))
 }
 
 fn tool_view(record: &McpToolRecord) -> McpToolView {
@@ -622,6 +685,8 @@ pub struct InvokeRequest {
     pub caller: McpCaller,
     pub caller_id: Option<String>,
     pub approval_id: Option<String>,
+    /// Rôle d'équipe (lead/worker/reviewer) quand `caller = team`.
+    pub role: Option<String>,
 }
 
 /// Point d'entrée unique d'exécution d'un outil MCP.
@@ -638,6 +703,7 @@ pub async fn invoke_mcp_tool(state: &AppState, request: InvokeRequest) -> IhResu
         caller,
         caller_id,
         approval_id,
+        role,
     } = request;
 
     let server = state
@@ -681,6 +747,43 @@ pub async fn invoke_mcp_tool(state: &AppState, request: InvokeRequest) -> IhResu
         return Err(IhError::Denied(format!(
             "l'outil MCP « {tool} » n'est pas activé par l'utilisateur"
         )));
+    }
+    // Restriction par rôle d'équipe : jamais implicite.
+    if caller == McpCaller::Team {
+        let role = role.as_deref().unwrap_or_default();
+        if role.is_empty() {
+            record_call(
+                state,
+                &server_id,
+                &tool,
+                caller.as_str(),
+                caller_id.as_deref(),
+                &arguments,
+                "denied",
+                Some("rôle d'équipe absent".into()),
+                None,
+            );
+            return Err(IhError::Denied(
+                "un appel d'équipe exige un rôle (lead, worker, reviewer)".into(),
+            ));
+        }
+        let key = format!("{server_id}/{tool}");
+        if !ih_security::mcp::role_permits(role, &key, &role_permissions(state)) {
+            record_call(
+                state,
+                &server_id,
+                &tool,
+                caller.as_str(),
+                caller_id.as_deref(),
+                &arguments,
+                "denied",
+                Some(format!("outil non autorisé pour le rôle {role}")),
+                None,
+            );
+            return Err(IhError::Denied(format!(
+                "l'outil MCP {key} n'est pas autorisé pour le rôle « {role} »"
+            )));
+        }
     }
     validate_arguments(&tool_record.input_schema, &arguments)?;
     let risk = risk_from_str(&tool_record.risk)?;
@@ -861,6 +964,7 @@ pub async fn mcp_call(
     caller: Option<String>,
     caller_id: Option<String>,
     approval_id: Option<String>,
+    role: Option<String>,
 ) -> IhResult<McpCallOutcome> {
     let caller = caller
         .as_deref()
@@ -875,6 +979,7 @@ pub async fn mcp_call(
             caller,
             caller_id,
             approval_id,
+            role,
         },
     )
     .await

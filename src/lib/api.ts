@@ -1046,6 +1046,7 @@ export const api = {
       caller?: string;
       callerId?: string;
       approvalId?: string;
+      role?: string;
     }) => call<McpRemoteCallOutcome>("mcp_call", {
       serverId: request.serverId,
       tool: request.tool,
@@ -1053,7 +1054,11 @@ export const api = {
       caller: request.caller,
       callerId: request.callerId,
       approvalId: request.approvalId,
+      role: request.role,
     }),
+    rolePermissions: () => call<Record<string, string[]>>("mcp_role_permissions_get"),
+    setRolePermissions: (role: string, tools: string[]) =>
+      call<Record<string, string[]>>("mcp_role_permissions_set", { role, tools }),
     calls: (limit = 50, serverId?: string) =>
       call<McpCallRecord[]>("mcp_calls_list", { limit, serverId }),
     exportConfig: () => call<string>("mcp_export_config"),

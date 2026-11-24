@@ -42,6 +42,10 @@
 - **Agents / Team** : `mcp_agent_config` génère la configuration MCP des CLI
   (Claude Code, Gemini CLI, OpenCode) sans secrets ; fichier non injecté
   automatiquement (documenté).
+- **Permissions MCP par rôle d'équipe** : `mcp_role_permissions_get/set`
+  (Lead/Worker/Reviewer), édition dans la page MCP, vérification dans
+  `invoke_mcp_tool` avant approbation ; rôle absent = défaut global, liste
+  vide = aucun outil, appel Team sans rôle refusé.
 - **Interface** : section **Serveurs MCP** (transport, URL, délai, jeton
   trousseau, en-têtes JSON, pré-autorisation), statuts lisibles, catalogue avec
   risque et activation individuelle, appel avec approbation affichant serveur,

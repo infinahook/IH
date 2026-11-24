@@ -1476,6 +1476,13 @@
     "name_url_required": "Saisissez un nom et une URL.",
     "agent_config": "Config CLI",
     "agent_config_done": "Configuration pour {flavor} générée (sans secrets).",
-    "agent_flavor": "CLI d'agent"
+    "agent_flavor": "CLI d'agent",
+    "team_roles": "Rôles d'équipe (Team)",
+    "team_roles_hint": "Rôles absents : défaut global (outils activés). Liste vide : aucun outil pour ce rôle. Un appel Team sans rôle autorisé est refusé.",
+    "team_roles_format": "Un couple serveur/outil par ligne.",
+    "role_lead": "Lead",
+    "role_worker": "Worker",
+    "role_reviewer": "Reviewer",
+    "roles_saved": "Permissions du rôle « {role} » enregistrées."
   }
 }

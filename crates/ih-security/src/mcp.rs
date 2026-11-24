@@ -327,6 +327,55 @@ fn canonical_json(value: &Value) -> String {
     }
 }
 
+/// Politique de rôle pour les outils MCP d'une course d'équipe.
+///
+/// `permissions` associe un rôle (`lead`, `worker`, `reviewer`) à la liste des
+/// couples `serveur/outil` autorisés. Sémantique :
+/// - rôle **absent** de la map : les outils activés globalement restent
+///   permis (comportement par défaut d'IH) ;
+/// - rôle présent avec une liste vide : aucun outil MCP pour ce rôle
+///   (refus explicite, jamais interprété comme « tout est permis ») ;
+/// - rôle présent avec une liste : seuls les couples cités sont autorisés.
+pub fn role_permits(
+    role: &str,
+    tool_key: &str,
+    permissions: &std::collections::BTreeMap<String, Vec<String>>,
+) -> bool {
+    match permissions.get(role) {
+        None => true,
+        Some(allowed) => allowed.iter().any(|entry| entry == tool_key),
+    }
+}
+
+#[cfg(test)]
+mod role_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn perms() -> BTreeMap<String, Vec<String>> {
+        let mut map = BTreeMap::new();
+        map.insert("lead".to_string(), vec!["srv/echo".to_string()]);
+        map.insert("worker".to_string(), Vec::new());
+        map
+    }
+
+    #[test]
+    fn role_absent_laisse_le_defaut_global() {
+        assert!(role_permits("reviewer", "srv/delete_all", &perms()));
+    }
+
+    #[test]
+    fn role_present_avec_liste_restreint() {
+        assert!(role_permits("lead", "srv/echo", &perms()));
+        assert!(!role_permits("lead", "srv/delete_all", &perms()));
+    }
+
+    #[test]
+    fn role_present_avec_liste_vide_refuse_tout() {
+        assert!(!role_permits("worker", "srv/echo", &perms()));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

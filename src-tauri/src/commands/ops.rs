@@ -400,6 +400,7 @@ pub fn workflow_run_now(state: State<'_, AppState>, id: String) -> IhResult<Work
                 caller: McpCaller::Automation,
                 caller_id: Some(workflow.id.clone()),
                 approval_id: None,
+                role: None,
             };
             match crate::commands::mcp::invoke_mcp_tool_blocking(&state, request) {
                 Ok(outcome) if outcome.status == "completed" => {

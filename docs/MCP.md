@@ -202,9 +202,22 @@ configuration MCP **sans aucun secret** :
 Le fichier n'est **pas injecté automatiquement** dans les sessions d'agent ni
 dans les rôles d'équipe : chaque CLI a son propre format et ses propres règles
 (et aucun CLI n'est installé sur la machine de validation). L'injection
-automatique par adaptateur et la **restriction des outils MCP par rôle**
-(Lead/Worker/Reviewer) restent à implémenter ; par défaut, aucun rôle ne reçoit
-de permission MCP.
+automatique par adaptateur reste à implémenter.
+
+**Restriction des outils MCP par rôle (Team) — implémentée côté garde-fou IH :**
+
+- `mcp_role_permissions_get/set` : liste des couples `serveur/outil` autorisés
+  par rôle (`lead`, `worker`, `reviewer`), stockée dans les réglages (aucun
+  secret), éditable dans la page MCP ;
+- sémantique stricte : rôle **absent** = défaut global (outils activés),
+  rôle avec **liste vide** = aucun outil ; un appel `caller=team` **sans rôle**
+  est refusé ;
+- tout appel Team passe par `invoke_mcp_tool`, qui vérifie le rôle avant
+  l'approbation — un Worker ne peut pas élargir ses propres permissions.
+
+Cette restriction s'applique au chemin d'exécution d'IH. Pour les CLI
+d'agents, elle est portée par la configuration exportée (par rôle) que
+l'utilisateur branche lui-même ; aucune injection automatique n'existe.
 
 ## Intégration Automatisations
 
@@ -241,7 +254,9 @@ ces étapes sur le même exécuteur (le bridge synchrone est déjà en place).
    réinjecté dans l'historique du modèle.
 3. **Injections dans les CLI d'agents** : export manuel (`mcp_agent_config`)
    uniquement ; aucune écriture automatique de fichier ni argument CLI ajouté
-   aux sessions d'agents, et pas de permissions MCP par rôle d'équipe.
+   aux sessions d'agents. La restriction par rôle est appliquée par le
+   garde-fou IH (`caller=team`) et par la configuration exportée, pas par une
+   injection dans les CLI.
 4. **Workflows** : étapes « outil MCP » disponibles à l'exécution manuelle ;
    l'intégration au planificateur d'arrière-plan suivra la fusion de 0.6.0.
 5. **MCP stdio** : toujours via `ih-extensions` (page Plugins), non migré dans

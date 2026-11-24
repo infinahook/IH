@@ -1476,6 +1476,13 @@
     "name_url_required": "Enter a name and a URL.",
     "agent_config": "CLI config",
     "agent_config_done": "Configuration for {flavor} generated (without secrets).",
-    "agent_flavor": "Agent CLI"
+    "agent_flavor": "Agent CLI",
+    "team_roles": "Team roles",
+    "team_roles_hint": "Absent role: global default (enabled tools). Empty list: no tool for this role. A Team call without an allowed role is denied.",
+    "team_roles_format": "One server/tool pair per line.",
+    "role_lead": "Lead",
+    "role_worker": "Worker",
+    "role_reviewer": "Reviewer",
+    "roles_saved": "Permissions for role “{role}” saved."
   }
 }
