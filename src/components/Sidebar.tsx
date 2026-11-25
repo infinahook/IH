@@ -21,6 +21,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { SECTIONS, type SectionId } from "../lib/navigation";
+import logo from "../assets/logo.png";
 import { useApp } from "../lib/store";
 
 const ICONS: Record<SectionId, LucideIcon> = {
@@ -52,7 +53,7 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="brand">
         <div className="brand-mark" aria-hidden="true">
-          IH
+          <img src={logo} alt="" />
         </div>
         <div>
           <strong>{t("app.name")}</strong>

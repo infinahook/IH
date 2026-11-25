@@ -1,5 +1,6 @@
 import { useEffect, type ComponentType } from "react";
 import { RefreshCw } from "lucide-react";
+import logo from "./assets/logo.png";
 import { ErrorBanner } from "./components/ErrorBanner";
 import { LoadingRow } from "./components/EmptyState";
 import { Sidebar } from "./components/Sidebar";
@@ -72,7 +73,7 @@ function Shell() {
     return (
       <div className="boot-screen">
         <div className="brand-mark" aria-hidden="true">
-          IH
+          <img src={logo} alt="" />
         </div>
         <p className="boot-title">{t("app.name")}</p>
         <LoadingRow label={t("app.loading")} />
