@@ -22,3 +22,11 @@ bytes.workspace = true
 url.workspace = true
 http.workspace = true
 rmcp.workspace = true
+
+[dev-dependencies]
+ih-chat = { path = "../ih-chat" }
+ih-providers = { path = "../ih-providers" }
+ih-store = { path = "../ih-store" }
+async-trait = "0.1"
+chrono.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

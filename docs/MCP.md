@@ -165,7 +165,7 @@ testable localement : le serveur de test d'`ih-mcp` (voir
 
 ## Intégration Chat
 
-Trois niveaux, tous soumis à approbation :
+Quatre niveaux, tous soumis à approbation :
 
 1. **Invocation explicite** — bouton « Outils MCP » dans le composeur, panneau
    d'appel, insertion du résultat dans le message.
@@ -178,10 +178,19 @@ Trois niveaux, tous soumis à approbation :
    sont acceptés), l'affiche à l'utilisateur et exige une approbation liée à
    l'empreinte des paramètres ; l'exécution passe par le point d'entrée unique
    (`caller = "chat"`). Le résultat est ajouté au fil comme message `tool`.
-3. **Tool use natif des fournisseurs** (OpenAI `tools`, Anthropic `tool_use`) :
-   **absent** — le protocole texte ci-dessus remplace cette intégration. Le
-   résultat d'outil n'est pas renvoyé au modèle dans l'historique : le tour
-   suivant repart de la conversation (`user`/`assistant` seulement).
+3. **Tool calling natif (0.6.2, famille OpenAI-compatible)** — le fournisseur
+   déclare explicitement `supports_tools` ; les outils MCP découverts sont alors
+   envoyés comme définitions natives (`tools`). Une réponse avec `tool_calls`
+   n'exécute rien : chaque demande devient une **carte** de la conversation,
+   persistée `pending`. L'utilisateur approuve ou refuse ; l'approbation est
+   liée à l'empreinte exacte des arguments et consommée une seule fois par
+   `invoke_mcp_tool`. Le résultat part au modèle comme message `tool` et le
+   tour reprend (max 3 cycles, 6 appels par tour). Aucune exécution
+   automatique, aucun rejeu après redémarrage.
+   Anthropic, Gemini et Ollama n'annoncent pas cette capacité : le protocole
+   texte (niveau 2) reste leur chemin.
+4. **Résultats d'outils réinjectés** : en natif, oui — via le message `tool`
+   associé par `tool_call_id`, sans confondre résultat et contenu utilisateur.
 
 Le modèle ne peut donc jamais exécuter un outil : le seul chemin d'exécution
 est le garde-fou Rust (serveur/outil activés, arguments validés, approbation
@@ -220,6 +229,39 @@ Cette restriction s'applique au chemin d'exécution d'IH. Pour les CLI
 d'agents, elle est portée par la configuration exportée (par rôle) que
 l'utilisateur branche lui-même ; aucune injection automatique n'existe.
 
+## Serveurs MCP stdio hérités (chemin contrôlé)
+
+Le transport **stdio** (client `ih-extensions::mcp::McpClient`, commande IPC
+`mcp_call_tool`) est un chemin historique, conservé comme fonctionnalité
+utilisateur de la page Plugins (ajout, connexion, appel d'outil).
+
+**Il n'est atteignable ni par le chat, ni par le modèle, ni par le mode Agent,
+ni par le mode Équipe, ni par les automatisations** : le catalogue du chat ne
+lit que la table des serveurs distants (`mcp_servers`), `propose_calls` résout
+uniquement des noms de ce catalogue, et les automatisations passent par
+`invoke_mcp_tool`. Un nom d'outil stdio est donc « inconnu » pour le modèle.
+
+Depuis 0.6.2 (correction pré-merge), il applique les mêmes contrôles que le
+garde-fou distant, adaptés au transport :
+
+| Contrôle | Mise en œuvre |
+|---|---|
+| Activation du serveur | `mcp_stdio_set_enabled` ; serveur désactivé ⇒ connexion et appels refusés (`Denied`), session fermée à la désactivation |
+| Connexion utilisateur | la session doit exister (`mcp_connect`), sinon `NotFound` |
+| Outil réellement annoncé | `tools/list` à chaque appel ; nom inconnu ⇒ `NotFound` |
+| Arguments | objet JSON borné (256 Kio) et **validés contre le schéma `inputSchema`** du serveur (mêmes règles que le distant) |
+| Classification du risque | locale, par nom, description et heuristiques (le protocole stdio historique ne transporte pas d'annotations d'outil) — un nom destructif est classé `critical` |
+| Approbation | **interactive obligatoire, à usage unique, liée à l'empreinte SHA-256** (serveur + outil + paramètres) ; aucune pré-autorisation stdio n'existe |
+| Trace | entrée d'audit `mcp_tool` (décision `approved`) avec paramètres **redactés** |
+| Arguments affichés | redactés avant la demande d'approbation et l'audit |
+
+Différences assumées avec `invoke_mcp_tool` (distants) : pas de catalogue
+persistant d'outils activables un par un, pas de permissions par rôle
+(l'appelant est l'interface), pas d'historique `mcp_calls` (la table est liée
+par clé étrangère aux serveurs distants). **Migration prévue dans une version
+ultérieure** : router ce transport par le garde-fou commun avec un catalogue
+d'outils stdio persisté.
+
 ## Intégration Automatisations
 
 Les étapes de workflow acceptent deux formes : un prompt d'agent
@@ -242,17 +284,23 @@ ces étapes sur le même exécuteur (le bridge synchrone est déjà en place).
   date, erreur.
 - Événements : `ih://mcp-status` (connexion/déconnexion/erreur),
   `ih://mcp-discovered` (outils découverts), `ih://mcp-call`
-  (`approval_required`, `started`, `finished`). Jamais de secret.
+  (`approval_required`, `started`, `finished`), `ih://chat-tool-call`
+  (`proposed`, `denied`, `finished`, `failed` : cartes du chat natif). Jamais
+  de secret.
+- Persistance du chat natif : table `chat_tool_calls` (migration v6) — une
+  ligne par proposition, avec arguments **redactés** (audit/interface) et
+  arguments bruts conservés séparément pour la seule exécution approuvée.
 - Audit : décisions d'approbation (`approved`, `auto`).
 
 ## Limites connues
 
 1. **OAuth 2.1** : non intégré (jetons bearer et en-têtes personnalisés
    seulement).
-2. **Tool use natif** : pas d'appel d'outil via l'API `tools` des
-   fournisseurs ; la proposition passe par le protocole texte `ih-mcp-call`
-   (filtré, approuvé, exécuté par le garde-fou) et le résultat n'est pas
-   réinjecté dans l'historique du modèle.
+2. **Tool use natif** : implémenté pour la famille **OpenAI-compatible**
+   (0.6.2). Anthropic, Gemini et Ollama n'annoncent pas la capacité : ils
+   gardent le protocole texte `ih-mcp-call` (filtré, approuvé, exécuté par le
+   garde-fou). L'extensibilité repose sur `Provider::supports_native_tools` et
+   la sérialisation propre à chaque famille, pas sur une devinette.
 3. **Injections dans les CLI d'agents** : export manuel (`mcp_agent_config`)
    uniquement ; aucune écriture automatique de fichier ni argument CLI ajouté
    aux sessions d'agents. La restriction par rôle est appliquée par le

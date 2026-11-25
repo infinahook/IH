@@ -29,7 +29,7 @@ import { JsonView } from "../components/JsonView";
 import { Notice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
 
-type ServerAction = "connect" | "disconnect" | "call" | "remove";
+type ServerAction = "connect" | "disconnect" | "call" | "remove" | "enable";
 
 interface ServerFeedback {
   busy: ServerAction | null;
@@ -107,6 +107,20 @@ export function PluginsPage() {
     if (done) {
       setForm({ id: "", name: "", command: "", args: "" });
       servers.reload();
+    }
+  };
+
+  const toggleEnabled = async (server: InstalledExtension) => {
+    const done = await runServer(server.id, "enable", async () => {
+      await api.mcp.setEnabled(server.id, !server.enabled);
+      return true;
+    });
+    if (done) {
+      servers.reload();
+      if (server.enabled) {
+        setConnectedServers((previous) => ({ ...previous, [server.id]: false }));
+        setTools((previous) => ({ ...previous, [server.id]: [] }));
+      }
     }
   };
 
@@ -395,13 +409,23 @@ export function PluginsPage() {
                         type="button"
                         className="primary small"
                         onClick={() => void connect(server)}
-                        disabled={busy !== null}
+                        disabled={busy !== null || !server.enabled}
+                        title={server.enabled ? undefined : t("plugins.enabled_hint")}
                         aria-busy={busy === "connect"}
                       >
                         {busy === "connect" ? <Spinner /> : <Link2 size={13} aria-hidden="true" />}
                         {t("plugins.connect")}
                       </button>
                     )}
+                    <label className="checkbox-row drawer-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={server.enabled}
+                        disabled={busy !== null}
+                        onChange={() => void toggleEnabled(server)}
+                      />
+                      <span>{t("plugins.enabled")}</span>
+                    </label>
                     <button
                       type="button"
                       className="ghost small danger-text"

@@ -79,7 +79,7 @@ pub struct McpTestOutcome {
 
 // ----------------------------------------------------------------- helpers
 
-fn risk_from_str(value: &str) -> IhResult<RiskLevel> {
+pub(crate) fn risk_from_str(value: &str) -> IhResult<RiskLevel> {
     match value {
         "low" => Ok(RiskLevel::Low),
         "medium" => Ok(RiskLevel::Medium),
@@ -96,7 +96,7 @@ fn transport_from_str(value: &str) -> IhResult<McpTransport> {
         .ok_or_else(|| IhError::Invalid(format!("transport MCP inconnu : {value}")))
 }
 
-fn truncate(text: &str, max: usize) -> String {
+pub(crate) fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_string();
     }

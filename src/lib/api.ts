@@ -184,6 +184,8 @@ export interface ProviderConfig {
   endpoint_path: string | null;
   headers: Record<string, string>;
   streaming: boolean;
+  /** Capacité tool calling natif déclarée pour ce fournisseur. */
+  supports_tools: boolean;
   temperature: number | null;
   max_tokens: number | null;
   custom: boolean;
@@ -364,6 +366,8 @@ export interface ProviderView {
   /** Nombre d'en-têtes configurés ; les valeurs ne sont jamais renvoyées. */
   headers_count: number;
   streaming: boolean;
+  /** Capacité tool calling natif déclarée pour ce fournisseur. */
+  supports_tools: boolean;
   timeout_secs: number;
   created_at: string | null;
   updated_at: string | null;
@@ -379,6 +383,8 @@ export interface ProviderInput {
   headers?: Record<string, string>;
   timeout_secs?: number;
   streaming?: boolean;
+  /** Déclaration explicite du tool calling natif (absente : inchangée). */
+  supports_tools?: boolean;
   temperature?: number | null;
   max_tokens?: number | null;
   default_model?: string | null;
@@ -516,6 +522,15 @@ export interface ChatAccepted {
   project_id: string;
   provider_id: string;
   model: string;
+  /** Vrai si le fournisseur accepte les cartes d'appel d'outils natives. */
+  native_tools: boolean;
+}
+
+/** Appel d'outil demandé par le modèle (identifiant du fournisseur). */
+export interface ChatToolCallRequest {
+  id: string;
+  name: string;
+  arguments: unknown;
 }
 
 /** Résultat final d'un tour de conversation, y compris annulé. */
@@ -527,6 +542,36 @@ export interface ChatOutcome {
   cancelled: boolean;
   finish_reason: string | null;
   elapsed_ms: number;
+  tool_calls?: ChatToolCallRequest[];
+}
+
+/** Proposition d'appel d'outil persistée (arguments déjà masqués). */
+export interface ChatToolCallView {
+  id: string;
+  request_id: string;
+  round: number;
+  provider_call_id: string;
+  exposed_name: string;
+  server_id: string;
+  tool: string;
+  risk: string;
+  category: string;
+  arguments: unknown;
+  status: string;
+  error: string | null;
+  result_text: string | null;
+  created_at: string;
+  decided_at: string | null;
+  finished_at: string | null;
+}
+
+/** Résultat d'une décision humaine sur une carte d'appel. */
+export interface ChatToolDecisionOutcome {
+  call_id: string;
+  status: string;
+  summary: string;
+  result_text: string | null;
+  continued: boolean;
 }
 
 export interface Workflow {
@@ -989,6 +1034,8 @@ export const api = {
     add: (serverId: string, name: string, command: string, args: string[]) =>
       call<void>("mcp_server_add", { id: serverId, name, command, args }),
     remove: (serverId: string) => call<void>("mcp_server_remove", { id: serverId }),
+    setEnabled: (serverId: string, enabled: boolean) =>
+      call<void>("mcp_stdio_set_enabled", { id: serverId, enabled }),
     connect: (serverId: string, clientName = "IH") =>
       call<McpTool[]>("mcp_connect", { id: serverId, clientName }),
     callTool: (
@@ -1121,6 +1168,10 @@ export const api = {
     active: () => call<number>("chat_active"),
     appendToolResult: (threadId: string, tool: string, status: string, content: string) =>
       call<Message>("chat_append_tool_result", { threadId, tool, status, content }),
+    toolCalls: (threadId: string) =>
+      call<ChatToolCallView[]>("chat_tool_calls_list", { threadId }),
+    toolDecide: (callId: string, decision: "approve" | "deny") =>
+      call<ChatToolDecisionOutcome>("chat_tool_decide", { callId, decision }),
   },
 
   // historique

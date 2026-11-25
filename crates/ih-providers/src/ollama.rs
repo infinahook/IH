@@ -228,6 +228,7 @@ impl Provider for OllamaProvider {
             },
             finish_reason: payload.done_reason,
             model,
+            tool_calls: Vec::new(),
         })
     }
 
@@ -267,6 +268,6 @@ impl Provider for OllamaProvider {
             Ok(false)
         })
         .await?;
-        Ok(state.into_response())
+        state.into_response(&self.id)
     }
 }

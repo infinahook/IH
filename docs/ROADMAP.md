@@ -14,6 +14,8 @@ prétendre qu'un jalon est atteint s'il n'est pas testé.
 | **Fournisseurs IA** — cloud + local, modèles, santé, streaming | `ih-providers` (15 tests) sur 4 fournisseurs, sans réseau externe |
 | **Skills et plugins** — installation vérifiée, client MCP | `ih-extensions` (27 tests) |
 | **Équipes et automatisation** — graphe, rôles, ordonnanceur | `ih-orchestrator` (23 tests) |
+| **MCP natif** — Streamable HTTP, SSE, garde-fou et approbations liées à l'empreinte | `ih-mcp` (48 tests) + `ih-security` (47 tests) + recette graphique 0.6.1 |
+| **Tool calling natif dans Chat** — outils MCP exposés, décision humaine, résultat réinjecté, continuations bornées | `ih-providers` (28 tests) + `ih-desktop` (11 tests) + `ih-mcp` (cycle complet fournisseur simulé/serveur local réel) + cartes graphiques 0.6.2 |
 | **Release engineering partiel** — signature Ed25519, `.deb`, AppImage, PKGBUILD | `ih-update` (39 tests) + bundles produits + CI Arch |
 
 ## Restant, par ordre de valeur
@@ -23,8 +25,10 @@ prétendre qu'un jalon est atteint s'il n'est pas testé.
 2. **Planificateur d'automatisations en arrière-plan** (aujourd'hui : exécution
    manuelle) + édition/suppression des workflows.
 3. **Registre de skills distant** avec vérification de mise à jour.
-4. **MCP étendu** : ressources, prompts, sampling et tool use — les transports
-   HTTP/Streamable et SSE sont **livrés en 0.6.1**.
+4. **MCP étendu** : ressources, prompts, sampling et tool use natif des autres
+   familles — les transports HTTP/Streamable et SSE sont **livrés en 0.6.1**
+   et le tool calling natif OpenAI-compatible en **0.6.2** ; Anthropic/Gemini/
+   Ollama gardent le protocole texte.
 5. **Git distant** : `fetch`, `pull`, `push`, résolution de conflits.
 6. **Coloration syntaxique** dans l'éditeur.
 7. **Page d'audit** : exposer `list_audit` via une commande IPC et enregistrer

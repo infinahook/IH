@@ -34,6 +34,25 @@ export interface ChatMcpProposalEvent {
   proposals: McpToolProposal[];
 }
 
+/** Carte d'appel d'outil natif : proposition, décision ou résultat. */
+export interface ChatToolCallEvent {
+  phase: string;
+  thread_id: string;
+  request_id: string;
+  call_id: string;
+  provider_call_id: string;
+  round: number;
+  exposed_name: string;
+  server_id: string;
+  tool: string;
+  risk: string;
+  category: string;
+  arguments: unknown;
+  status: string;
+  error: string | null;
+  result_text: string | null;
+}
+
 // ------------------------------------------------------ état de streaming
 
 export type ChatStreamStatus = "idle" | "streaming" | "done" | "error";
@@ -55,6 +74,26 @@ export interface ChatStreamState {
   text: string;
   outcome: ChatOutcome | null;
   error: ChatStreamError | null;
+}
+
+const SENSITIVE_KEY = /token|secret|password|passwd|api[-_]?key|authorization|cookie|bearer|credential|private[-_]?key/i;
+
+/**
+ * Masque les valeurs des clés sensibles d'un objet JSON d'arguments, pour
+ * qu'aucun secret saisi par l'utilisateur n'apparaisse dans une carte d'outil.
+ */
+export function maskSensitiveArguments(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => maskSensitiveArguments(entry));
+  }
+  if (typeof value === "object" && value !== null) {
+    const masked: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      masked[key] = SENSITIVE_KEY.test(key) ? "[masqué]" : maskSensitiveArguments(entry);
+    }
+    return masked;
+  }
+  return value;
 }
 
 export const INITIAL_CHAT_STREAM: ChatStreamState = {

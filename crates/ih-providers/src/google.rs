@@ -343,7 +343,7 @@ impl Provider for GoogleProvider {
                 self.id
             )));
         }
-        Ok(state.into_response())
+        state.into_response(&self.id)
     }
 
     async fn chat_stream(
@@ -383,6 +383,6 @@ impl Provider for GoogleProvider {
             Ok(false)
         })
         .await?;
-        Ok(state.into_response())
+        state.into_response(&self.id)
     }
 }

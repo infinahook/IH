@@ -223,7 +223,25 @@
     "mcp_proposal_arguments": "Parameters",
     "mcp_proposal_done": "Tool result added to the conversation.",
     "mcp_proposal_failed": "Call failed: {message}",
-    "mcp_proposal_dismiss": "Dismiss"
+    "mcp_proposal_dismiss": "Dismiss",
+    "tool_call_title": "MCP tool calls",
+    "tool_call_hint": "The model requests these tools. Nothing runs without your decision; each approval is bound to the exact parameters and is single-use.",
+    "tool_call_refresh": "Refresh",
+    "tool_call_show": "Show parameters",
+    "tool_call_hide": "Hide parameters",
+    "tool_call_arguments": "Parameters (sensitive values masked)",
+    "tool_call_result": "Result",
+    "tool_call_approve": "Approve and run",
+    "tool_call_deny": "Refuse",
+    "tool_call_continued": "Decision recorded: the model continues with the result.",
+    "tool_call_decided": "Decision recorded (status: {status}).",
+    "tool_call_failed": "Decision failed: {message}",
+    "tool_call_status_pending": "Awaiting decision",
+    "tool_call_status_denied": "Refused",
+    "tool_call_status_completed": "Completed",
+    "tool_call_status_failed": "Failed",
+    "tool_call_status_invalid": "Invalid",
+    "tool_call_status_expired": "Expired"
   },
   "status": {
     "ready": "Ready",
@@ -560,7 +578,9 @@
     "models_section": "Models ({count})",
     "model_remove_title": "Delete model",
     "detail_empty_title": "No provider selected",
-    "detail_empty_description": "Choose a provider from the list on the left."
+    "detail_empty_description": "Choose a provider from the list on the left.",
+    "field_supports_tools_hint": "Declares native tool calling support (OpenAI-compatible family). When off, chat keeps the text protocol and manual approval.",
+    "field_supports_tools_unavailable": "Not available for this family: native support is announced as-is."
   },
   "skills": {
     "title": "Skills",
@@ -636,7 +656,9 @@
     "server": "Server",
     "disconnected": "Server disconnected.",
     "object_required": "A JSON object is expected.",
-    "id_command_required": "An ID and a command are required."
+    "id_command_required": "An ID and a command are required.",
+    "enabled": "Server enabled",
+    "enabled_hint": "Enable the server before connecting and calling its tools."
   },
   "terminal": {
     "title": "Terminal",

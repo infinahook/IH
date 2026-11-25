@@ -18,10 +18,10 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::migrate;
 use crate::model::{
-    AgentEventRow, AgentSessionDetail, AuditEntry, InstalledExtension, McpCallRecord,
-    McpServerRecord, McpToolRecord, MemoryEntry, Message, NewAgentEvent, NewAuditEntry, NewMcpCall,
-    NewMemoryEntry, NewMessage, NewSession, NewTask, NewWorkflowRun, Project, SessionRow, Task,
-    Thread, Workflow, WorkflowRun,
+    AgentEventRow, AgentSessionDetail, AuditEntry, ChatToolCallRecord, InstalledExtension,
+    McpCallRecord, McpServerRecord, McpToolRecord, MemoryEntry, Message, NewAgentEvent,
+    NewAuditEntry, NewChatToolCall, NewMcpCall, NewMemoryEntry, NewMessage, NewSession, NewTask,
+    NewWorkflowRun, Project, SessionRow, Task, Thread, Workflow, WorkflowRun,
 };
 use crate::util::{
     agent_state_str, db_err, decode_json, decode_opt_json, encode_json, get_agent_state, get_id,
@@ -106,6 +106,13 @@ impl Store {
         };
         {
             let mut conn = store.lock()?;
+            // Protection des données : avant toute migration, une copie
+            // cohérente (API backup de SQLite, compatible WAL) est écrite à
+            // côté de la base. Un échec de sauvegarde interrompt l'ouverture
+            // plutôt que de migrer sans filet.
+            if let Some(db_path) = store.path.as_deref() {
+                backup_before_migration(&conn, db_path)?;
+            }
             migrate::migrate(&mut conn)?;
         }
         Ok(store)
@@ -1491,6 +1498,286 @@ impl Store {
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|err| db_err("lecture des appels MCP", err))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Appels d'outils proposés par un modèle (chat natif)
+// ---------------------------------------------------------------------------
+
+impl Store {
+    /// Enregistre une proposition d'appel d'outil (arguments déjà redactés).
+    ///
+    /// Seuls `pending` et `invalid` peuvent être créés : les autres statuts
+    /// résultent d'une décision ou d'une exécution ultérieure.
+    pub fn insert_chat_tool_call(&self, call: &NewChatToolCall) -> IhResult<ChatToolCallRecord> {
+        validate_choice(
+            "statut de proposition d'outil",
+            &call.status,
+            &["pending", "invalid"],
+        )?;
+        require_non_empty("nom exposé d'outil", &call.exposed_name)?;
+        require_non_empty("identifiant de serveur MCP", &call.server_id)?;
+        require_non_empty("nom d'outil MCP", &call.tool)?;
+        require_non_empty("empreinte d'appel", &call.fingerprint)?;
+        let arguments = encode_json("arguments de proposition d'outil", &call.arguments)?;
+        let raw_arguments = encode_json(
+            "arguments bruts de proposition d'outil",
+            &call.raw_arguments,
+        )?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
+        {
+            let conn = self.lock()?;
+            conn.execute(
+                "INSERT INTO chat_tool_calls
+                    (id, thread_id, project_id, request_id, round, provider_call_id,
+                     exposed_name, server_id, tool, risk, category, fingerprint,
+                     arguments_redacted, arguments_raw, status, error, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                         ?16, ?17)",
+                params![
+                    id,
+                    call.thread_id.as_str(),
+                    call.project_id.as_str(),
+                    call.request_id,
+                    i64::from(call.round),
+                    call.provider_call_id,
+                    call.exposed_name,
+                    call.server_id,
+                    call.tool,
+                    call.risk,
+                    call.category,
+                    call.fingerprint,
+                    arguments,
+                    raw_arguments,
+                    call.status,
+                    call.error,
+                    now,
+                ],
+            )
+            .map_err(|err| {
+                db_err(
+                    format!("insertion de la proposition {}", call.exposed_name),
+                    err,
+                )
+            })?;
+        }
+        self.get_chat_tool_call(&id)?.ok_or_else(|| {
+            IhError::Internal("proposition d'outil introuvable après insertion".into())
+        })
+    }
+
+    /// Lit une proposition par identifiant.
+    pub fn get_chat_tool_call(&self, id: &str) -> IhResult<Option<ChatToolCallRecord>> {
+        let conn = self.lock()?;
+        conn.query_row(CHAT_TOOL_CALL_SELECT, params![id], chat_tool_call_from_row)
+            .optional()
+            .map_err(|err| db_err(format!("lecture de la proposition d'outil {id}"), err))
+    }
+
+    /// Liste toutes les propositions d'une conversation, dans l'ordre d'émission.
+    pub fn list_chat_tool_calls(&self, thread_id: &ThreadId) -> IhResult<Vec<ChatToolCallRecord>> {
+        let sql = CHAT_TOOL_CALL_LIST_SELECT.replace("WHERE_THREAD", "WHERE thread_id = ?1");
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|err| db_err("préparation de la liste des propositions d'outils", err))?;
+        let rows = stmt
+            .query_map(params![thread_id.as_str()], chat_tool_call_from_row)
+            .map_err(|err| db_err("lecture des propositions d'outils", err))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| db_err("lecture des propositions d'outils", err))
+    }
+
+    /// Liste les propositions d'un même tour (`request_id`).
+    pub fn list_chat_tool_calls_for_request(
+        &self,
+        request_id: &str,
+    ) -> IhResult<Vec<ChatToolCallRecord>> {
+        let sql = CHAT_TOOL_CALL_LIST_SELECT.replace("WHERE_THREAD", "WHERE request_id = ?1");
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|err| db_err("préparation des propositions d'un tour", err))?;
+        let rows = stmt
+            .query_map(params![request_id], chat_tool_call_from_row)
+            .map_err(|err| db_err("lecture des propositions d'un tour", err))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| db_err("lecture des propositions d'un tour", err))
+    }
+
+    /// Enregistre la décision humaine sur une proposition `pending`.
+    ///
+    /// Une proposition déjà décidée ne peut pas changer de statut : la
+    /// transition est vérifiée par le `WHERE status = 'pending'`.
+    pub fn decide_chat_tool_call(
+        &self,
+        id: &str,
+        status: &str,
+        error: Option<&str>,
+    ) -> IhResult<ChatToolCallRecord> {
+        validate_choice(
+            "décision de proposition d'outil",
+            status,
+            &["denied", "failed", "invalid", "expired"],
+        )?;
+        let now = Utc::now();
+        let touched = {
+            let conn = self.lock()?;
+            conn.execute(
+                "UPDATE chat_tool_calls
+                    SET status = ?2, error = ?3, decided_at = ?4
+                  WHERE id = ?1 AND status = 'pending' AND approval_id IS NULL",
+                params![id, status, error, now],
+            )
+            .map_err(|err| db_err(format!("décision de la proposition {id}"), err))?
+        };
+        if touched == 0 {
+            return Err(IhError::Conflict(format!(
+                "la proposition d'outil {id} n'est plus en attente de décision"
+            )));
+        }
+        self.get_chat_tool_call(id)?
+            .ok_or_else(|| IhError::NotFound(format!("proposition d'outil {id}")))
+    }
+
+    /// Réclame atomiquement une proposition pour l'exécution approuvée.
+    ///
+    /// Le premier appelant qui pose une approbation gagne ; toute tentative
+    /// concurrente (double clic, seconde instance, rejeu) échoue : une carte
+    /// ne peut pas être exécutée deux fois. La décision `deny` est elle aussi
+    /// impossible après réclamation (`approval_id IS NULL` exigé).
+    pub fn claim_chat_tool_call(&self, id: &str, approval_id: &str) -> IhResult<bool> {
+        require_non_empty("approbation de proposition d'outil", approval_id)?;
+        let conn = self.lock()?;
+        let touched = conn
+            .execute(
+                "UPDATE chat_tool_calls
+                    SET approval_id = ?2
+                  WHERE id = ?1 AND status = 'pending' AND approval_id IS NULL",
+                params![id, approval_id],
+            )
+            .map_err(|err| db_err(format!("réclamation de la proposition {id}"), err))?;
+        Ok(touched > 0)
+    }
+
+    /// Clôt une proposition exécutée (ou dont l'exécution a échoué).
+    pub fn finish_chat_tool_call(
+        &self,
+        id: &str,
+        status: &str,
+        error: Option<&str>,
+        result_text: Option<&str>,
+        approval_id: Option<&str>,
+    ) -> IhResult<ChatToolCallRecord> {
+        validate_choice(
+            "fin de proposition d'outil",
+            status,
+            &["completed", "failed"],
+        )?;
+        let now = Utc::now();
+        let touched = {
+            let conn = self.lock()?;
+            conn.execute(
+                "UPDATE chat_tool_calls
+                    SET status = ?2, error = ?3, result_text = ?4, approval_id = COALESCE(?5, approval_id),
+                        decided_at = COALESCE(decided_at, ?6), finished_at = ?6
+                  WHERE id = ?1 AND status = 'pending'",
+                params![id, status, error, result_text, approval_id, now],
+            )
+            .map_err(|err| db_err(format!("fin de la proposition {id}"), err))?
+        };
+        if touched == 0 {
+            return Err(IhError::Conflict(format!(
+                "la proposition d'outil {id} n'est plus ouverte"
+            )));
+        }
+        self.get_chat_tool_call(id)?
+            .ok_or_else(|| IhError::NotFound(format!("proposition d'outil {id}")))
+    }
+}
+
+const CHAT_TOOL_CALL_SELECT: &str = "SELECT id, thread_id, project_id, request_id, round,
+        provider_call_id, exposed_name, server_id, tool, risk, category, fingerprint,
+        arguments_redacted, arguments_raw, status, error, result_text, approval_id,
+        created_at, decided_at, finished_at
+     FROM chat_tool_calls WHERE id = ?1";
+
+const CHAT_TOOL_CALL_LIST_SELECT: &str = "SELECT id, thread_id, project_id, request_id, round,
+        provider_call_id, exposed_name, server_id, tool, risk, category, fingerprint,
+        arguments_redacted, arguments_raw, status, error, result_text, approval_id,
+        created_at, decided_at, finished_at
+     FROM chat_tool_calls WHERE_THREAD
+     ORDER BY created_at, id";
+
+fn chat_tool_call_from_row(row: &Row<'_>) -> rusqlite::Result<ChatToolCallRecord> {
+    Ok(ChatToolCallRecord {
+        id: row.get(0)?,
+        thread_id: get_id(row, 1)?,
+        project_id: get_id(row, 2)?,
+        request_id: row.get(3)?,
+        round: u32::try_from(row.get::<_, i64>(4)?).unwrap_or(0),
+        provider_call_id: row.get(5)?,
+        exposed_name: row.get(6)?,
+        server_id: row.get(7)?,
+        tool: row.get(8)?,
+        risk: row.get(9)?,
+        category: row.get(10)?,
+        fingerprint: row.get(11)?,
+        arguments: decode_json(row, 12, "arguments de proposition d'outil")?,
+        raw_arguments: decode_json(row, 13, "arguments bruts de proposition d'outil")?,
+        status: row.get(14)?,
+        error: row.get(15)?,
+        result_text: row.get(16)?,
+        approval_id: row.get(17)?,
+        created_at: row.get(18)?,
+        decided_at: row.get(19)?,
+        finished_at: row.get(20)?,
+    })
+}
+
+/// Sauvegarde la base avant une migration de schéma, si nécessaire.
+///
+/// La copie utilise l'API `backup` de SQLite : elle est cohérente même quand
+/// la base est en mode WAL (contrairement à une simple copie du fichier
+/// principal, qui perdrait les transactions encore dans le WAL).
+///
+/// Chemin : `<base>.pre-v<ancienne version>-<horodatage>.bak`, à côté de la
+/// base. Aucun fichier n'est écrit si aucune migration n'est requise.
+fn backup_before_migration(conn: &Connection, db_path: &Path) -> IhResult<Option<PathBuf>> {
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|err| db_err("lecture de la version avant migration", err))?;
+    let version = u32::try_from(version).unwrap_or_default();
+    if version == 0 || version >= migrate::SCHEMA_VERSION {
+        return Ok(None);
+    }
+    let stamp = Utc::now().format("%Y%m%dT%H%M%S%.3f");
+    let file_name = db_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "ih.sqlite3".into());
+    let target = db_path.with_file_name(format!("{file_name}.pre-v{version}-{stamp}.bak"));
+    let mut destination = Connection::open(&target).map_err(|err| {
+        db_err(
+            format!("création de la sauvegarde {}", target.display()),
+            err,
+        )
+    })?;
+    {
+        let backup = rusqlite::backup::Backup::new(conn, &mut destination)
+            .map_err(|err| db_err("préparation de la sauvegarde avant migration", err))?;
+        backup
+            .run_to_completion(64, std::time::Duration::from_millis(10), None)
+            .map_err(|err| db_err("écriture de la sauvegarde avant migration", err))?;
+    }
+    drop(destination);
+    tracing::info!(
+        path = %target.display(),
+        version,
+        "sauvegarde de sécurité écrite avant migration"
+    );
+    Ok(Some(target))
 }
 
 /// Applique les PRAGMA de connexion.

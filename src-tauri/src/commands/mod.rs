@@ -3,10 +3,12 @@
 pub mod agent;
 pub mod ai;
 pub mod chat;
+pub mod chat_tools;
 pub mod core;
 pub mod extensions;
 pub mod files;
 pub mod mcp;
+pub mod mcp_tools;
 pub mod ops;
 pub mod team;
 pub mod workspace;

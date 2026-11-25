@@ -1048,3 +1048,248 @@ fn assert_send_sync<T: Send + Sync>() {}
 fn store_est_send_et_sync() {
     assert_send_sync::<Store>();
 }
+
+// -------------------------------------------------------------------------
+// Appels d'outils proposés par un modèle (chat natif, migration v6)
+// -------------------------------------------------------------------------
+
+fn new_chat_tool_call(
+    thread: &Thread,
+    project: &Project,
+    request_id: &str,
+    status: &str,
+) -> NewChatToolCall {
+    NewChatToolCall {
+        thread_id: thread.id.clone(),
+        project_id: project.id.clone(),
+        request_id: request_id.to_owned(),
+        round: 0,
+        provider_call_id: "call_1".to_owned(),
+        exposed_name: "demo__echo".to_owned(),
+        server_id: "demo".to_owned(),
+        tool: "echo".to_owned(),
+        risk: "low".to_owned(),
+        category: "read".to_owned(),
+        fingerprint: "f".repeat(64),
+        arguments: json!({ "text": "[masqué]" }),
+        raw_arguments: json!({ "text": "valeur réelle" }),
+        status: status.to_owned(),
+        error: None,
+    }
+}
+
+#[test]
+fn chat_tool_call_proposition_et_lectures() {
+    let store = Store::open_in_memory().expect("base mémoire");
+    let project = seed_project(&store, "chat-tools");
+    let thread = store
+        .create_thread(&project.id, "Essai", None)
+        .expect("conversation");
+    let pending = store
+        .insert_chat_tool_call(&new_chat_tool_call(&thread, &project, "req-1", "pending"))
+        .expect("proposition pending");
+    assert_eq!(pending.status, "pending");
+    assert_eq!(pending.exposed_name, "demo__echo");
+    assert!(pending.decided_at.is_none());
+
+    let by_thread = store.list_chat_tool_calls(&thread.id).expect("liste");
+    assert_eq!(by_thread.len(), 1);
+    assert_eq!(by_thread[0].id, pending.id);
+    let by_request = store
+        .list_chat_tool_calls_for_request("req-1")
+        .expect("liste par tour");
+    assert_eq!(by_request.len(), 1);
+    assert_eq!(by_request[0].server_id, "demo");
+
+    let invalid = store
+        .insert_chat_tool_call(&new_chat_tool_call(&thread, &project, "req-1", "invalid"))
+        .expect("proposition invalid");
+    assert_eq!(invalid.status, "invalid");
+    assert!(store
+        .insert_chat_tool_call(&new_chat_tool_call(&thread, &project, "req-1", "completed"))
+        .is_err());
+    assert!(store
+        .list_chat_tool_calls(&ThreadId::new())
+        .expect("liste vide")
+        .is_empty());
+}
+
+#[test]
+fn chat_tool_call_decisions_et_transitions_verrouillees() {
+    let store = Store::open_in_memory().expect("base mémoire");
+    let project = seed_project(&store, "chat-tools");
+    let thread = store
+        .create_thread(&project.id, "Essai", None)
+        .expect("conversation");
+    let call = store
+        .insert_chat_tool_call(&new_chat_tool_call(&thread, &project, "req-1", "pending"))
+        .expect("proposition");
+
+    let denied = store
+        .decide_chat_tool_call(&call.id, "denied", None)
+        .expect("refus");
+    assert_eq!(denied.status, "denied");
+    assert!(denied.decided_at.is_some());
+    // Une proposition déjà décidée ne change plus.
+    assert!(matches!(
+        store.decide_chat_tool_call(&call.id, "invalid", None),
+        Err(IhError::Conflict(_))
+    ));
+
+    // Une proposition refusée ne peut plus être exécutée : la fin exige une
+    // proposition encore ouverte (réclamée par une approbation).
+    assert!(matches!(
+        store.finish_chat_tool_call(&call.id, "completed", None, Some("résultat"), None),
+        Err(IhError::Conflict(_))
+    ));
+}
+
+#[test]
+fn chat_tool_call_reclamation_atomique_une_seule_execution() {
+    let store = Store::open_in_memory().expect("base mémoire");
+    let project = seed_project(&store, "chat-tools");
+    let thread = store
+        .create_thread(&project.id, "Essai", None)
+        .expect("conversation");
+    let call = store
+        .insert_chat_tool_call(&new_chat_tool_call(&thread, &project, "req-1", "pending"))
+        .expect("proposition");
+
+    assert!(store
+        .claim_chat_tool_call(&call.id, "appro-1")
+        .expect("première réclamation"));
+    // Une seconde réclamation échoue : une seule exécution possible.
+    assert!(!store
+        .claim_chat_tool_call(&call.id, "appro-2")
+        .expect("seconde réclamation"));
+    // Un refus après réclamation est impossible.
+    assert!(matches!(
+        store.decide_chat_tool_call(&call.id, "denied", None),
+        Err(IhError::Conflict(_))
+    ));
+    let finished = store
+        .finish_chat_tool_call(
+            &call.id,
+            "completed",
+            None,
+            Some("résultat"),
+            Some("appro-1"),
+        )
+        .expect("fin");
+    assert_eq!(finished.status, "completed");
+    assert_eq!(finished.result_text.as_deref(), Some("résultat"));
+    assert_eq!(finished.approval_id.as_deref(), Some("appro-1"));
+    assert!(finished.finished_at.is_some());
+    // Une seconde fin échoue.
+    assert!(matches!(
+        store.finish_chat_tool_call(&call.id, "failed", None, None, None),
+        Err(IhError::Conflict(_))
+    ));
+}
+
+#[test]
+fn chat_tool_call_pending_n_est_pas_rejoue_apres_reouverture() {
+    let db = TempDb::new();
+    let project = {
+        let store = Store::open(&db.path()).expect("ouverture");
+        let project = seed_project(&store, "chat-tools");
+        let thread = store
+            .create_thread(&project.id, "Essai", None)
+            .expect("conversation");
+        store
+            .insert_chat_tool_call(&new_chat_tool_call(&thread, &project, "req-1", "pending"))
+            .expect("proposition");
+        store
+    };
+    drop(project);
+
+    // Nouvelle ouverture : la proposition reste en attente, jamais exécutée.
+    let store = Store::open(&db.path()).expect("réouverture");
+    let thread_id = store
+        .list_threads(&store.list_projects().unwrap()[0].id)
+        .unwrap()[0]
+        .id
+        .clone();
+    let calls = store.list_chat_tool_calls(&thread_id).expect("liste");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].status, "pending");
+    assert!(calls[0].finished_at.is_none());
+}
+
+// -------------------------------------------------------------------------
+// Protection des données : sauvegarde cohérente (WAL compris) avant migration
+// -------------------------------------------------------------------------
+
+#[test]
+fn sauvegarde_avant_migration_preserve_les_donnees() {
+    let db = TempDb::new();
+    let path = db.path();
+    let project;
+    {
+        let store = Store::open(&path).expect("création");
+        project = seed_project(&store, "sauvegarde");
+        // État d'une base 0.6.1 : version 5, sans la table v6.
+        let conn = rusqlite::Connection::open(&path).expect("connexion directe");
+        conn.execute_batch(
+            "PRAGMA wal_checkpoint(TRUNCATE);
+             DROP TABLE chat_tool_calls;
+             PRAGMA user_version = 5;",
+        )
+        .expect("simulation du schéma v5");
+    }
+
+    let store = Store::open(&path).expect("réouverture");
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    let preserved = store
+        .get_project(&project.id)
+        .expect("lecture")
+        .expect("projet");
+    assert_eq!(preserved.name, "sauvegarde");
+
+    let backups: Vec<std::path::PathBuf> = std::fs::read_dir(path.parent().unwrap())
+        .expect("lecture du dossier")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .map(|name| {
+                    name.to_string_lossy().contains(".pre-v5-")
+                        && name.to_string_lossy().ends_with(".bak")
+                })
+                .unwrap_or(false)
+        })
+        .collect();
+    assert_eq!(backups.len(), 1, "une sauvegarde avant migration attendue");
+    // La copie contient réellement les données d'avant migration.
+    let copy = rusqlite::Connection::open_with_flags(
+        &backups[0],
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .expect("ouverture de la sauvegarde");
+    let name: String = copy
+        .query_row(
+            "SELECT name FROM projects WHERE id = ?1",
+            [project.id.as_str()],
+            |row| row.get(0),
+        )
+        .expect("projet dans la sauvegarde");
+    assert_eq!(name, "sauvegarde");
+    let version: i64 = copy
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("version de la sauvegarde");
+    assert_eq!(version, 5, "la sauvegarde garde le schéma d'origine");
+}
+
+#[test]
+fn aucune_sauvegarde_quand_le_schema_est_a_jour() {
+    let db = TempDb::new();
+    let path = db.path();
+    drop(Store::open(&path).expect("création"));
+    drop(Store::open(&path).expect("réouverture"));
+    let backups = std::fs::read_dir(path.parent().unwrap())
+        .expect("lecture du dossier")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|entry| entry.to_string_lossy().ends_with(".bak"))
+        .count();
+    assert_eq!(backups, 0, "aucune sauvegarde sans migration");
+}

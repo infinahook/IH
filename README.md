@@ -130,6 +130,7 @@ npm run build
 | [docs/FEATURES.md](docs/FEATURES.md) | état exact des fonctionnalités (fait / partiel / absent) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | frontières, crates, flux, politique de ressources |
 | [docs/SECURITY.md](docs/SECURITY.md) | contrôles implémentés et limites assumées |
+| [docs/DATA_SAFETY.md](docs/DATA_SAFETY.md) | protection du profil local, sauvegardes, incident 0.6.2 |
 | [docs/UPDATES.md](docs/UPDATES.md) | signature, manifeste, installation, rollback |
 | [docs/WORKSPACE.md](docs/WORKSPACE.md) | guide du workspace, du contexte et du diff |
 | [docs/AGENT_MODE.md](docs/AGENT_MODE.md) | guide du mode Agent, adaptateurs et limites |

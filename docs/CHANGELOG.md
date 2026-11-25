@@ -1,5 +1,89 @@
 # Journal des versions
 
+## 0.6.2 — Tool calling MCP natif dans Chat
+
+### Ajouté
+- **Modèle commun de tool calling** (`ih-providers`) : `ToolDefinition`,
+  `ToolCall`, `ToolCallResult` ; `ChatRequest.tools`, `ChatMessage.tool_calls` /
+  `tool_call_id`, `ChatResponse.tool_calls`. La capacité est **déclarée**, jamais
+  devinée : `Provider::supports_native_tools()` (défaut `false`).
+- **Fournisseur OpenAI-compatible** : outils sérialisés au format
+  `{"type":"function",…}`, messages assistant à `tool_calls` et messages
+  `tool`, parsing non-streaming (arguments chaîne JSON ou objet) et streaming
+  SSE avec appels **fragmentés** (index, identifiant, nom, arguments) ;
+  arguments invalides remontés en erreur explicite ; flux sans outils inchangé.
+- **Découverte et conversion** (`src-tauri/commands/mcp_tools.rs`) : seuls les
+  serveurs **activés et connectés** et les outils **activés par l'utilisateur**
+  sont exposés, sous un nom sûr `{serveur}__{outil}` (≤ 64 caractères,
+  caractères normalisés, hachage déterministe des noms longs, suffixe en cas de
+  collision). Table inverse nom exposé → (serveur, outil) gardée côté noyau :
+  aucune URL, aucun jeton, aucun en-tête ne part au modèle. Schémas non-objet
+  écartés, catalogue borné (24 outils, 8 Kio par schéma, 32 Kio au total).
+  IPC `chat_tools_list` sans secret.
+- **Cycle sécurisé dans Chat** : une réponse du modèle avec `tool_calls` ne
+  déclenche **aucune** exécution. Chaque demande devient une proposition
+  persistée `pending` (arguments redactés pour l'audit et l'interface) et une
+  carte `ih://chat-tool-call`. La décision humaine (`chat_tool_decide`)
+  matérialise une **approbation à usage unique liée à l'empreinte** des
+  paramètres, puis appelle `invoke_mcp_tool` — seul chemin d'exécution. Le
+  résultat est renvoyé au modèle comme message `tool` et le tour reprend
+  (bornes **testées** : 3 cycles de continuation, 6 appels par tour, les
+  propositions invalides ne consommant pas de budget). Aucun chemin parallèle,
+  aucune reprise automatique après redémarrage.
+- **Persistance** (migration SQLite **v6**) : table `chat_tool_calls`
+  (tour, cycle, identifiant d'appel fournisseur, nom exposé, serveur/outil
+  réels, risque, catégorie, empreinte SHA-256, arguments redactés et argents
+  bruts d'exécution, statut, erreur, résultat, approbation, horodatages) avec
+  transitions verrouillées. Une proposition `pending` n'est jamais rejouée.
+- **Interface** : cartes d'appels d'outils dans la conversation (serveur/outil,
+  risque, statut, paramètres dépliables **valeurs sensibles masquées**,
+  résultat, erreur), boutons Approuver/Refuser, rafraîchissement par événements
+  et depuis la base, y compris pendant les cycles de continuation.
+- **Tests réels** : cycle complet de bout en bout contre un **serveur MCP local
+  réel** (Streamable HTTP) et un **fournisseur OpenAI simulé** (serveur HTTP
+  local) : requête d'outil → proposition → approbation liée à l'empreinte →
+  exécution MCP → message `tool` → continuation → réponse finale, avec
+  vérification de l'empreinte (rejeu refusé) et de l'unicité du message
+  utilisateur.
+
+### Modifié
+- `ProviderConfig.supports_tools` (défaut `false`) : opt-in explicite du tool
+  calling natif, exposé dans l'interface de configuration des fournisseurs
+  (famille OpenAI-compatible ; les autres familles annoncent honnêtement
+  l'absence de support).
+- Chat : si la capacité est déclarée, les outils partent en natif et le
+  protocole texte `ih-mcp-call` n'est pas injecté ; sinon le comportement 0.6.1
+  est conservé à l'identique (aucune régression).
+- Anthropic, Gemini et Ollama : `tool_calls` vide, capacité fausse, fallback
+  texte préservé.
+- Version **0.6.2**.
+
+### Sécurité
+- Invariants 0.6.1 conservés : point d'entrée unique `invoke_mcp_tool`,
+  anti-SSRF (URL validée, DNS revalidé, redirections non suivies, proxys
+  ignorés), approbations à usage unique liées à l'empreinte, redaction des
+  arguments et des erreurs, tailles et délais bornés, aucun secret au modèle.
+- Nouveau : le modèle ne peut jamais exécuter un outil sans décision humaine
+  explicite ; une carte ne s'exécute qu'une fois (réclamation atomique en base
+  `claim_chat_tool_call`, une décision `deny` est refusée après réclamation) ;
+  un événement de continuation ne peut pas contourner la décision ; toute
+  issue d'exécution autre que `completed` est traitée comme un échec explicite.
+- **MCP stdio historique** : les appels de la page Plugins (`mcp_call_tool`)
+  appliquent désormais les mêmes contrôles que le garde-fou distant — serveur
+  activé (nouvelle commande `mcp_stdio_set_enabled`, session fermée à la
+  désactivation) et connecté, outil réellement annoncé par `tools/list`,
+  arguments validés contre son `inputSchema`, classification locale du risque,
+  approbation interactive à usage unique liée à l'empreinte et trace d'audit
+  redactée. Le chemin reste isolé du chat, du modèle, des agents, de l'équipe
+  et des automatisations (catalogue distant uniquement), ce qui est
+  désormais couvert par un test de régression.
+- **Protection des données locales** : sauvegarde cohérente (API backup SQLite,
+  WAL inclus) écrite automatiquement avant toute migration de schéma, un échec
+  interrompant l'ouverture plutôt que de migrer sans filet ; script
+  `scripts/backup-profile.sh` qui refuse le profil utilisateur réel sauf
+  autorisation explicite et vérifie l'intégrité de la copie ; post-mortem et
+  procédures dans [DATA_SAFETY.md](DATA_SAFETY.md).
+
 ## 0.6.1 — MCP natif : Streamable HTTP et SSE
 
 ### Ajouté

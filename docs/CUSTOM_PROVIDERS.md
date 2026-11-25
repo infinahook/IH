@@ -48,6 +48,7 @@ Le chemin doit commencer par `/`, ne pas contenir `..` ni espace.
 | `headers` | en-têtes HTTP additionnels (`X-Tenant: acme`, `HTTP-Referer: …`) |
 | `timeout_secs` | délai maximal par requête |
 | `streaming` | `false` ⇒ réponse complète en un bloc, diffusée en un seul delta |
+| `supports_tools` | `true` ⇒ le fournisseur **déclare** le tool calling natif (famille OpenAI-compatible) ; le chat natif envoie alors les outils MCP activés et attend `tool_calls`. Défaut `false` : protocole texte `ih-mcp-call` inchangé |
 | `temperature`, `max_tokens` | paramètres de génération appliqués si renseignés |
 | `default_model` | modèle présélectionné dans le chat |
 | `models` | liste connue (découverte ou saisie manuelle) |
@@ -112,11 +113,25 @@ Passerelle    base_url = https://llm.interne
 | `model_unavailable` | serveur sans `/models` : saisir le modèle à la main |
 | Réponse vide | modèle inconnu du serveur : vérifier l'identifiant exact |
 
+## Tool calling natif
+
+Depuis 0.6.2, un fournisseur **OpenAI-compatible** peut déclarer
+`supports_tools = true` (case « Tool calling natif » de la configuration). Les
+outils MCP réellement activés partent alors comme définitions `tools` ; une
+réponse `tool_calls` devient une carte soumise à décision humaine, puis le
+résultat est réinjecté comme message `tool`. Les autres familles (Anthropic,
+Gemini, Ollama) annoncent honnêtement l'absence de capacité et gardent le
+protocole texte. La capacité est **explicite** : un endpoint « compatible
+OpenAI » qui n'implémente pas `tools` doit laisser la case décochée (une
+requête qui contient des outils est alors refusée avant tout appel réseau).
+
 ## Limites
 
 - Quatre protocoles seulement ; ajouter un protocole demande un adaptateur Rust.
 - Pas de découverte des capacités (vision, outils) au-delà de ce que l'API
   expose ; les champs restent vides plutôt qu'inventés.
+- Tool calling natif implémenté pour OpenAI-compatible : les autres familles
+  gardent le protocole texte tant qu'aucun parsing natif n'est écrit.
 - Le streaming dépend du support serveur ; `streaming = false` force une
   réponse complète.
 
@@ -129,6 +144,7 @@ Passerelle    base_url = https://llm.interne
 | Streaming désactivé (un seul delta) | idem | ✅ |
 | Redirection 302 non suivie | idem | ✅ |
 | Classification des erreurs de connexion | test unitaire `ih-providers` | ✅ |
+| Tool calling natif (capacité, sérialisation `tools`/`tool_calls`, refus si capacité désactivée, streaming fragmenté) | tests `ih-providers` (serveur HTTP local) | ✅ |
 | Formulaire, en-têtes, statuts | 21 tests frontend | ✅ |
 | Création/modification via l'interface (GUI) | — | ❌ non exécuté : le lancement graphique de validation s'est bloqué dans l'environnement Xvfb + trousseau ; le contrat IPC est couvert par les tests mais **aucun scénario GUI complet n'a été joué** |
 | Endpoint cloud réel (OpenAI, Groq…) | — | ❌ aucune clé disponible |

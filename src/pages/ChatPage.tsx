@@ -33,6 +33,7 @@ import {
   AppError,
   api,
   toAppError,
+  type ChatToolCallView,
   type ChatUsage,
   type FileMatch,
   type McpRemoteTool,
@@ -57,6 +58,7 @@ import {
   type ChatDoneEvent,
   type ChatErrorEvent,
   type ChatMcpProposalEvent,
+  type ChatToolCallEvent,
   type ChatStreamAction,
   type McpToolProposal,
 } from "../lib/chat";
@@ -104,6 +106,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { Field } from "../components/Field";
 import { FileExplorer } from "../components/FileExplorer";
 import { Modal } from "../components/Modal";
+import { ChatToolCards } from "../components/ChatToolCards";
 import { McpCallPanel } from "../components/McpCallPanel";
 import { Notice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
@@ -402,6 +405,7 @@ export function ChatPage() {
       return;
     }
     void loadMessages(selectedThreadId);
+    void reloadToolCards(selectedThreadId);
     // `loadMessages` est recréé à chaque rendu ; seule la sélection compte ici.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedThreadId]);
@@ -520,6 +524,9 @@ export function ChatPage() {
     finalizingRef.current = null;
     threads.reload();
     void refreshActive();
+    if (selectedThreadRef.current === payload.thread_id) {
+      void reloadToolCards(payload.thread_id);
+    }
   };
 
   const finishError = async (payload: ChatErrorEvent, turn: ActiveTurn) => {
@@ -589,6 +596,13 @@ export function ChatPage() {
       void finishDone(payload, turn);
       return;
     }
+    // Fin d'un cycle de continuation : aucun tour actif, mais la conversation
+    // doit afficher la réponse finale et les cartes à jour.
+    if (!turn && !sendPendingRef.current && payload.thread_id === selectedThreadRef.current) {
+      void loadMessages(payload.thread_id);
+      void reloadToolCards(payload.thread_id);
+      return;
+    }
     if (!turn && sendPendingRef.current) {
       terminalRef.current.set(payload.request_id, {
         type: "done",
@@ -630,6 +644,53 @@ export function ChatPage() {
       .tools()
       .then((tools) => setMcpToolsCatalog(tools))
       .catch(() => undefined);
+  };
+
+  // Cartes d'appels d'outils natifs : état lu en base, jamais deviné côté UI.
+  const reloadToolCards = async (threadId: string) => {
+    try {
+      const cards = await api.chat.toolCalls(threadId);
+      if (selectedThreadRef.current === threadId) {
+        setToolCards(cards.slice(-8));
+      }
+    } catch {
+      // Une conversation sans appel d'outil n'a simplement aucune carte.
+    }
+  };
+
+  const decideToolCall = async (card: ChatToolCallView, decision: "approve" | "deny") => {
+    setToolCardsBusy(card.id);
+    setToolCardsNotice(null);
+    try {
+      const outcome = await api.chat.toolDecide(card.id, decision);
+      setToolCardsNotice(
+        outcome.continued
+          ? t("chat.tool_call_continued")
+          : t("chat.tool_call_decided", { status: outcome.status }),
+      );
+    } catch (reason) {
+      setToolCardsNotice(t("chat.tool_call_failed", { message: toAppError(reason).message }));
+    } finally {
+      setToolCardsBusy(null);
+      if (selectedThreadRef.current) {
+        await reloadToolCards(selectedThreadRef.current);
+        await loadMessages(selectedThreadRef.current);
+      }
+    }
+  };
+
+  const handleToolCall = (payload: ChatToolCallEvent) => {
+    if (payload.thread_id !== selectedThreadRef.current) {
+      return;
+    }
+    void reloadToolCards(payload.thread_id);
+    if (
+      payload.phase === "finished" ||
+      payload.phase === "failed" ||
+      payload.phase === "denied"
+    ) {
+      void loadMessages(payload.thread_id);
+    }
   };
 
   const toolRisk = (proposal: McpToolProposal): string =>
@@ -717,6 +778,10 @@ export function ChatPage() {
     "ih://chat-mcp-proposal",
     handleProposal,
   );
+  const toolCallListenerError = useTauriEvent<ChatToolCallEvent>(
+    "ih://chat-tool-call",
+    handleToolCall,
+  );
 
   // --------------------------------------------------------------- envoi
   const sendAction = useAction();
@@ -733,6 +798,9 @@ export function ChatPage() {
     proposal: McpToolProposal;
   } | null>(null);
   const [mcpProposalBusy, setMcpProposalBusy] = useState<string | null>(null);
+  const [toolCards, setToolCards] = useState<ChatToolCallView[]>([]);
+  const [toolCardsBusy, setToolCardsBusy] = useState<string | null>(null);
+  const [toolCardsNotice, setToolCardsNotice] = useState<string | null>(null);
   const [mcpProposalNotice, setMcpProposalNotice] = useState<string | null>(null);
   const [composerAlert, setComposerAlert] = useState<{
     tone: "warning" | "danger";
@@ -1863,6 +1931,18 @@ export function ChatPage() {
                 ) : null}
               </div>
 
+              {toolCallListenerError ? <ErrorBanner error={toolCallListenerError} /> : null}
+              {toolCardsNotice ? <Notice tone="success">{toolCardsNotice}</Notice> : null}
+              <ChatToolCards
+                cards={toolCards}
+                busyCallId={toolCardsBusy}
+                onDecide={(card, decision) => void decideToolCall(card, decision)}
+                onRefresh={() => {
+                  if (selectedThreadRef.current) {
+                    void reloadToolCards(selectedThreadRef.current);
+                  }
+                }}
+              />
               {proposalListenerError && mcpProposals.length > 0 ? (
                 <ErrorBanner error={proposalListenerError} />
               ) : null}

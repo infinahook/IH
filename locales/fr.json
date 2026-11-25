@@ -223,7 +223,25 @@
     "mcp_proposal_arguments": "Paramètres",
     "mcp_proposal_done": "Résultat de l'outil ajouté à la conversation.",
     "mcp_proposal_failed": "Échec de l'appel : {message}",
-    "mcp_proposal_dismiss": "Ignorer"
+    "mcp_proposal_dismiss": "Ignorer",
+    "tool_call_title": "Appels d'outils MCP",
+    "tool_call_hint": "Le modèle demande ces outils. Rien ne s'exécute sans votre décision ; chaque approbation est liée aux paramètres exacts et à usage unique.",
+    "tool_call_refresh": "Rafraîchir",
+    "tool_call_show": "Voir les paramètres",
+    "tool_call_hide": "Masquer les paramètres",
+    "tool_call_arguments": "Paramètres (valeurs sensibles masquées)",
+    "tool_call_result": "Résultat",
+    "tool_call_approve": "Approuver et exécuter",
+    "tool_call_deny": "Refuser",
+    "tool_call_continued": "Décision enregistrée : le modèle reprend avec le résultat.",
+    "tool_call_decided": "Décision enregistrée (statut : {status}).",
+    "tool_call_failed": "Décision impossible : {message}",
+    "tool_call_status_pending": "En attente de décision",
+    "tool_call_status_denied": "Refusé",
+    "tool_call_status_completed": "Exécuté",
+    "tool_call_status_failed": "Échec",
+    "tool_call_status_invalid": "Invalide",
+    "tool_call_status_expired": "Expiré"
   },
   "status": {
     "ready": "Prêt",
@@ -560,7 +578,9 @@
     "models_section": "Modèles ({count})",
     "model_remove_title": "Supprimer le modèle",
     "detail_empty_title": "Aucun fournisseur sélectionné",
-    "detail_empty_description": "Choisissez un fournisseur dans la liste de gauche."
+    "detail_empty_description": "Choisissez un fournisseur dans la liste de gauche.",
+    "field_supports_tools_hint": "Déclare le support du tool calling natif (famille OpenAI-compatible). Désactivé : le chat garde le protocole texte et l'approbation manuelle.",
+    "field_supports_tools_unavailable": "Non disponible pour cette famille : le support natif est annoncé tel quel."
   },
   "skills": {
     "title": "Skills",
@@ -636,7 +656,9 @@
     "server": "Serveur",
     "disconnected": "Serveur déconnecté.",
     "object_required": "Un objet JSON est attendu.",
-    "id_command_required": "Un identifiant et une commande sont obligatoires."
+    "id_command_required": "Un identifiant et une commande sont obligatoires.",
+    "enabled": "Serveur actif",
+    "enabled_hint": "Activez d'abord le serveur pour vous connecter et appeler ses outils."
   },
   "terminal": {
     "title": "Terminal",
