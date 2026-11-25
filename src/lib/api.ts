@@ -1034,6 +1034,8 @@ export const api = {
     add: (serverId: string, name: string, command: string, args: string[]) =>
       call<void>("mcp_server_add", { id: serverId, name, command, args }),
     remove: (serverId: string) => call<void>("mcp_server_remove", { id: serverId }),
+    setEnabled: (serverId: string, enabled: boolean) =>
+      call<void>("mcp_stdio_set_enabled", { id: serverId, enabled }),
     connect: (serverId: string, clientName = "IH") =>
       call<McpTool[]>("mcp_connect", { id: serverId, clientName }),
     callTool: (

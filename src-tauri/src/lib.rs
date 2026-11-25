@@ -144,6 +144,7 @@ pub fn run() {
             commands::extensions::mcp_server_remove,
             commands::extensions::mcp_connect,
             commands::extensions::mcp_call_tool,
+            commands::extensions::mcp_stdio_set_enabled,
             commands::extensions::mcp_disconnect,
             // tâches, mémoire, historique, automatisations, mises à jour
             commands::ops::tasks_list,

@@ -886,6 +886,40 @@ mod tests {
     }
 
     #[test]
+    fn les_serveurs_mcp_stdio_ne_sont_jamais_exposes_au_chat() {
+        let store = Store::open_in_memory().expect("base");
+        let project = ih_store::Project {
+            id: ProjectId::new(),
+            path: "/tmp/ih-chat-tools-test".into(),
+            name: "test".into(),
+            created_at: chrono::Utc::now(),
+            last_opened_at: chrono::Utc::now(),
+            trusted: true,
+        };
+        store.upsert_project(&project).expect("projet");
+        // Serveur MCP stdio (extension) activé : il ne doit jamais entrer dans
+        // le catalogue du chat, qui ne lit que les serveurs distants.
+        store
+            .upsert_extension(&ih_store::InstalledExtension {
+                id: "stdio-demo".into(),
+                kind: "plugin".into(),
+                name: "Stdio".into(),
+                version: "1".into(),
+                source: "stdio:demo".into(),
+                manifest: serde_json::json!({"command": "demo", "args": []}),
+                sha256: None,
+                enabled: true,
+                installed_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            })
+            .expect("extension");
+        let catalog = chat_tool_catalog_from_store(&store).expect("catalogue");
+        assert!(catalog.definitions.is_empty());
+        assert!(catalog.target("stdio-demo__echo").is_none());
+        assert!(catalog.target("echo").is_none());
+    }
+
+    #[test]
     fn decision_inconnue_est_rejetee() {
         assert!(ToolCallDecision::parse("maybe").is_err());
         assert_eq!(
