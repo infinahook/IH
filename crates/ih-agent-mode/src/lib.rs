@@ -220,6 +220,9 @@ pub fn probe_version(program: &Path) -> Option<String> {
 pub struct Sandbox {
     project_root: PathBuf,
     workdir: PathBuf,
+    /// Chemins Git attendus, calculés ici à partir du dépôt découvert par IH.
+    /// Le fichier `.git` du worktree n'est jamais consulté comme autorité.
+    git: GitMounts,
 }
 
 impl Sandbox {
@@ -229,6 +232,11 @@ impl Sandbox {
 
     pub fn project_root(&self) -> &Path {
         &self.project_root
+    }
+
+    /// Montages Git attendus (à transmettre au superviseur).
+    pub fn git(&self) -> &GitMounts {
+        &self.git
     }
 }
 
@@ -256,9 +264,27 @@ pub fn create_sandbox(project_root: &Path, base_dir: &Path, tag: &str) -> IhResu
         )));
     }
     repo.add_detached_worktree(&workdir)?;
+    // Le dépôt `.git` du projet et le nom du worktree sont connus d'IH : les
+    // montages sont calculés ici, puis vérifiés (canonicalisation + confinement
+    // + pointeur `.git` conforme). Un `.git` modifié fait échouer la création.
+    let common_dir = repo.git_common_dir()?;
+    let name = workdir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| IhError::Invalid("nom de worktree non UTF-8".into()))?;
+    let git = match GitMounts::expected(&common_dir, name, &workdir) {
+        Ok(git) => git,
+        Err(error) => {
+            // Worktree inutilisable : on le retire au lieu de laisser une
+            // session à moitié créée.
+            let _ = repo.remove_worktree(&workdir, true);
+            return Err(error);
+        }
+    };
     Ok(Sandbox {
         project_root: repo.root().to_path_buf(),
         workdir,
+        git,
     })
 }
 
@@ -273,11 +299,63 @@ pub fn remove_sandbox(sandbox: &Sandbox) -> IhResult<()> {
     Ok(())
 }
 
+/// Commande Git **durcie** pour inspecter un worktree contrôlé par un agent.
+///
+/// Le dépôt peut contenir des configurations ou attributs exécutables
+/// (`core.fsmonitor`, `core.hooksPath`, `diff.<driver>.textconv`, `diff.external`,
+/// protocoles externes) : ils sont neutralisés par configuration explicite en
+/// ligne de commande (prioritaire sur toute configuration de dépôt) et par un
+/// environnement minimal. Un agent ne peut donc pas faire exécuter un programme
+/// sur l'hôte en modifiant des fichiers Git.
+fn hardened_git(workdir: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
+        .env_clear()
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("HOME", std::env::temp_dir())
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_PAGER", "cat")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_ASKPASS", "/bin/false")
+        .env("SSH_ASKPASS", "/bin/false")
+        .arg("-C")
+        .arg(workdir)
+        .args([
+            // Neutralisation des mécanismes exécutables du dépôt.
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.pager=cat",
+            "-c",
+            "core.askPass=",
+            "-c",
+            "core.sshCommand=",
+            "-c",
+            "core.editor=/bin/false",
+            "-c",
+            "diff.external=",
+            "-c",
+            "diff.renames=false",
+            "-c",
+            "protocol.allow=never",
+            "-c",
+            "submodule.recurse=false",
+            "-c",
+            "gc.auto=0",
+            "-c",
+            "maintenance.auto=false",
+        ]);
+    command
+}
+
 /// Liste les fichiers modifiés, ajoutés ou supprimés dans le sandbox.
 pub fn changed_files(sandbox: &Sandbox) -> IhResult<Vec<String>> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(&sandbox.workdir)
+    let output = hardened_git(&sandbox.workdir)
         .args(["status", "--porcelain=v1", "-z"])
         .stdin(Stdio::null())
         .output()
@@ -637,6 +715,7 @@ mod tests {
 // worktree unique. Extrait du commanditaire Tauri pour rester testable.
 // ---------------------------------------------------------------------------
 
+use ih_agents::sandbox::GitMounts;
 use ih_agents::{AgentSupervisor, StartRequest};
 use ih_core::config::AppConfig;
 use ih_core::events::AgentState;
@@ -749,6 +828,7 @@ pub fn run_team_tasks_with_events(
             project_dir: sandbox.workdir().to_path_buf(),
             prompt,
             session_id: None,
+            git: Some(sandbox.git().clone()),
             // Confirmation : uniquement pour un membre réellement configuré au
             // niveau non isolé, et seulement parce que la course d'équipe a été
             // approuvée (acquittement explicite inclus dans l'empreinte).

@@ -25,7 +25,7 @@ use ih_core::{IhError, IhResult};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 pub use ih_core::config::SecurityLevel;
@@ -109,13 +109,16 @@ fn evaluate_engine(forced: Option<PathBuf>) -> SandboxAvailability {
 
     let version = probe_version(&path);
     match probe_functional(&path) {
-        Ok(()) => SandboxAvailability {
-            engine: "bubblewrap".into(),
-            path: Some(path.display().to_string()),
-            version,
-            functional: true,
-            error: None,
-        },
+        Ok(()) => {
+            remember_engine(&path);
+            SandboxAvailability {
+                engine: "bubblewrap".into(),
+                path: Some(path.display().to_string()),
+                version,
+                functional: true,
+                error: None,
+            }
+        }
         Err(error) => SandboxAvailability {
             engine: "bubblewrap".into(),
             path: Some(path.display().to_string()),
@@ -124,6 +127,70 @@ fn evaluate_engine(forced: Option<PathBuf>) -> SandboxAvailability {
             error: Some(error),
         },
     }
+}
+
+/// Empreinte d'identité du fichier moteur : un remplacement (réinstallation,
+/// lien substitutif) change au moins un de ces champs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EngineIdentity {
+    dev: u64,
+    ino: u64,
+    size: u64,
+    mtime_ns: i128,
+    uid: u32,
+}
+
+fn engine_identity(path: &Path) -> Option<EngineIdentity> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    let mtime = meta.modified().ok()?;
+    let mtime_ns = mtime
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i128)
+        .unwrap_or(0);
+    Some(EngineIdentity {
+        dev: meta.dev(),
+        ino: meta.ino(),
+        size: meta.size(),
+        mtime_ns,
+        uid: meta.uid(),
+    })
+}
+
+/// Dernier moteur effectivement validé (chemin + identité).
+fn verified_engine() -> &'static Mutex<Option<(PathBuf, EngineIdentity)>> {
+    static VERIFIED: OnceLock<Mutex<Option<(PathBuf, EngineIdentity)>>> = OnceLock::new();
+    VERIFIED.get_or_init(|| Mutex::new(None))
+}
+
+fn remember_engine(path: &Path) {
+    if let Some(identity) = engine_identity(path) {
+        if let Ok(mut guard) = verified_engine().lock() {
+            *guard = Some((path.to_path_buf(), identity));
+        }
+    }
+}
+
+/// **Revalidation au lancement** : si l'identité du fichier moteur a changé
+/// depuis la dernière validation, la sonde (propriété + positive + négative)
+/// est rejouée. Un moteur modifié n'est donc jamais utilisé sans contrôle.
+fn revalidate_engine(path: &Path) -> Result<(), String> {
+    let identity = engine_identity(path)
+        .ok_or_else(|| format!("moteur de sandbox inaccessible : {}", path.display()))?;
+    let unchanged = verified_engine()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .is_some_and(|(known_path, known_identity)| {
+            known_path == path && known_identity == identity
+        });
+    if unchanged {
+        return Ok(());
+    }
+    engine_trusted(path)?;
+    probe_functional(path)?;
+    remember_engine(path);
+    Ok(())
 }
 
 /// Un moteur de sandbox doit être un fichier stable : jamais un lien ou un
@@ -438,6 +505,173 @@ fn staging_for(kind: &AgentKind, private_home: &Path) -> Staging {
     staging
 }
 
+/// Montages Git d'un worktree, **calculés et conservés par IH** à la création
+/// du worktree.
+///
+/// Le fichier `.git` d'un worktree est inscriptible par l'agent : son contenu ne
+/// fait donc jamais autorité. Ces chemins viennent du dépôt découvert par IH et
+/// sont validés (canonicalisation + confinement) avant d'être transformés en
+/// arguments de bubblewrap.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitMounts {
+    /// `<dépôt>/.git/worktrees/<nom>` — métadonnées propres au worktree.
+    pub worktree_gitdir: PathBuf,
+    /// `<dépôt>/.git` — répertoire Git commun (objets, références, config).
+    pub common_dir: PathBuf,
+}
+
+impl GitMounts {
+    /// Construit les montages attendus pour un worktree donné.
+    ///
+    /// Refuse tout chemin qui n'est pas exactement `<commondir>/worktrees/<nom>`
+    /// ou qui n'est pas confiné au dépôt (lien symbolique, `..`, répertoire
+    /// inexistant, répertoire Git hors `.git`).
+    pub fn expected(common_dir: &Path, worktree_name: &str, workdir: &Path) -> IhResult<Self> {
+        validate_path_component(worktree_name)?;
+        let common = checked_dir(common_dir, "répertoire Git commun")?;
+        if common.file_name().and_then(|name| name.to_str()) != Some(".git") {
+            return Err(IhError::Agent(format!(
+                "répertoire Git commun inattendu (un dossier `.git` est attendu) : {}",
+                common.display()
+            )));
+        }
+        let gitdir = common.join("worktrees").join(worktree_name);
+        let gitdir = checked_dir(&gitdir, "répertoire Git du worktree")?;
+        // Confinement : le gitdir doit être strictement sous le répertoire commun.
+        if !gitdir.starts_with(&common) {
+            return Err(IhError::Agent(format!(
+                "répertoire Git du worktree hors du dépôt : {}",
+                gitdir.display()
+            )));
+        }
+        // Le `.git` du worktree doit désigner ce gitdir, sans lien symbolique.
+        verify_worktree_pointer(workdir, &gitdir)?;
+        Ok(Self {
+            worktree_gitdir: gitdir,
+            common_dir: common,
+        })
+    }
+
+    /// Revérifie l'état réel du worktree avant un lancement : `.git` régulier,
+    /// contenu identique au chemin attendu, `commondir` identique au répertoire
+    /// commun attendu. Toute divergence refuse le lancement.
+    pub fn verify(&self, workdir: &Path) -> IhResult<()> {
+        verify_worktree_pointer(workdir, &self.worktree_gitdir)?;
+        let common = checked_dir(&self.common_dir, "répertoire Git commun")?;
+        if common != self.common_dir {
+            return Err(IhError::Agent(format!(
+                "répertoire Git commun modifié : {}",
+                self.common_dir.display()
+            )));
+        }
+        let commondir_file = self.worktree_gitdir.join("commondir");
+        let Ok(raw) = std::fs::read_to_string(&commondir_file) else {
+            return Err(IhError::Agent(format!(
+                "`commondir` illisible dans {} : montage Git refusé",
+                self.worktree_gitdir.display()
+            )));
+        };
+        let candidate = self.worktree_gitdir.join(raw.trim());
+        let candidate = std::fs::canonicalize(&candidate).map_err(|error| {
+            IhError::Agent(format!(
+                "`commondir` pointe vers un chemin inexistant ({}) : {error}",
+                candidate.display()
+            ))
+        })?;
+        if candidate != self.common_dir {
+            return Err(IhError::Agent(format!(
+                "`commondir` pointe hors du dépôt attendu ({} ≠ {}) : montage Git refusé",
+                candidate.display(),
+                self.common_dir.display()
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Vérifie que le `.git` du worktree est un **fichier régulier** (jamais un lien
+/// symbolique) désignant exactement le gitdir attendu.
+fn verify_worktree_pointer(workdir: &Path, expected: &Path) -> IhResult<()> {
+    let pointer = workdir.join(".git");
+    let meta = std::fs::symlink_metadata(&pointer).map_err(|error| {
+        IhError::Agent(format!(
+            "fichier `.git` absent du worktree {} : {error}",
+            pointer.display()
+        ))
+    })?;
+    if !meta.file_type().is_file() {
+        return Err(IhError::Agent(format!(
+            "`.git` du worktree n'est pas un fichier régulier (lien symbolique ou dossier) : {}",
+            pointer.display()
+        )));
+    }
+    let content = std::fs::read_to_string(&pointer)
+        .map_err(|error| IhError::Agent(format!("`.git` illisible : {error}")))?;
+    let declared = content.trim();
+    let Some(rest) = declared.strip_prefix("gitdir:") else {
+        return Err(IhError::Agent(format!(
+            "`.git` malformé (préfixe `gitdir:` attendu) : {declared:.120}"
+        )));
+    };
+    let declared = PathBuf::from(rest.trim());
+    if !declared.is_absolute() {
+        return Err(IhError::Agent(format!(
+            "`.git` désigne un chemin relatif : {}",
+            declared.display()
+        )));
+    }
+    let declared = std::fs::canonicalize(&declared).map_err(|error| {
+        IhError::Agent(format!(
+            "`.git` désigne un chemin inexistant ({}) : {error}",
+            declared.display()
+        ))
+    })?;
+    if declared != expected {
+        return Err(IhError::Agent(format!(
+            "`.git` du worktree modifié : {} au lieu de {} — lancement refusé",
+            declared.display(),
+            expected.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Répertoire existant, non symbolique, retourné canonicalisé.
+fn checked_dir(path: &Path, label: &str) -> IhResult<PathBuf> {
+    let meta = std::fs::symlink_metadata(path).map_err(|error| {
+        IhError::Agent(format!(
+            "{label} introuvable ({}) : {error}",
+            path.display()
+        ))
+    })?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err(IhError::Agent(format!(
+            "{label} n'est pas un répertoire réel : {}",
+            path.display()
+        )));
+    }
+    std::fs::canonicalize(path)
+        .map_err(|error| IhError::Agent(format!("{label} non canonicalisable : {error}")))
+}
+
+/// Identifiant utilisé comme composant de chemin.
+fn validate_path_component(value: &str) -> IhResult<()> {
+    let valid = !value.is_empty()
+        && value.len() <= 128
+        && value != "."
+        && value != ".."
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+    if valid {
+        Ok(())
+    } else {
+        Err(IhError::Invalid(format!(
+            "composant de chemin invalide : {value}"
+        )))
+    }
+}
+
 /// Dossier personnel privé d'une session, supprimé **automatiquement** à sa
 /// destruction (succès, erreur, échec de lancement, annulation, panique).
 ///
@@ -445,32 +679,149 @@ fn staging_for(kind: &AgentKind, private_home: &Path) -> Staging {
 /// garde suffit à supprimer les copies d'identifiants.
 pub struct PrivateHome {
     path: PathBuf,
+    /// Verrou système (`flock`) tenu pendant toute la vie de la session : un
+    /// autre processus IH ne peut ni le prendre ni supprimer le dossier. Le
+    /// champ n'est pas lu : sa seule existence maintient le verrou jusqu'au
+    /// `Drop`.
+    #[allow(dead_code)]
+    lock: Option<std::fs::File>,
 }
 
+/// Fichier verrouillé : sa présence et le verrou qu'il porte déterminent si le
+/// dossier est encore utilisé (insensible à la réutilisation de PID).
+const LOCK_FILE: &str = ".ih-lock";
+
 impl PrivateHome {
-    /// Crée le dossier privé (permissions `0700`) marqué par son propriétaire.
+    /// Crée le dossier privé (permissions `0700`), le verrouille et y inscrit
+    /// son propriétaire. Toute étape qui échoue supprime le dossier : aucun
+    /// dossier partiellement initialisé ne subsiste.
     fn create(session_tag: &str) -> IhResult<Self> {
         validate_session_tag(session_tag)?;
         let path = std::env::temp_dir().join(format!("ih-agent-home-{session_tag}"));
         if path.exists() {
             let _ = std::fs::remove_dir_all(&path);
         }
-        std::fs::create_dir_all(&path)
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder
+            .recursive(true)
+            .create(&path)
             .map_err(|error| IhError::Internal(format!("dossier privé de l'agent : {error}")))?;
+        match Self::open(path.clone()) {
+            Ok(home) => Ok(home),
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&path);
+                Err(error)
+            }
+        }
+    }
+
+    /// Initialise un dossier déjà créé : verrou exclusif puis marqueur de
+    /// propriétaire. Échec ⇒ erreur (le dossier est nettoyé par l'appelant).
+    fn open(path: PathBuf) -> IhResult<Self> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(path.join(LOCK_FILE))
+            .map_err(|error| IhError::Internal(format!("verrou du dossier privé : {error}")))?;
+        // Verrou exclusif non bloquant : nous sommes le seul propriétaire.
+        let acquired = unsafe {
+            libc::flock(
+                std::os::unix::io::AsRawFd::as_raw_fd(&lock),
+                libc::LOCK_EX | libc::LOCK_NB,
+            )
+        };
+        if acquired != 0 {
+            return Err(IhError::Internal(
+                "dossier privé déjà utilisé (verrou indisponible)".into(),
+            ));
+        }
+        // Marqueur obligatoire : sans lui, aucune session ne peut démarrer.
+        let owner = format!("{} {}", std::process::id(), process_start_time());
+        std::fs::write(path.join(OWNER_FILE), owner)
+            .map_err(|error| IhError::Internal(format!("marqueur de propriétaire : {error}")))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700));
+            let mode = std::fs::metadata(&path)
+                .map(|meta| meta.permissions().mode() & 0o777)
+                .unwrap_or(0);
+            if mode != 0o700 {
+                return Err(IhError::Internal(format!(
+                    "dossier privé aux permissions inattendues ({mode:o} au lieu de 700)"
+                )));
+            }
         }
-        // Marqueur de vie : permet à un futur démarrage d'IH de distinguer un
-        // dossier orphelin d'un dossier encore utilisé.
-        let _ = std::fs::write(path.join(OWNER_FILE), std::process::id().to_string());
-        Ok(Self { path })
+        Ok(Self {
+            path,
+            lock: Some(lock),
+        })
     }
 
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+/// Instant de démarrage du processus courant (champ 22 de `/proc/<pid>/stat`).
+/// Combiné au PID, il rend la détection de vivacité insensible à la
+/// réutilisation de PID.
+fn process_start_time() -> u64 {
+    start_time_of(std::process::id()).unwrap_or(0)
+}
+
+fn start_time_of(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Le nom de commande peut contenir des espaces et des parenthèses : on
+    // repart de la dernière parenthèse fermante.
+    let rest = stat.rsplit_once(')')?.1;
+    rest.split_whitespace().nth(19)?.parse().ok()
+}
+
+/// Vrai si le dossier est réellement utilisé : verrou tenu, ou (à défaut de
+/// verrou) couple PID + instant de démarrage identique.
+fn private_home_is_alive(path: &Path) -> bool {
+    if let Ok(file) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path.join(LOCK_FILE))
+    {
+        let taken = unsafe {
+            libc::flock(
+                std::os::unix::io::AsRawFd::as_raw_fd(&file),
+                libc::LOCK_EX | libc::LOCK_NB,
+            )
+        };
+        if taken == 0 {
+            // Verrou libre : le dossier n'est utilisé par personne.
+            unsafe {
+                libc::flock(std::os::unix::io::AsRawFd::as_raw_fd(&file), libc::LOCK_UN);
+            }
+            return false;
+        }
+        return true;
+    }
+    // Pas de verrou (ancien format ou fichier inaccessible) : repli sur le
+    // marqueur PID + instant de démarrage.
+    let Ok(owner) = std::fs::read_to_string(path.join(OWNER_FILE)) else {
+        return true; // impossible de conclure : on ne supprime pas
+    };
+    let mut parts = owner.split_whitespace();
+    let (Some(pid), Some(start)) = (parts.next(), parts.next()) else {
+        return true;
+    };
+    let (Ok(pid), Ok(start)) = (pid.parse::<u32>(), start.parse::<u64>()) else {
+        return true;
+    };
+    start_time_of(pid) == Some(start) && start != 0
 }
 
 impl Drop for PrivateHome {
@@ -499,20 +850,16 @@ pub fn cleanup_orphan_homes() -> usize {
         if !name.starts_with("ih-agent-home-") || !path.is_dir() {
             continue;
         }
-        let owner = std::fs::read_to_string(path.join(OWNER_FILE)).ok();
-        let alive = owner
-            .as_deref()
-            .and_then(|pid| pid.trim().parse::<u32>().ok())
-            .is_some_and(pid_alive);
-        if !alive && std::fs::remove_dir_all(&path).is_ok() {
+        // Un dossier encore verrouillé (donc utilisé) n'est JAMAIS supprimé ; à
+        // défaut de verrou, le couple PID + instant de démarrage tranche.
+        if private_home_is_alive(&path) {
+            continue;
+        }
+        if std::fs::remove_dir_all(&path).is_ok() {
             removed += 1;
         }
     }
     removed
-}
-
-fn pid_alive(pid: u32) -> bool {
-    Path::new("/proc").join(pid.to_string()).exists()
 }
 
 /// Un identifiant de session sert de composant de chemin : alphabet strict,
@@ -555,11 +902,16 @@ pub(crate) fn check_engine(report: &SandboxAvailability) -> IhResult<PathBuf> {
                 .unwrap_or_else(|| "raison inconnue".into())
         )));
     }
-    report
+    let path = report
         .path
         .as_deref()
         .map(PathBuf::from)
-        .ok_or_else(|| IhError::Agent("chemin de bubblewrap introuvable".into()))
+        .ok_or_else(|| IhError::Agent("chemin de bubblewrap introuvable".into()))?;
+    // NV6 : le moteur est revérifié à chaque lancement ; un binaire remplacé
+    // depuis la première sonde est re-sondé (propriété + isolation réelle).
+    revalidate_engine(&path)
+        .map_err(|error| IhError::Agent(format!("sandbox refusée : {error}")))?;
+    Ok(path)
 }
 
 /// Construit la commande sandboxée pour un agent.
@@ -567,6 +919,7 @@ pub(crate) fn check_engine(report: &SandboxAvailability) -> IhResult<PathBuf> {
 /// `workdir` est monté en lecture-écriture ; tout le reste du système visible
 /// est en lecture seule (`/usr`, `/etc`, `/opt/apps`), `/tmp` est privé, le
 /// dossier personnel de l'utilisateur n'est jamais monté.
+#[allow(clippy::too_many_arguments)]
 pub fn sandboxed_command(
     level: SecurityLevel,
     kind: &AgentKind,
@@ -575,6 +928,7 @@ pub fn sandboxed_command(
     workdir: &Path,
     extra_env: &[(String, String)],
     session_tag: &str,
+    git: Option<&GitMounts>,
 ) -> IhResult<SandboxCommand> {
     if level == SecurityLevel::None {
         return Err(IhError::Invalid(
@@ -685,17 +1039,24 @@ pub fn sandboxed_command(
         "/home/agent".into(),
     ]);
 
-    // Git dans le worktree : le fichier `.git` du worktree pointe vers
-    // `<dépôt>/.git/worktrees/<nom>`, absent de la sandbox. Ce dossier de
-    // métadonnées est monté en écriture (index, HEAD propres au worktree) et le
-    // répertoire Git commun en LECTURE SEULE : le dépôt principal n'est jamais
-    // inscriptible, et la revue des diffs reste faite par IH sur l'hôte.
-    for (source, target, writable) in git_mounts(workdir) {
-        bwrargs.extend([
-            if writable { "--bind" } else { "--ro-bind" }.into(),
-            source.display().to_string(),
-            target,
-        ]);
+    // Git dans le worktree : les chemins viennent d'IH (`GitMounts`), jamais du
+    // fichier `.git` du worktree (inscriptible par l'agent). Le répertoire Git
+    // commun ET les métadonnées du worktree sont montés en LECTURE SEULE :
+    // l'index de la session vit dans le dossier privé (`GIT_INDEX_FILE`), donc
+    // le dépôt principal n'est jamais inscriptible et rien de contrôlé par
+    // l'agent ne devient un montage.
+    let mut git_env: Vec<(String, String)> = Vec::new();
+    if let Some(git) = git {
+        git.verify(workdir)?;
+        for source in [&git.common_dir, &git.worktree_gitdir] {
+            bwrargs.extend([
+                "--ro-bind".into(),
+                source.display().to_string(),
+                source.display().to_string(),
+            ]);
+        }
+        git_env.push(("GIT_INDEX_FILE".into(), "/home/agent/.git-index".into()));
+        git_env.push(("GIT_OPTIONAL_LOCKS".into(), "0".into()));
     }
 
     for (source, target) in staging.binds.iter().chain(node_grant.iter()) {
@@ -724,6 +1085,7 @@ pub fn sandboxed_command(
         ("TERM".into(), "dumb".into()),
     ];
     env.extend(staging.env.iter().cloned());
+    env.extend(git_env);
     // Variables explicitement déclarées pour l'agent (jamais héritées).
     env.extend(extra_env.iter().cloned());
     for (key, value) in &env {
@@ -812,6 +1174,26 @@ fn executable_grant_roots(
     let Some(root) = root else {
         return Ok(Vec::new());
     };
+    // NV5 : la racine est résolue puis revalidée sur son chemin canonique, et un
+    // répertoire symbolique est refusé (le montage suivrait sa cible).
+    let meta = std::fs::symlink_metadata(&root).map_err(|error| {
+        IhError::Agent(format!(
+            "répertoire de l'exécutable introuvable ({}) : {error}",
+            root.display()
+        ))
+    })?;
+    if meta.file_type().is_symlink() {
+        return Err(IhError::Agent(format!(
+            "isolation impossible : le répertoire de l'exécutable est un lien symbolique ({})",
+            root.display()
+        )));
+    }
+    let root = std::fs::canonicalize(&root).map_err(|error| {
+        IhError::Agent(format!(
+            "répertoire de l'exécutable non canonicalisable ({}) : {error}",
+            root.display()
+        ))
+    })?;
     if let Some(reason) = forbidden_grant_reason(&root, home_dir().as_deref()) {
         return Err(IhError::Agent(format!(
             "isolation impossible pour l'exécutable {} : {reason}. Déplacez l'exécutable dans un sous-dossier dédié (par exemple ~/.local/bin) ou choisissez un agent installé par paquet.",
@@ -873,43 +1255,6 @@ fn forbidden_grant_reason(root: &Path, home: Option<&Path>) -> Option<String> {
         ));
     }
     None
-}
-
-/// Montages nécessaires pour que Git fonctionne dans un worktree sandboxé.
-///
-/// Retourne `(source hôte, destination identique, inscriptible)`. Le worktree
-/// reste le seul dossier inscriptible du projet ; le dépôt principal n'est
-/// exposé qu'en lecture (objets, références).
-fn git_mounts(workdir: &Path) -> Vec<(PathBuf, String, bool)> {
-    let pointer = workdir.join(".git");
-    if !pointer.is_file() {
-        return Vec::new();
-    }
-    let Ok(content) = std::fs::read_to_string(&pointer) else {
-        return Vec::new();
-    };
-    let Some(rest) = content.trim().strip_prefix("gitdir:") else {
-        return Vec::new();
-    };
-    let gitdir = PathBuf::from(rest.trim());
-    if !gitdir.is_absolute() || !gitdir.is_dir() {
-        return Vec::new();
-    }
-
-    let mut mounts: Vec<(PathBuf, String, bool)> = Vec::new();
-    // Le répertoire Git commun (dépôt principal) est monté en premier et en
-    // LECTURE SEULE : objets, références et configuration restent intacts.
-    if let Ok(common) = std::fs::read_to_string(gitdir.join("commondir")) {
-        let common = gitdir.join(common.trim());
-        let common = std::fs::canonicalize(&common).unwrap_or(common);
-        if common.is_dir() && common != gitdir {
-            mounts.push((common.clone(), common.display().to_string(), false));
-        }
-    }
-    // Puis le dossier de métadonnées DU WORKTREE, en écriture : appliqué après
-    // le dépôt commun, il reste gagnant (index et HEAD propres à la session).
-    mounts.push((gitdir.clone(), gitdir.display().to_string(), true));
-    mounts
 }
 
 /// Résumé lisible pour l'interface et les approbations.
@@ -984,6 +1329,7 @@ mod tests {
             Path::new("/tmp"),
             &[],
             "test-none",
+            None,
         )
         .err()
         .expect("le niveau non isolé ne doit pas passer par la sandbox");
@@ -1006,6 +1352,7 @@ mod tests {
             Path::new("/tmp"),
             &[],
             "test-unavailable",
+            None,
         )
         .is_err());
     }
@@ -1030,6 +1377,7 @@ mod tests {
             Path::new("/tmp"),
             &[],
             "unavailable-test",
+            None,
         )
         .is_err());
     }
@@ -1143,17 +1491,47 @@ mod tests {
         );
     }
 
-    /// Le nettoyage des orphelins épargne les dossiers d'instances vivantes.
+    /// Le nettoyage des orphelins épargne les dossiers d'instances vivantes,
+    /// y compris quand le marqueur de propriétaire est périmé (PID réutilisé) :
+    /// le verrou fait foi.
     #[test]
     fn le_nettoyage_des_orphelins_epargne_les_instances_vivantes() {
         let live = PrivateHome::create(&format!("test-vivant-{}", std::process::id()))
             .expect("dossier vivant");
+        // Dossier « mort » : PID inexistant + instant de démarrage quelconque.
         let dead_path =
             std::env::temp_dir().join(format!("ih-agent-home-test-mort-{}", std::process::id()));
         std::fs::create_dir_all(&dead_path).expect("dossier mort");
-        std::fs::write(dead_path.join(OWNER_FILE), "4294967294").expect("pid mort");
-        // Le nettoyage peut aussi être déclenché par un superviseur créé dans un
-        // test parallèle : on vérifie l'effet, pas le compteur.
+        std::fs::write(dead_path.join(OWNER_FILE), "4294967294 1").expect("pid mort");
+
+        // Dossier vivant mais marqueur périmé : le verrou est tenu.
+        let locked_path =
+            std::env::temp_dir().join(format!("ih-agent-home-test-verrou-{}", std::process::id()));
+        std::fs::create_dir_all(&locked_path).expect("dossier verrouillé");
+        std::fs::write(locked_path.join(OWNER_FILE), "4294967294 1").expect("marqueur périmé");
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(locked_path.join(LOCK_FILE))
+            .expect("verrou");
+        assert_eq!(
+            unsafe {
+                libc::flock(
+                    std::os::unix::io::AsRawFd::as_raw_fd(&lock),
+                    libc::LOCK_EX | libc::LOCK_NB,
+                )
+            },
+            0,
+            "verrou de test"
+        );
+
+        // Dossier illisible (propriétaire absent) : conservé par prudence.
+        let unknown_path =
+            std::env::temp_dir().join(format!("ih-agent-home-test-inconnu-{}", std::process::id()));
+        std::fs::create_dir_all(&unknown_path).expect("dossier inconnu");
+
         cleanup_orphan_homes();
         assert!(
             !dead_path.exists(),
@@ -1163,6 +1541,39 @@ mod tests {
             live.path().exists(),
             "le dossier d'une instance vivante est conservé"
         );
+        assert!(
+            locked_path.exists(),
+            "un dossier verrouillé n'est jamais supprimé, même avec un PID périmé"
+        );
+        assert!(
+            unknown_path.exists(),
+            "sans marqueur exploitable, le dossier est conservé (jamais de suppression à l'aveugle)"
+        );
+
+        drop(lock);
+        let _ = std::fs::remove_dir_all(&locked_path);
+        let _ = std::fs::remove_dir_all(&unknown_path);
+    }
+
+    /// Le marqueur de propriétaire est obligatoire : si son écriture échoue, la
+    /// création échoue et le dossier partiel est supprimé.
+    #[test]
+    fn lechec_decriture_du_marqueur_fait_echouer_la_creation() {
+        let path = std::env::temp_dir().join(format!(
+            "ih-agent-home-test-marqueur-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).expect("dossier");
+        // `OWNER_FILE` est un répertoire : l'écriture du marqueur échoue.
+        std::fs::create_dir_all(path.join(OWNER_FILE)).expect("marqueur bloquant");
+        let result = PrivateHome::open(path.clone());
+        assert!(
+            result.is_err(),
+            "sans marqueur, aucune session ne doit démarrer"
+        );
+        let _ = std::fs::remove_dir_all(&path);
+        assert!(!path.exists(), "aucun résidu après échec");
     }
 
     /// Un identifiant de session ne peut pas sortir du répertoire temporaire.

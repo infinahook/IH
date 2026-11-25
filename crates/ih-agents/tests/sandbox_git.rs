@@ -43,7 +43,7 @@ fn unique(tag: &str) -> PathBuf {
     path
 }
 
-fn run_sandbox(workdir: &Path, script: &str) -> (bool, String, String) {
+fn run_sandbox(workdir: &Path, git: &sandbox::GitMounts, script: &str) -> (bool, String, String) {
     let plan = sandbox::sandboxed_command(
         SecurityLevel::Isolated,
         &AgentKind::Custom,
@@ -52,6 +52,7 @@ fn run_sandbox(workdir: &Path, script: &str) -> (bool, String, String) {
         workdir,
         &[],
         "git-test",
+        Some(git),
     )
     .expect("plan shell");
     let output = Command::new(&plan.program)
@@ -77,7 +78,8 @@ fn git_status_et_diff_fonctionnent_dans_le_worktree_sans_toucher_le_depot() {
         return;
     }
 
-    let base = unique("repo");
+    let root = unique("repo");
+    let base = root.clone();
     let repo = base.join("depot");
     let worktree = base.join("wt");
     std::fs::create_dir_all(&repo).unwrap();
@@ -97,6 +99,9 @@ fn git_status_et_diff_fonctionnent_dans_le_worktree_sans_toucher_le_depot() {
             worktree.to_str().unwrap(),
         ],
     );
+    let common = std::fs::canonicalize(repo.join(".git")).unwrap();
+    let git = sandbox::GitMounts::expected(&common, "wt", &worktree).expect("montages Git IH");
+    let gitdir = git.worktree_gitdir.clone();
     // Le canari de protection : une écriture du dépôt doit échouer.
     let config_path = repo.join(".git/config");
     let before = std::fs::read_to_string(&config_path).unwrap();
@@ -105,14 +110,16 @@ fn git_status_et_diff_fonctionnent_dans_le_worktree_sans_toucher_le_depot() {
         "cd {wt} && \
          echo 'modification' >> README.md && echo MODIFIED=ok; \
          echo STATUT=$(git status --porcelain | head -2); \
-         echo STATUT_CODE=$?; \
          echo DIFF=$(git diff --stat | tail -1); \
+         echo INDEX=$(printenv GIT_INDEX_FILE); \
          echo PIRATE=1 >> {config} 2>&1 && echo DEPOT_WRITE=ok || echo DEPOT_WRITE=refused; \
-         echo ADDED=$(git status --porcelain | wc -l)",
+         echo PIRATE=1 >> {gitdir}/HEAD 2>&1 && echo GITDIR_WRITE=ok || echo GITDIR_WRITE=refused; \
+         echo PIRATE=1 >> {gitdir}/commondir 2>&1 && echo COMMONDIR_WRITE=ok || echo COMMONDIR_WRITE=refused",
         wt = worktree.display(),
-        config = config_path.display()
+        config = config_path.display(),
+        gitdir = gitdir.display()
     );
-    let (success, stdout, stderr) = run_sandbox(&worktree, &script);
+    let (success, stdout, stderr) = run_sandbox(&worktree, &git, &script);
     println!("stdout={stdout}\nstderr={stderr}");
     assert!(success, "sandbox: {stderr}");
     assert!(stdout.contains("MODIFIED=ok"), "écriture dans le worktree");
@@ -121,23 +128,38 @@ fn git_status_et_diff_fonctionnent_dans_le_worktree_sans_toucher_le_depot() {
         "git status doit voir la modification : {stdout}"
     );
     assert!(
-        stdout.contains("README.md") && stdout.contains("DIFF="),
+        stdout.contains("DIFF="),
         "git diff doit fonctionner : {stdout}"
     );
     assert!(
-        stdout.contains("DEPOT_WRITE=refused"),
-        "le dépôt principal ne doit pas être inscriptible : {stdout}"
+        stdout.contains("INDEX=/home/agent/.git-index"),
+        "l'index de session vit dans le home privé : {stdout}"
     );
-    // Le dépôt est réellement intact.
+    // Le dépôt et les métadonnées Git sont en lecture seule dans la sandbox.
+    assert!(stdout.contains("DEPOT_WRITE=refused"), "{stdout}");
+    assert!(stdout.contains("GITDIR_WRITE=refused"), "{stdout}");
+    assert!(stdout.contains("COMMONDIR_WRITE=refused"), "{stdout}");
     assert_eq!(
         std::fs::read_to_string(&config_path).unwrap(),
         before,
         "le .git/config du dépôt a été modifié"
     );
 
+    // Un `.git` empoisonné APRÈS la session ne produit aucun montage : la
+    // construction suivante est refusée (NV1).
+    std::fs::write(
+        worktree.join(".git"),
+        format!("gitdir: {}\n", base.join("hors-depot").display()),
+    )
+    .unwrap();
+    assert!(
+        git.verify(&worktree).is_err(),
+        "`.git` détourné doit être refusé"
+    );
+
     let _ = Command::new("git")
         .args(["worktree", "remove", "--force", worktree.to_str().unwrap()])
         .current_dir(&repo)
         .status();
-    let _ = std::fs::remove_dir_all(&base);
+    let _ = std::fs::remove_dir_all(&root);
 }

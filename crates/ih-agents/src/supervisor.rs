@@ -29,6 +29,9 @@ pub struct StartRequest {
     /// Confirmation explicite pour un agent configuré en niveau non isolé.
     /// Sans elle, un agent non sandboxé est refusé (aucun repli silencieux).
     pub confirm_unsandboxed: bool,
+    /// Montages Git attendus du worktree, **calculés par IH** à sa création.
+    /// Jamais déduits du fichier `.git` (inscriptible par l'agent).
+    pub git: Option<sandbox::GitMounts>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -202,6 +205,7 @@ impl AgentSupervisor {
                 &request.project_dir,
                 &declared_env,
                 &session_id,
+                request.git.as_ref(),
             )?)
         } else {
             None
@@ -639,6 +643,7 @@ mod tests {
                 prompt: "salut".to_string(),
                 session_id: None,
                 confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         let state = supervisor.wait(&id, Duration::from_secs(5)).unwrap();
@@ -677,6 +682,7 @@ mod tests {
                 prompt: "x".to_string(),
                 session_id: None,
                 confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         assert_eq!(
@@ -707,6 +713,7 @@ mod tests {
                 prompt: "x".to_string(),
                 session_id: None,
                 confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         std::thread::sleep(Duration::from_millis(200));
@@ -745,6 +752,7 @@ mod tests {
                 prompt: "x".to_string(),
                 session_id: None,
                 confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         let _ = supervisor.wait(&id, Duration::from_secs(5));
@@ -774,6 +782,7 @@ mod tests {
                 prompt: "x".to_string(),
                 session_id: None,
                 confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         let second = supervisor.start(StartRequest {
@@ -782,6 +791,7 @@ mod tests {
             prompt: "y".to_string(),
             session_id: None,
             confirm_unsandboxed: false,
+            git: None,
         });
         assert!(matches!(second, Err(IhError::Limit(_))));
         supervisor.cancel(&first).ok();
@@ -819,6 +829,7 @@ mod tests {
                 prompt: "x".to_string(),
                 session_id: Some(session),
                 confirm_unsandboxed: false,
+                git: None,
             })
             .expect("lancement");
         let state = supervisor.wait(&id, Duration::from_secs(10)).unwrap();
@@ -844,6 +855,7 @@ mod tests {
                 prompt: "x".to_string(),
                 session_id: None,
                 confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap_err();
         assert!(err.to_string().contains("introuvable"));
@@ -856,6 +868,7 @@ mod tests {
                 prompt: "   ".to_string(),
                 session_id: None,
                 confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap_err();
         assert!(matches!(err, IhError::Invalid(_)));
@@ -883,6 +896,7 @@ mod tests {
                 prompt: "x".to_string(),
                 session_id: None,
                 confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         let _ = supervisor.wait(&id, Duration::from_secs(10));
@@ -917,6 +931,7 @@ mod tests {
                 prompt: "x".to_string(),
                 session_id: None,
                 confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         assert_eq!(
