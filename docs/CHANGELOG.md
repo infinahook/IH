@@ -1,5 +1,12 @@
 # Journal des versions
 
+## 0.6.5 — Nouveau logo (25/11/2026)
+
+### Modifié
+- **Logo de l'application** : icônes système et marque de l'interface
+  remplacées par le nouveau logo (emblème sur tuile blanche), recadrées en
+  carré depuis le fichier fourni (1024×1024).
+
 ## 0.6.4 — Agents CLI (Kilo, DSH CLI, Goose), sandbox système et corrections d'audit (25/11/2026)
 
 ### Ajouté
