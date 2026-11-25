@@ -1,5 +1,40 @@
 # Journal des versions
 
+## 0.6.3 — Cohérence visuelle de l'interface
+
+### Corrigé
+- **Sélecteurs Fournisseur / Modèle** : les menus déroulants étaient rendus par
+  le thème GTK natif (fond `#343434`, hauteur et padding imposés), donc
+  désalignés des champs, du badge « Prêt » et du bouton d'options. Ils sont
+  désormais dessinés par le design system (`appearance: none`, chevron CSS,
+  32 px, rayon 8), avec les mêmes états de focus que les autres champs.
+- **Grille de mise en page** : jetons d'espacement 8 px (`--space-*`), hauteurs
+  de contrôles (32 / 24 px) et rayons (8 px contrôles, 12 px cartes) pour un
+  rendu homogène d'une page à l'autre.
+- **Menu latéral** : largeur 240 px (208/192 px sous 1040/960), espacements
+  verticaux réguliers, entrées de navigation de 36 px.
+- **Barre supérieure** : hauteur 64 px, fil d'Ariane lisible, sélecteur « Projet
+  courant » de 32 px, bascule FR/EN de 32 px, icônes d'action 32×32 avec zone
+  cliquable cohérente.
+- **En-tête de page** : marges et espacements du titre, du sous-titre et des
+  actions alignés sur la grille.
+- **Onglets Chat / Agent et « Nouvelle conversation »** : hauteurs et
+  espacements identiques (32 px, 8 px d'écart).
+- **Barre Fournisseur / Modèle** : une rangée de 48 px, contrôles de 32 px
+  alignés, badge « Prêt » et bouton de réglages alignés, gap de 8 px, plus
+  aucun chevauchement.
+- **Zone centrale et composeur** : messages espacés de 12 px, texte de 13 px /
+  1.6, composeur de 12/16 px de padding, saisie de 72 px, rangée
+  Contexte · Outils MCP · compteur · Envoyer alignée sur 32 px.
+- **Composants partagés** (boutons, champs, badges, rayons, focus) harmonisés,
+  y compris aux largeurs réduites.
+
+### Vérifié
+- 182 tests frontend, `tsc --noEmit` et build de production verts ; captures aux
+  résolutions 1366×768, 1440×920 et 1920×1080 ; saisie testée dans le
+  composeur ; aucun débordement horizontal.
+- Aucune modification de fonctionnalité, de logique métier, d'IPC ni de données.
+
 ## 0.6.2 — Tool calling MCP natif dans Chat
 
 ### Ajouté
