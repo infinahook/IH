@@ -302,13 +302,21 @@ a {
   width: 38px;
   height: 38px;
   border-radius: 11px;
-  background: linear-gradient(135deg, var(--accent-strong), #68c99a);
+  background: #ffffff;
   color: #101810;
   font-weight: 900;
   display: grid;
   place-items: center;
   letter-spacing: -1px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
 }
 
 .brand strong {
