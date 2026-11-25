@@ -145,11 +145,12 @@ pub fn agent_session_request_approval(
             autonomy.join(" ")
         ));
     }
-    let request = state.approvals.ask(
+    let request = state.approvals.ask_with_fingerprint(
         AGENT_CATEGORY,
         &format!("Lancer {} sur : {}", adapter.label, truncate(&task, 120)),
         &detail,
         RiskLevel::High,
+        Some(fingerprint.clone()),
     )?;
     Ok(AgentApprovalView {
         approval_id: request.id.into_string(),
@@ -219,16 +220,11 @@ pub fn agent_session_start(
         &root,
         &task,
     );
-    let pending = state
+    // NV9 : comparaison du champ d'empreinte dédié (jamais une recherche dans
+    // le détail) ; la consommation vérifie aussi l'expiration et l'usage unique.
+    state
         .approvals
-        .get(&approval_id)?
-        .ok_or_else(|| IhError::NotFound(format!("approbation {approval_id}")))?;
-    if !pending.detail.contains(&fingerprint) {
-        return Err(IhError::Denied(
-            "l'approbation ne correspond pas à cette commande ou à cette tâche".into(),
-        ));
-    }
-    state.approvals.consume(&approval_id, AGENT_CATEGORY)?;
+        .consume_with_fingerprint(&approval_id, AGENT_CATEGORY, &fingerprint)?;
 
     // 2. Session persistée puis sandbox isolé.
     let session = state.store.create_session(&NewSession {
@@ -264,6 +260,8 @@ pub fn agent_session_start(
         // L'approbation consommée couvre la commande ET le niveau de sécurité :
         // un niveau non isolé n'est lancé qu'après cette approbation explicite.
         confirm_unsandboxed: adapter.security == ih_core::config::SecurityLevel::None,
+        // Montages Git calculés par IH à la création du worktree.
+        git: Some(sandbox.git().clone()),
     })?;
     if supervisor_id != session_id.to_string() {
         return Err(IhError::Internal(

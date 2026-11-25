@@ -183,11 +183,12 @@ pub fn team_request_approval(
              isolation système. Cette exécution ne doit être autorisée qu'en connaissance de cause.",
         );
     }
-    let approval = state.approvals.ask(
+    let approval = state.approvals.ask_with_fingerprint(
         TEAM_CATEGORY,
         &format!("Lancer une équipe sur : {}", truncate(&request.goal, 100)),
         &detail,
         ih_security::risk::RiskLevel::High,
+        Some(fingerprint.clone()),
     )?;
 
     Ok(TeamApprovalView {
@@ -241,16 +242,10 @@ pub fn team_run(
     // Approbation : doit correspondre exactement à cette course (niveaux de
     // sécurité et acquittement compris).
     let expected = full_fingerprint(&request, &root, &config)?;
-    let pending = state
+    // NV9 : comparaison du champ d'empreinte (jamais le texte du détail).
+    state
         .approvals
-        .get(&approval_id)?
-        .ok_or_else(|| IhError::NotFound(format!("approbation {approval_id}")))?;
-    if !ih_agent_mode::approval_covers(&pending.detail, &expected) {
-        return Err(IhError::Denied(
-            "l'approbation ne correspond pas à cet objectif ou à ces agents".into(),
-        ));
-    }
-    state.approvals.consume(&approval_id, TEAM_CATEGORY)?;
+        .consume_with_fingerprint(&approval_id, TEAM_CATEGORY, &expected)?;
 
     let plan = plan_goal(&request.goal, &team, request.work_items)?;
     plan.graph.validate()?;
