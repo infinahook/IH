@@ -1,6 +1,6 @@
 # Journal des versions
 
-## Non publié — agents CLI supplémentaires (Kilo, DSH CLI, Goose)
+## 0.6.4 — Agents CLI (Kilo, DSH CLI, Goose), sandbox système et corrections d'audit (25/11/2026)
 
 ### Ajouté
 - **Trois nouveaux adaptateurs d'agents CLI**, au même niveau que les agents
