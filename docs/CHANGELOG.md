@@ -1,5 +1,141 @@
 # Journal des versions
 
+## 0.6.4 — Agents CLI (Kilo, DSH CLI, Goose), sandbox système et corrections d'audit (25/11/2026)
+
+### Ajouté
+- **Trois nouveaux adaptateurs d'agents CLI**, au même niveau que les agents
+  existants : Kilo (`kilo run --format json --auto "<tâche>"`), DSH CLI
+  (`dsh --profile headless "<tâche>"`) et Goose
+  (`goose run --no-session --quiet --output-format stream-json -t "<tâche>"`).
+- **Détection renforcée** : nom configuré et alias connus, `PATH` de
+  l'application, `PATH` du shell de connexion (comme OpenCode) et dossiers
+  connus (`~/.local/bin`, `~/.cargo/bin`, `~/.bun/bin`, `~/.npm-global/bin`,
+  `/usr/local/bin`, `/snap/bin`, `flatpak`, paquets `/opt/apps/*/files/bin`).
+  En cas d'homonymes, seule l'installation qui répond correctement à
+  `--version` est retenue ; un faux positif est signalé et non sélectionnable.
+- **Normalisation** : Kilo réutilise le parseur JSON d'OpenCode (même famille
+  d'événements) ; Goose a son parseur `stream-json` ; DSH affiche son message
+  final (interface texte officielle du profil `headless`).
+- **Versions et chemins** affichés dans la page Agents ; l'état du moteur
+  signale les exécutables trouvés mais non fonctionnels.
+- **Avertissement « mode autonome »** : quand la commande contient un drapeau
+  d'autonomie (`--auto` pour Kilo, `--yolo`, …), le détail d'approbation précise
+  que l'agent peut écrire, exécuter, supprimer et accéder au réseau hors du
+  worktree avec les droits de l'utilisateur, et que ces actions ne sont pas
+  couvertes par le diff. Ces drapeaux apparaissent aussi dans les capacités de
+  l'adaptateur (audit du 25/11 : portée réelle vérifiée sur kilo 7.8.32).
+
+### Modifié
+- Le superviseur lance l'**exécutable résolu** (chemin absolu) et transmet les
+  variables d'environnement déclarées dans la configuration de l'agent.
+- Sélection d'adaptateur : un binaire seulement détecté mais non fonctionnel
+  n'est plus sélectionnable. Pour DSH, le CLI livré avec le paquet
+  d'application (`/opt/apps/.../bin/dsh`, Node embarqué) est préféré à une
+  autre installation npm homonyme : une copie nvm 0.2.2-rc.5 se termine sans
+  sortie en profil `headless`, ce qu'IH ne peut pas accepter comme succès.
+- Un exécutable utilisateur est monté dans la sandbox par sa **cible résolue**
+  (liens symboliques npm résolus, paquet `node_modules` entier) : un script
+  Node a besoin de son paquet, pas du seul fichier de lancement.
+
+### Sécurité — sandbox système des agents
+- **Isolation réelle par bubblewrap** (Zorin OS / Ubuntu : `apt install bubblewrap`, Arch : `pacman -S bubblewrap`) : `/usr`, `/etc` en lecture seule, `/tmp` privé, worktree seul répertoire inscriptible, dossier personnel privé, `--proc`/`--dev` dédiés, PID/IPC/UTS isolés, `--die-with-parent`.
+- **Trois niveaux par agent** (`security` dans `[[agents]]`) : `isolated` (réseau coupé), `isolated_network` (**défaut**, provider distant), `none` (non isolé, confirmation explicite obligatoire, jamais de bascule silencieuse). Le niveau fait partie de l'empreinte d'approbation.
+- **Environnement reconstruit** (`--clearenv` puis HOME/PATH/TMPDIR/LANG/TERM + variables déclarées) : aucun héritage des secrets de l'utilisateur.
+- **Secrets contrôlés** : seuls les identifiants propres à l'agent sont copiés (0600) dans son dossier privé (Kilo auth.json/config, DSH credentials/profils, Goose config/secrets), puis supprimés en fin de session.
+- **Refus explicite** si bubblewrap est indisponible ou inopérant : aucun repli vers une exécution non sandboxée.
+- Interface : niveau, moteur, état du réseau et avertissements affichés dans la page Agents, le mode Agent, l'approbation et le résumé d'équipe.
+- Tests réels (agents installés, canaris) : lecture/écriture dans le worktree autorisées ; canari `$HOME`, `~/.ssh`, sockets, écriture/suppression hors worktree refusés ; réseau coupé en `isolated` ; annulation effective ; diff limité au worktree. Détails : `docs/AGENT_SECURITY.md`.
+
+### Corrigé (audit indépendant de sécurité)
+- **Protection du dossier personnel** : un exécutable placé directement dans
+  `$HOME` (ou dont la racine de montage contiendrait `$HOME`, `~/.ssh`,
+  `~/.aws`, `~/.config`, `~/.local/share`) est **refusé** au lieu de faire
+  entrer tout le home en lecture seule dans la sandbox.
+- **Moteur de sandbox authentifié** : `IH_SANDBOX_ENGINE` n'est honorée qu'en
+  build de test/débogage ; le moteur doit être un binaire absolu, non
+  inscriptible par le groupe ou le monde (et possédé par root en production).
+  Une **sonde négative** vérifie qu'il refuse réellement une écriture hors
+  sandbox : un faux `bwrap` qui ignore les drapeaux est refusé.
+- **Acquittement explicite en Mode Équipe** : si un membre s'exécute au niveau
+  `none`, la course exige une confirmation dédiée, transmise par l'interface,
+  inscrite dans l'empreinte d'approbation et revérifiée au lancement.
+- **Sondes sans environnement hérité** : `--version` des agents et le shell de
+  connexion sont exécutés avec un environnement minimal (`env_clear`) : plus
+  aucune variable de l'application n'est transmise avant la sandbox.
+- **Nettoyage garanti des dossiers privés** : garde RAII (succès, erreur,
+  échec de lancement, timeout, annulation), permissions `0700`, marqueur de
+  propriétaire et purge des dossiers orphelins au démarrage — sans toucher aux
+  instances IH encore actives.
+- **Identifiants validés** : tout identifiant utilisé comme composant de chemin
+  est restreint à `[A-Za-z0-9._-]` (sans `..`, sans `/`, 64 caractères max)
+  avant toute opération de fichier, notamment `remove_dir_all`.
+- **Git dans le worktree sandboxé** : `git status` et `git diff` fonctionnent
+  dans la sandbox (métadonnées du worktree en écriture, dépôt principal monté
+  en **lecture seule** : le `.git/config` du dépôt reste intangible).
+- **Commande IPC obsolète supprimée** : `agent_start` (lancement sans
+  approbation ni worktree) est retirée ; la page Agents renvoie vers le Mode
+  Agent, seul chemin avec approbation, worktree et revue de diff.
+- **CI** : nouveau job « Sandbox réelle (bubblewrap) » qui installe
+  bubblewrap, vérifie les user namespaces, exige que la sandbox refuse une
+  écriture hors worktree, puis exécute les tests d'isolation. Les jobs Ubuntu
+  et Arch sont conservés.
+- **Tests honnêtes** : les tests exigeant bubblewrap ou des agents réels sont
+  désormais `#[ignore]` (visibles comme ignorés, jamais « réussis » sans
+  exécution) ; les canaris des tests sont créés dans un dossier temporaire et
+  ne touchent plus le `$HOME` réel.
+
+### Corrigé (audit final indépendant — NV1 à NV9)
+- **NV1 (critique) — évasion de sandbox via `.git`** : le contenu du fichier
+  `.git` d'un worktree est inscriptible par l'agent et **ne fait plus
+  autorité**. Les montages Git sont calculés par IH à la création du worktree
+  (`GitMounts`, depuis le dépôt découvert puis canonicalisé et confiné),
+  conservés côté Rust et transmis au superviseur. Un `.git` absent, symbolique,
+  malformé, relatif ou pointant ailleurs **refuse le lancement** : aucun montage
+  alternatif n'est créé.
+- **NV2** : `commondir` est vérifié à chaque lancement ; il doit désigner
+  exactement le répertoire Git commun attendu, sinon refus explicite.
+- **NV3/NV4 (architecture Git)** : le répertoire Git commun **et** les
+  métadonnées du worktree sont montés en **lecture seule** ; l'index de session
+  vit dans le home privé (`GIT_INDEX_FILE=/home/agent/.git-index`). Le dépôt
+  n'est donc jamais inscriptible et rien de contrôlé par l'agent ne devient un
+  montage.
+- **NV4 (hôte)** : les inspections Git d'IH sur un worktree d'agent sont
+  exécutées avec un environnement minimal et une configuration explicite
+  (`core.fsmonitor=false`, `core.hooksPath=/dev/null`, `diff.external=`,
+  `protocol.allow=never`, …) : fsmonitor/hooks/textconv/`GIT_*` du dépôt ne
+  peuvent plus faire exécuter un programme sur l'hôte (test canari).
+- **NV3 (dossier privé)** : le marqueur `.ih-owner` est **obligatoire** (échec
+  d'écriture ⇒ création refusée et dossier supprimé) et un **verrou `flock`**
+  est tenu pendant toute la session : le nettoyage des orphelins ne supprime
+  jamais un dossier vivant, même avec un PID réutilisé (NV8 : PID + instant de
+  démarrage de `/proc/<pid>/stat`).
+- **NV5** : la racine de montage d'un exécutable est canonicalisée et un
+  répertoire symbolique est refusé ; la fenêtre TOCTOU résiduelle est
+  documentée.
+- **NV6** : le moteur de sandbox est **revalidé à chaque lancement**
+  (identité dev/ino/taille/mtime/uid puis nouvelle sonde si changement).
+- **NV9** : les approbations d'agent et d'équipe utilisent un **champ
+  d'empreinte dédié** (`ask_with_fingerprint` / `consume_with_fingerprint`)
+  au lieu d'une recherche dans le texte du détail.
+- Tests de régression : canaris `.git`/`commondir` (HOME factice, `.ssh`
+  factice, `..`, lien symbolique, chemin inexistant, chemin valide), Team Mode
+  (empoisonnement refusé à la session suivante), Git normal (`status`/`diff`,
+  index dans le home privé), exécution contrôlée par le dépôt (canari
+  fsmonitor/textconv), dossier privé (marqueur obligatoire, verrou).
+
+### Vérifié
+- Tests réels exécutés sur la machine de validation (`IH_REAL_AGENTS=1`) :
+  détection et version (`kilo 7.8.32`, `dsh 0.1.0-rc.7`, `goose 1.61.0`),
+  lancement et réponse, annulation effective du groupe de processus, erreur
+  volontairement provoquée, isolation par worktree git et collecte des fichiers
+  modifiés — pour les trois CLI.
+- Sandbox réelle : les trois agents écrivent `sbox-ok.txt` dans le worktree
+  avec un accès hôte refusé (canaris `$HOME`, `~/.ssh`, sockets), un prompt
+  hostile ne fait fuiter aucun canari, et le niveau `isolated` échoue
+  explicitement chez les trois (DNS/transport coupés).
+- 442 tests Rust (+17 tests d'isolation/agents ignorés explicitement), 188 tests frontend,
+  `tsc --noEmit` et build de production verts.
+
 ## 0.6.3 — Cohérence visuelle de l'interface
 
 ### Corrigé

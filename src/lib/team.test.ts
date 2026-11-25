@@ -18,6 +18,7 @@ import {
   type TeamForm,
   type TeamRunState,
   type TeamTaskView,
+  teamRequiresUnsandboxedAck,
 } from "./team";
 
 // ---------------------------------------------------------------- fabriques
@@ -121,6 +122,7 @@ describe("construction de la requête d'équipe", () => {
       workers: ["codex"],
       reviewer: null,
       work_items: 2,
+      unsandboxed_ack: false,
     });
   });
 
@@ -182,6 +184,33 @@ describe("construction de la requête d'équipe", () => {
 });
 
 // ------------------------------------------------------------- rôles
+
+describe("acquittement hors sandbox en équipe", () => {
+  const securityOf = (id: string) => ({ iso: "isolated", net: "isolated_network", none: "none" })[id];
+
+  it("exige l'acquittement dès qu'un membre est au niveau none", () => {
+    expect(teamRequiresUnsandboxedAck(["iso", "net"], securityOf)).toBe(false);
+    expect(teamRequiresUnsandboxedAck(["iso", "none"], securityOf)).toBe(true);
+    expect(teamRequiresUnsandboxedAck([null, "none", undefined], securityOf)).toBe(true);
+    // Un agent inconnu ne déclenche pas l'exigence (le noyau refusera l'agent).
+    expect(teamRequiresUnsandboxedAck(["inconnu"], securityOf)).toBe(false);
+  });
+
+  it("transmet l'acquittement dans la requête IPC", () => {
+    const base = {
+      projectId: "projet-1",
+      goal: "Objectif",
+      lead: "iso",
+      workers: ["net"],
+      reviewer: null,
+      workItems: 2,
+    };
+    const withoutAck = buildTeamRequest({ ...base, unsandboxedAck: false });
+    expect(withoutAck.request?.unsandboxed_ack).toBe(false);
+    const withAck = buildTeamRequest({ ...base, unsandboxedAck: true });
+    expect(withAck.request?.unsandboxed_ack).toBe(true);
+  });
+});
 
 describe("mapping des rôles", () => {
   it("normalise les trois rôles et rejette l'inconnu", () => {

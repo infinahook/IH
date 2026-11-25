@@ -5,6 +5,7 @@
 //! `ResourcePolicy` et n'est pas contournable par l'interface.
 
 use crate::adapters::AgentAdapter;
+use crate::sandbox::{self, SecurityLevel};
 use ih_core::events::{AgentState, CoreEvent, OutputStream};
 use ih_core::{IhError, IhResult, ResourcePolicy, SessionId};
 use std::collections::HashMap;
@@ -25,6 +26,12 @@ pub struct StartRequest {
     pub prompt: String,
     /// Identifiant de session fourni par l'appelant (persisté en base).
     pub session_id: Option<SessionId>,
+    /// Confirmation explicite pour un agent configuré en niveau non isolé.
+    /// Sans elle, un agent non sandboxé est refusé (aucun repli silencieux).
+    pub confirm_unsandboxed: bool,
+    /// Montages Git attendus du worktree, **calculés par IH** à sa création.
+    /// Jamais déduits du fichier `.git` (inscriptible par l'agent).
+    pub git: Option<sandbox::GitMounts>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -69,6 +76,9 @@ pub struct AgentSupervisor {
 impl AgentSupervisor {
     pub fn new(policy: ResourcePolicy, sink: EventSink) -> IhResult<Self> {
         policy.validate()?;
+        // Dossiers privés d'instances IH mortes : purgés au démarrage, sans
+        // toucher à ceux d'instances encore actives.
+        let _ = sandbox::cleanup_orphan_homes();
         Ok(Self {
             policy,
             sink,
@@ -133,12 +143,16 @@ impl AgentSupervisor {
                 request.agent.id
             )));
         }
-        if request.agent.detection().is_none() {
-            return Err(IhError::Agent(format!(
-                "programme introuvable dans le PATH : {}",
+        // Résolution réelle : PATH, PATH du shell de connexion, dossiers connus
+        // (ex. `/opt/apps/<app>/files/bin` pour DSH). Le binaire résolu est
+        // lancé par chemin absolu : un dossier absent du PATH graphique ne
+        // suffit plus à empêcher l'exécution.
+        let executable = request.agent.detection().ok_or_else(|| {
+            IhError::Agent(format!(
+                "programme introuvable (PATH, PATH du shell de connexion, dossiers connus) : {}",
                 request.agent.program
-            )));
-        }
+            ))
+        })?;
         if request.prompt.trim().is_empty() {
             return Err(IhError::Invalid("instruction vide".into()));
         }
@@ -156,11 +170,75 @@ impl AgentSupervisor {
         }
 
         let session_id = request.session_id.clone().unwrap_or_default().into_string();
-        let (program, args) = request.agent.build_command(&request.prompt);
+        // L'identifiant sert de composant du dossier privé : jamais de valeur
+        // brute non validée près d'un `remove_dir_all`.
+        sandbox::validate_session_tag(&session_id)?;
+        let (_, args) = request.agent.build_command(&request.prompt);
+        let level = request.agent.security;
+
+        // Niveau non isolé : refus tant que l'appelant n'a pas confirmé
+        // explicitement (approbation dédiée côté IH).
+        if level == SecurityLevel::None && !request.confirm_unsandboxed {
+            return Err(IhError::Denied(
+                "niveau non isolé : confirmation explicite requise (aucun repli silencieux vers l'exécution non sandboxée)"
+                    .into(),
+            ));
+        }
+
+        // Environnement déclaré pour l'agent (jamais hérité de l'hôte en mode
+        // sandboxé : l'environnement hôte contient des secrets).
+        let declared_env: Vec<(String, String)> = request
+            .agent
+            .env
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+
+        // Sandbox système (bubblewrap) : isolation réelle des fichiers, de
+        // l'environnement et du réseau selon le niveau.
+        let sandboxed = if level != SecurityLevel::None {
+            Some(sandbox::sandboxed_command(
+                level,
+                &request.agent.kind,
+                &executable,
+                &args,
+                &request.project_dir,
+                &declared_env,
+                &session_id,
+                request.git.as_ref(),
+            )?)
+        } else {
+            None
+        };
+
+        // Le garde du dossier privé (RAII) suit la commande : s'il est perdu
+        // sur un chemin d'erreur, les copies d'identifiants sont supprimées.
+        #[allow(clippy::type_complexity)]
+        let (program, final_args, plan_env, private_home) = match sandboxed {
+            Some(plan) => (
+                plan.program.clone(),
+                plan.args.clone(),
+                Some(plan.env.clone()),
+                plan.private_home,
+            ),
+            None => (executable.clone(), args.clone(), None, None),
+        };
 
         let mut command = Command::new(&program);
+        command.args(&final_args);
+        match &plan_env {
+            // Environnement vidé puis reconstruit explicitement par la sandbox.
+            Some(env) => {
+                command.env_clear();
+                command.envs(env.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+            None => {
+                // Compatibilité : un agent explicitement non isolé conserve
+                // l'environnement historique, plus ses variables déclarées.
+                command.envs(&request.agent.env);
+            }
+        }
         command
-            .args(&args)
             .current_dir(&request.project_dir)
             // Certains CLI (OpenCode v2.3.2 vérifié) résolvent leur projet via
             // `$PWD` et ignorent le répertoire courant réel : sans cela, ils
@@ -277,6 +355,9 @@ impl AgentSupervisor {
         let watchdog_running = running.clone();
         let timeout = Duration::from_secs(request.agent.timeout_secs.max(1));
         let active = self.active.clone();
+        // Déplacé dans le thread de veille : il est détruit (et le dossier
+        // supprimé) à la fin de la session, quel qu'en soit le motif.
+        let watched_home = private_home;
         std::thread::spawn(move || {
             let started = Instant::now();
             let mut final_state = AgentState::Completed;
@@ -326,6 +407,9 @@ impl AgentSupervisor {
                     let _ = child.wait();
                 }
             }
+            // Les copies de secrets de la session sandboxée ne survivent pas
+            // à la session : le garde RAII les supprime en tombant.
+            drop(watched_home);
 
             if let Ok(mut guard) = watchdog_running.state.lock() {
                 *guard = final_state;
@@ -531,6 +615,12 @@ mod tests {
             args: vec![],
             enabled: true,
             timeout_secs: 5,
+            env: Default::default(),
+            // Ces tests portent sur la supervision du processus (états, timeout,
+            // annulation, environnement, sortie bornée), pas sur la sandbox :
+            // ils demandent donc explicitement le niveau non isolé, autorisé par
+            // la confirmation passée avec chaque `StartRequest`.
+            security: ih_core::config::SecurityLevel::None,
         }
     }
 
@@ -552,6 +642,8 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "salut".to_string(),
                 session_id: None,
+                confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         let state = supervisor.wait(&id, Duration::from_secs(5)).unwrap();
@@ -589,6 +681,8 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         assert_eq!(
@@ -618,6 +712,8 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         std::thread::sleep(Duration::from_millis(200));
@@ -655,6 +751,8 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         let _ = supervisor.wait(&id, Duration::from_secs(5));
@@ -683,6 +781,8 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         let second = supervisor.start(StartRequest {
@@ -690,10 +790,55 @@ mod tests {
             project_dir: dir.clone(),
             prompt: "y".to_string(),
             session_id: None,
+            confirm_unsandboxed: false,
+            git: None,
         });
         assert!(matches!(second, Err(IhError::Limit(_))));
         supervisor.cancel(&first).ok();
         let _ = supervisor.wait(&first, Duration::from_secs(5));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Une session sandboxée qui échoue (interpréteur introuvable) ne doit
+    /// laisser aucun dossier privé derrière elle : le garde RAII supprime les
+    /// copies d'identifiants sur le chemin d'erreur.
+    #[test]
+    fn un_echec_de_lancement_sandboxe_ne_laisse_aucun_dossier_prive() {
+        if !sandbox::availability().functional {
+            eprintln!("IGNORÉ: bubblewrap non fonctionnel sur cette machine");
+            return;
+        }
+        let dir = temp_dir();
+        // Script pointant vers un interpréteur absent : la détection réussit
+        // (fichier exécutable), l'exécution échoue dans la sandbox.
+        let script = script(
+            &dir,
+            "casse.sh",
+            "#!/interpreteur_absent/inexistant\necho jamais\n",
+        );
+        let (sink, _events) = collector();
+        let supervisor = AgentSupervisor::new(ResourcePolicy::default(), sink).unwrap();
+        let mut adapter = adapter_for(&script);
+        adapter.security = ih_core::config::SecurityLevel::Isolated;
+        let session = SessionId::parse("ses-echec-sandbox").unwrap();
+        let private_home = std::env::temp_dir().join("ih-agent-home-ses-echec-sandbox");
+        let id = supervisor
+            .start(StartRequest {
+                agent: adapter,
+                project_dir: dir.clone(),
+                prompt: "x".to_string(),
+                session_id: Some(session),
+                confirm_unsandboxed: false,
+                git: None,
+            })
+            .expect("lancement");
+        let state = supervisor.wait(&id, Duration::from_secs(10)).unwrap();
+        assert_eq!(state, AgentState::Failed, "l'exécution doit échouer");
+        assert!(
+            !private_home.exists(),
+            "le dossier privé doit être supprimé après un échec : {}",
+            private_home.display()
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -709,6 +854,8 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap_err();
         assert!(err.to_string().contains("introuvable"));
@@ -720,6 +867,8 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "   ".to_string(),
                 session_id: None,
+                confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap_err();
         assert!(matches!(err, IhError::Invalid(_)));
@@ -746,6 +895,8 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         let _ = supervisor.wait(&id, Duration::from_secs(10));
@@ -779,6 +930,8 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: true,
+                git: None,
             })
             .unwrap();
         assert_eq!(

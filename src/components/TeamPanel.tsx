@@ -11,6 +11,7 @@ import { selectableAdapters } from "../lib/agent";
 import { shortHash } from "../lib/format";
 import {
   buildTeamRequest,
+  teamRequiresUnsandboxedAck,
   filterTeamPendingDiffs,
   teamFieldErrorKey,
   teamRoleLabelKey,
@@ -84,12 +85,32 @@ export function TeamPanel({
   const [workers, setWorkers] = useState<string[]>([]);
   const [reviewer, setReviewer] = useState("");
   const [workItems, setWorkItems] = useState(2);
+  const [unsandboxedAck, setUnsandboxedAck] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [diffPreview, setDiffPreview] = useState<DiffPreview | null>(null);
   const [diffPreviewError, setDiffPreviewError] = useState<AppError | null>(null);
   const [diffPreviewBusy, setDiffPreviewBusy] = useState(false);
 
   const detected = useMemo(() => selectableAdapters(adapters), [adapters]);
+  // Niveaux de sécurité réellement appliqués à la course (agents sélectionnés).
+  const securitySummary = useMemo(() => {
+    const ids = [lead, ...workers, ...(reviewer ? [reviewer] : [])].filter(Boolean);
+    const labels = ids.map((id) => {
+      const adapter = adapters.find((entry) => entry.id === id);
+      return `${adapter?.label ?? id}=${t(`agent_security.level_${adapter?.security ?? "isolated_network"}`)}`;
+    });
+    return labels.join(" · ");
+  }, [lead, workers, reviewer, adapters, t]);
+
+  // Un membre au niveau « none » impose un acquittement explicite de
+  // l'exécution hors sandbox (même exigence qu'en Mode Agent).
+  const needsUnsandboxedAck = useMemo(
+    () =>
+      teamRequiresUnsandboxedAck([lead, ...workers, reviewer], (id) =>
+        adapters.find((entry) => entry.id === id)?.security,
+      ),
+    [lead, workers, reviewer, adapters],
+  );
 
   // Sélection par défaut : premier adaptateur détecté, sans jamais garder un
   // identifiant qui aurait disparu après une nouvelle détection.
@@ -119,12 +140,14 @@ export function TeamPanel({
     workers,
     reviewer: reviewer.length > 0 ? reviewer : null,
     workItems,
+    unsandboxedAck: needsUnsandboxedAck ? unsandboxedAck : false,
   };
   const build = buildTeamRequest(form);
   const errorKey = teamFieldErrorKey(build.error);
   const blockedHint = errorKey === null ? null : t(errorKey);
   const canLaunch =
     build.request !== null &&
+    (!needsUnsandboxedAck || unsandboxedAck) &&
     !controller.running &&
     !controller.requesting &&
     controller.approval === null;
@@ -271,6 +294,22 @@ export function TeamPanel({
         </Field>
 
         <div className="form-grid">
+          {securitySummary ? (
+            <p className="small muted">
+              {t("agent_security.team_summary", { levels: securitySummary })}
+            </p>
+          ) : null}
+          {needsUnsandboxedAck ? (
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={unsandboxedAck}
+                disabled={controller.running || controller.requesting}
+                onChange={(event) => setUnsandboxedAck(event.target.checked)}
+              />
+              <span>{t("agent_security.team_none_ack")}</span>
+            </label>
+          ) : null}
           <Field
             label={t("team.lead")}
             htmlFor="team-lead"

@@ -89,7 +89,30 @@ export type RiskLevel = "low" | "medium" | "high" | "critical";
 export type ApprovalState = "pending" | "approved" | "denied" | "consumed" | "expired";
 export type ApprovalDecision = "approve" | "deny";
 export type ProviderKind = "openai_compatible" | "anthropic" | "google" | "ollama";
-export type AgentKind = "claude_code" | "codex" | "gemini_cli" | "opencode" | "custom";
+/** Niveau de sécurité d'exécution d'un agent CLI. */
+export type SecurityLevel = "isolated" | "isolated_network" | "none";
+
+/** État réel de la sandbox système (bubblewrap). */
+export interface SandboxSummary {
+  level: SecurityLevel;
+  network: boolean;
+  sandboxed: boolean;
+  engine: string | null;
+  engine_ready: boolean;
+  error: string | null;
+  warnings: string[];
+}
+
+export type AgentKind =
+  | "claude_code"
+  | "codex"
+  | "gemini_cli"
+  | "opencode"
+  | "pi"
+  | "kilo"
+  | "dsh"
+  | "goose"
+  | "custom";
 export type DistroFamily = "arch" | "debian" | "other";
 export type ThemeName = "dark" | "light" | "system";
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error";
@@ -327,6 +350,12 @@ export interface AgentInfo {
   enabled: boolean;
   detected: boolean;
   resolved_path: string | null;
+  /** Version réellement lue par `<exécutable> --version`. */
+  version: string | null;
+  /** Diagnostic quand la détection ou la sonde de version échoue. */
+  error: string | null;
+  security: SecurityLevel;
+  sandbox: SandboxSummary;
 }
 
 export interface SessionSnapshot {
@@ -767,6 +796,10 @@ export interface AgentAdapterReport {
   detected: boolean;
   path: string | null;
   version: string | null;
+  /** Exécutable trouvé **et** répondant correctement à `--version`. */
+  functional: boolean;
+  security: SecurityLevel;
+  sandbox: SandboxSummary;
   capabilities: string[];
   diagnostic: string;
 }
@@ -824,6 +857,8 @@ export interface TeamRunRequest {
   workers: string[];
   reviewer: string | null;
   work_items: number;
+  /** Acquittement explicite exigé si un membre s'exécute sans sandbox. */
+  unsandboxed_ack?: boolean;
 }
 
 /** Demande d'approbation d'une course d'équipe (`team_request_approval`). */
@@ -938,8 +973,6 @@ export const api = {
   // agents
   agents: {
     list: () => call<AgentInfo[]>("agents_list"),
-    start: (projectId: string, agentId: string, prompt: string) =>
-      call<string>("agent_start", { projectId, agentId, prompt }),
     cancel: (sessionId: string) => call<void>("agent_cancel", { sessionId }),
     state: (sessionId: string) =>
       call<SessionSnapshot | null>("agent_state", { sessionId }),
@@ -950,11 +983,17 @@ export const api = {
   // mode agent (0.2.2) : adaptateurs, sessions isolées, approbations
   agent: {
     adapters: () => call<AgentAdapterReport[]>("agent_adapters"),
-    requestApproval: (projectId: string, agentId: string, task: string) =>
+    requestApproval: (
+      projectId: string,
+      agentId: string,
+      task: string,
+      unsandboxedAck = false,
+    ) =>
       call<AgentApprovalView>("agent_session_request_approval", {
         projectId,
         agentId,
         task,
+        unsandboxedAck,
       }),
     start: (
       projectId: string,

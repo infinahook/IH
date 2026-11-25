@@ -122,3 +122,59 @@ jobs:
 
       - name: Build release
         run: cargo build --release --locked --manifest-path src-tauri/Cargo.toml
+
+  sandbox:
+    name: Sandbox réelle (bubblewrap)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Installer bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bubblewrap build-essential pkg-config libssl-dev curl python3 file
+          # Ubuntu 24.04 restreint les user namespaces non privilégiés
+          # (AppArmor) : sans cela, même un bubblewrap installé ne peut pas
+          # créer de sandbox. L'étape suivante échoue si ce n'est pas effectif.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Vérifier que bubblewrap isole réellement
+        run: |
+          set -euo pipefail
+          bwrap --version
+          canari="$(mktemp -d)/canari.txt"
+          echo intact > "$canari"
+          # 1. une sandbox minimale démarre ;
+          bwrap --unshare-all --die-with-parent --ro-bind /usr /usr \
+            --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 \
+            --proc /proc --dev /dev --tmpfs /tmp -- /bin/sh -c 'exit 0'
+          # 2. et elle refuse réellement une écriture hors sandbox.
+          if bwrap --unshare-all --die-with-parent --ro-bind /usr /usr \
+            --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 \
+            --proc /proc --dev /dev --tmpfs /tmp \
+            -- /bin/sh -c "echo pirate > $canari"; then
+            echo "ERREUR: la sandbox laisse écrire hors worktree" >&2
+            exit 1
+          fi
+          grep -qx intact "$canari"
+          echo "OK: user namespaces disponibles et sandbox effective"
+
+      - name: Tests de sandbox réels
+        env:
+          IH_REQUIRE_SANDBOX: "1"
+        run: |
+          set -euo pipefail
+          # Aucune sandbox indisponible ne doit devenir un succès : la variable
+          # ci-dessus transforme l'absence de moteur en échec.
+          cargo test -p ih-agents --lib
+          cargo test -p ih-agents --test sandbox_runtime -- --ignored --test-threads=1
+          cargo test -p ih-agents --test home_protection -- --ignored --test-threads=1
+          cargo test -p ih-agents --test sandbox_git -- --ignored --test-threads=1
+          cargo test -p ih-agents --test git_mounts
+          cargo test -p ih-agent-mode --test team_git_isolation -- --ignored --test-threads=1
+          cargo test -p ih-agent-mode --test host_git_hardening
+          cargo test -p ih-agent-mode --lib

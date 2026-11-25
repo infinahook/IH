@@ -191,10 +191,30 @@ fn recommend_agents(ram_mb: u64) -> u8 {
 /// invisible pour IH. On interroge le shell avec un marqueur (la sortie du
 /// profil peut contenir autre chose) et un délai borné.
 pub fn login_shell_path() -> Option<String> {
+    // Le PATH du shell de connexion ne change pas pendant la vie du processus :
+    // le calculer une seule fois évite de relancer un shell à chaque détection
+    // d'agent (le résultat alimente aussi la résolution des exécutables).
+    static CACHE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(compute_login_shell_path).clone()
+}
+
+fn compute_login_shell_path() -> Option<String> {
     use std::process::{Command, Stdio};
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
-    let mut child = Command::new(shell)
+    // Le shell de connexion est exécuté pour connaître le `PATH` réellement
+    // installé : il reçoit un environnement minimal (jamais les variables de
+    // l'application, qui peuvent contenir des secrets) et son propre `.profile`
+    // fournit le reste.
+    let home = std::env::var_os("HOME").unwrap_or_default();
+    let mut child = Command::new(&shell)
         .args(["-lic", "printf '__IH_PATH__%s__IH_PATH_END__' \"$PATH\""])
+        .env_clear()
+        .env("HOME", &home)
+        .env("USER", std::env::var("USER").unwrap_or_default())
+        .env("LOGNAME", std::env::var("LOGNAME").unwrap_or_default())
+        .env("SHELL", &shell)
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("TERM", "dumb")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

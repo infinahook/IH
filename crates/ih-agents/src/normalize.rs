@@ -21,7 +21,59 @@ use serde_json::Value;
 pub fn normalize_line(kind: &AgentKind, line: &str) -> Vec<String> {
     match kind {
         AgentKind::Opencode => normalize_opencode(line),
+        // Kilo (7.8.32) émet exactement la même famille d'événements JSON
+        // que son ancêtre OpenCode (`step_start`, `tool_use`, `text`,
+        // `step_finish`, `error`) : un seul parseur, pas de divergence.
+        AgentKind::Kilo => normalize_opencode(line),
+        AgentKind::Goose => normalize_goose(line),
+        // DSH `headless` n'a pas d'interface structurée : il imprime le
+        // message final de l'assistant, affiché tel quel.
         _ => vec![line.to_string()],
+    }
+}
+
+/// Normalise le NDJSON de `goose run --output-format stream-json` (v1.61.0).
+///
+/// Événements observés en conditions réelles :
+/// - `{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"…"}]}}`
+/// - `{"type":"complete","total_tokens":…,"input_tokens":…,"output_tokens":…}`
+///
+/// Les événements non reconnus sont ignorés ; une ligne non JSON
+/// (avertissement du CLI) est restituée telle quelle.
+fn normalize_goose(line: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+        return vec![line.to_string()];
+    };
+    match value.get("type").and_then(Value::as_str).unwrap_or("") {
+        "message" => {
+            let message = value.get("message");
+            let role = message
+                .and_then(|m| m.get("role"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if role != "assistant" {
+                return Vec::new();
+            }
+            message
+                .and_then(|m| m.get("content"))
+                .and_then(Value::as_array)
+                .map(|parts| {
+                    parts
+                        .iter()
+                        .filter_map(|part| part.get("text").and_then(Value::as_str))
+                        .flat_map(|text| text.lines())
+                        .filter(|text| !text.trim().is_empty())
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+        "complete" => Vec::new(),
+        _ => Vec::new(),
     }
 }
 
@@ -176,6 +228,47 @@ mod tests {
                 vec![REAL_TEXT.to_string()]
             );
         }
+    }
+
+    /// Lignes réellement produites par `goose run --no-session -t … --output-format stream-json`
+    /// (goose 1.61.0, provider custom_deepseek).
+    const REAL_GOOSE_MESSAGE: &str = r#"{"type":"message","message":{"id":"eca6b4a9-feb0-4409-af50-578d1cd1fac1","role":"assistant","created":1795609708,"content":[{"type":"text","text":"OK"}],"metadata":{"userVisible":true,"agentVisible":true,"inference":{"provider":"custom_deepseek","requestedModel":"deepseek-flash"}}}}"#;
+    const REAL_GOOSE_COMPLETE: &str = r#"{"type":"complete","total_tokens":4377,"input_tokens":4375,"output_tokens":2,"cache_read_input_tokens":4096,"cache_write_input_tokens":0,"cost_usd":0.00005533800000000001}"#;
+
+    #[test]
+    fn kilo_utilise_le_parseur_opencode() {
+        assert_eq!(
+            normalize_line(&AgentKind::Kilo, REAL_TEXT),
+            vec!["J'ai ajouté la ligne `bonjour` à la fin de `a.txt`.".to_string()]
+        );
+        assert!(normalize_line(&AgentKind::Kilo, REAL_STEP_START).is_empty());
+        assert_eq!(
+            normalize_line(&AgentKind::Kilo, REAL_TOOL_READ),
+            vec!["[read] /tmp/oc-probe/a.txt".to_string()]
+        );
+    }
+
+    #[test]
+    fn goose_restitue_le_texte_assistant_et_masque_les_etapes() {
+        assert_eq!(
+            normalize_line(&AgentKind::Goose, REAL_GOOSE_MESSAGE),
+            vec!["OK".to_string()]
+        );
+        assert!(normalize_line(&AgentKind::Goose, REAL_GOOSE_COMPLETE).is_empty());
+        // Ligne non JSON (avertissement du CLI) restituée telle quelle.
+        let raw = "goose: warning something";
+        assert_eq!(
+            normalize_line(&AgentKind::Goose, raw),
+            vec![raw.to_string()]
+        );
+    }
+
+    #[test]
+    fn dsh_texte_final_est_conserve_tel_quel() {
+        assert_eq!(
+            normalize_line(&AgentKind::Dsh, "OK"),
+            vec!["OK".to_string()]
+        );
     }
 
     #[test]

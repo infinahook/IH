@@ -21,7 +21,10 @@ import {
   filterAgentPendingDiffs,
   isAdapterSelectable,
   isTerminalAgentPhase,
+  networkLabelKey,
   readOutputPayload,
+  requiresUnsandboxedAck,
+  securityLabelKey,
   readStatePayload,
   type AgentPhase,
 } from "../lib/agent";
@@ -307,7 +310,11 @@ export function AgentPanel({
                         <span className="agent-option-title">
                           <Bot size={14} aria-hidden="true" />
                           {adapter.label}
-                          <span className="small muted">{adapter.kind}</span>
+                          <span className="small muted">
+                            {t(`agents.kind_${adapter.kind}`, {
+                              defaultValue: adapter.kind,
+                            })}
+                          </span>
                         </span>
                         <span className="mono small">
                           {adapter.program}
@@ -317,6 +324,15 @@ export function AgentPanel({
                           {adapter.path
                             ? t("agent_mode.path", { path: adapter.path })
                             : t("agent_mode.path_unknown")}
+                        </span>
+                        <span className="agent-security">
+                          <Badge tone={adapter.sandbox?.sandboxed === false ? "warning" : adapter.sandbox?.engine_ready ? "success" : "danger"}>
+                            {t(securityLabelKey(adapter.security))}
+                          </Badge>
+                          <span className="small muted">
+                            {t(networkLabelKey(adapter.security, adapter.sandbox?.network))}
+                            {adapter.sandbox?.engine ? ` · ${adapter.sandbox.engine}` : ""}
+                          </span>
                         </span>
                         <span className={selectable ? "small muted" : "small danger-text"}>
                           {adapter.diagnostic}
@@ -369,6 +385,43 @@ export function AgentPanel({
               }}
             />
           </Field>
+          {c.selectedAdapter?.sandbox ? (
+            <div className="agent-sandbox-summary">
+              <Badge
+                tone={
+                  c.selectedAdapter.sandbox.sandboxed === false
+                    ? "warning"
+                    : c.selectedAdapter.sandbox.engine_ready
+                      ? "success"
+                      : "danger"
+                }
+              >
+                {t(securityLabelKey(c.selectedAdapter.sandbox.level))}
+              </Badge>
+              <span className="small muted">
+                {t(networkLabelKey(c.selectedAdapter.sandbox.level, c.selectedAdapter.sandbox.network))}
+                {c.selectedAdapter.sandbox.engine
+                  ? ` · ${c.selectedAdapter.sandbox.engine}`
+                  : ""}
+              </span>
+              {c.selectedAdapter.sandbox.warnings.map((warning) => (
+                <span key={warning} className="small warning-text">
+                  {warning}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {requiresUnsandboxedAck(c.selectedAdapter?.security) ? (
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={c.unsandboxedAck}
+                disabled={c.active || c.launching}
+                onChange={(event) => c.setUnsandboxedAck(event.target.checked)}
+              />
+              <span>{t("agent_security.none_ack")}</span>
+            </label>
+          ) : null}
           <div className="button-row">
             <button
               type="button"

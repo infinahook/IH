@@ -48,6 +48,12 @@ pub struct AdapterReport {
     pub detected: bool,
     pub path: Option<String>,
     pub version: Option<String>,
+    /// Vrai si l'exécutable existe ET répond correctement à `--version` : un
+    /// binaire homonyme non fonctionnel ne doit pas être proposé au lancement.
+    pub functional: bool,
+    /// Niveau de sécurité configuré et état réel de la sandbox.
+    pub security: ih_core::config::SecurityLevel,
+    pub sandbox: ih_agents::sandbox::SandboxSummary,
     /// Capacités réellement garanties par le contrat d'IH.
     pub capabilities: Vec<String>,
     pub diagnostic: String,
@@ -59,6 +65,7 @@ pub fn detect_adapters(configs: &[AgentConfig]) -> Vec<AdapterReport> {
         .iter()
         .map(|config| {
             let adapter = AgentAdapter::from_config(config);
+            let autonomy = adapter.autonomy_flags();
             let path = adapter.detection();
             // Un adaptateur personnalisé peut être un script : exécuter
             // `--version` y produirait des effets de bord. On ne sonde que les
@@ -69,6 +76,7 @@ pub fn detect_adapters(configs: &[AgentConfig]) -> Vec<AdapterReport> {
                 path.as_deref().and_then(probe_version)
             };
             let detected = path.is_some();
+            let functional = detected && (config.kind == AgentKind::Custom || version.is_some());
             AdapterReport {
                 id: config.id.clone(),
                 label: config.label.clone(),
@@ -77,11 +85,28 @@ pub fn detect_adapters(configs: &[AgentConfig]) -> Vec<AdapterReport> {
                 detected,
                 path: path.map(|p| p.display().to_string()),
                 version,
-                capabilities: capabilities_for(&config.kind),
-                diagnostic: if detected {
-                    "exécutable trouvé".into()
+                functional,
+                security: config.security,
+                sandbox: ih_agents::sandbox::summary(config.security),
+                capabilities: {
+                    let mut caps = capabilities_for(&config.kind);
+                    if !autonomy.is_empty() {
+                        caps.push(format!("outils-autonomes ({})", autonomy.join(" ")));
+                    }
+                    caps
+                },
+                diagnostic: if functional {
+                    "exécutable trouvé et fonctionnel".into()
+                } else if detected {
+                    format!(
+                        "« {} » trouvé mais ne répond pas à --version : CLI attendu ?",
+                        config.program
+                    )
                 } else {
-                    format!("« {} » introuvable dans le PATH", config.program)
+                    format!(
+                        "« {} » introuvable (PATH, PATH du shell de connexion, dossiers connus)",
+                        config.program
+                    )
                 },
             }
         })
@@ -97,6 +122,18 @@ fn capabilities_for(kind: &AgentKind) -> Vec<String> {
         "annulation".to_string(),
         "timeout".to_string(),
     ];
+    match kind {
+        // Interfaces structurées officielles : événements normalisés par IH.
+        AgentKind::Opencode | AgentKind::Kilo => caps.push("sortie-json".to_string()),
+        AgentKind::Goose => caps.push("sortie-json".to_string()),
+        // DSH headless n'imprime que le message final : sortie texte.
+        AgentKind::Dsh => caps.push("sortie-texte-finale".to_string()),
+        AgentKind::ClaudeCode
+        | AgentKind::Codex
+        | AgentKind::GeminiCli
+        | AgentKind::Pi
+        | AgentKind::Custom => {}
+    }
     if matches!(kind, AgentKind::Custom) {
         caps.push("arguments-personnalises".to_string());
     }
@@ -183,6 +220,9 @@ pub fn probe_version(program: &Path) -> Option<String> {
 pub struct Sandbox {
     project_root: PathBuf,
     workdir: PathBuf,
+    /// Chemins Git attendus, calculés ici à partir du dépôt découvert par IH.
+    /// Le fichier `.git` du worktree n'est jamais consulté comme autorité.
+    git: GitMounts,
 }
 
 impl Sandbox {
@@ -192,6 +232,11 @@ impl Sandbox {
 
     pub fn project_root(&self) -> &Path {
         &self.project_root
+    }
+
+    /// Montages Git attendus (à transmettre au superviseur).
+    pub fn git(&self) -> &GitMounts {
+        &self.git
     }
 }
 
@@ -219,9 +264,27 @@ pub fn create_sandbox(project_root: &Path, base_dir: &Path, tag: &str) -> IhResu
         )));
     }
     repo.add_detached_worktree(&workdir)?;
+    // Le dépôt `.git` du projet et le nom du worktree sont connus d'IH : les
+    // montages sont calculés ici, puis vérifiés (canonicalisation + confinement
+    // + pointeur `.git` conforme). Un `.git` modifié fait échouer la création.
+    let common_dir = repo.git_common_dir()?;
+    let name = workdir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| IhError::Invalid("nom de worktree non UTF-8".into()))?;
+    let git = match GitMounts::expected(&common_dir, name, &workdir) {
+        Ok(git) => git,
+        Err(error) => {
+            // Worktree inutilisable : on le retire au lieu de laisser une
+            // session à moitié créée.
+            let _ = repo.remove_worktree(&workdir, true);
+            return Err(error);
+        }
+    };
     Ok(Sandbox {
         project_root: repo.root().to_path_buf(),
         workdir,
+        git,
     })
 }
 
@@ -236,11 +299,63 @@ pub fn remove_sandbox(sandbox: &Sandbox) -> IhResult<()> {
     Ok(())
 }
 
+/// Commande Git **durcie** pour inspecter un worktree contrôlé par un agent.
+///
+/// Le dépôt peut contenir des configurations ou attributs exécutables
+/// (`core.fsmonitor`, `core.hooksPath`, `diff.<driver>.textconv`, `diff.external`,
+/// protocoles externes) : ils sont neutralisés par configuration explicite en
+/// ligne de commande (prioritaire sur toute configuration de dépôt) et par un
+/// environnement minimal. Un agent ne peut donc pas faire exécuter un programme
+/// sur l'hôte en modifiant des fichiers Git.
+fn hardened_git(workdir: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
+        .env_clear()
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("HOME", std::env::temp_dir())
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_PAGER", "cat")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_ASKPASS", "/bin/false")
+        .env("SSH_ASKPASS", "/bin/false")
+        .arg("-C")
+        .arg(workdir)
+        .args([
+            // Neutralisation des mécanismes exécutables du dépôt.
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.pager=cat",
+            "-c",
+            "core.askPass=",
+            "-c",
+            "core.sshCommand=",
+            "-c",
+            "core.editor=/bin/false",
+            "-c",
+            "diff.external=",
+            "-c",
+            "diff.renames=false",
+            "-c",
+            "protocol.allow=never",
+            "-c",
+            "submodule.recurse=false",
+            "-c",
+            "gc.auto=0",
+            "-c",
+            "maintenance.auto=false",
+        ]);
+    command
+}
+
 /// Liste les fichiers modifiés, ajoutés ou supprimés dans le sandbox.
 pub fn changed_files(sandbox: &Sandbox) -> IhResult<Vec<String>> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(&sandbox.workdir)
+    let output = hardened_git(&sandbox.workdir)
         .args(["status", "--porcelain=v1", "-z"])
         .stdin(Stdio::null())
         .output()
@@ -483,6 +598,39 @@ mod tests {
     }
 
     #[test]
+    fn les_drapeaux_d_autonomie_sont_exposes_dans_les_capacites() {
+        // Script factice identifié comme Kilo : la sonde de version réussit et
+        // le rapport expose l'autonomie apportée par `--auto`.
+        let dir = std::env::temp_dir().join(format!("ih-mode-autonomy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("kilo");
+        std::fs::write(&script, "#!/bin/sh\necho 7.8.32\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let configs = vec![AgentConfig {
+            id: "kilo".into(),
+            kind: AgentKind::Kilo,
+            label: "Kilo".into(),
+            program: script.display().to_string(),
+            enabled: true,
+            ..Default::default()
+        }];
+        let reports = detect_adapters(&configs);
+        assert!(
+            reports[0]
+                .capabilities
+                .iter()
+                .any(|capability| capability == "outils-autonomes (--auto)"),
+            "capacités : {:?}",
+            reports[0].capabilities
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn detection_et_version_des_adaptateurs() {
         let dir = temp_dir("adapter");
         let script = fake_agent(&dir, "fake-agent", "#!/bin/sh\necho \"fake-agent 1.2.3\"\n");
@@ -567,6 +715,7 @@ mod tests {
 // worktree unique. Extrait du commanditaire Tauri pour rester testable.
 // ---------------------------------------------------------------------------
 
+use ih_agents::sandbox::GitMounts;
 use ih_agents::{AgentSupervisor, StartRequest};
 use ih_core::config::AppConfig;
 use ih_core::events::AgentState;
@@ -673,11 +822,17 @@ pub fn run_team_tasks_with_events(
             node.title,
             node.description
         );
+        let unsandboxed = adapter.security == ih_core::config::SecurityLevel::None;
         let state = match supervisor.start(StartRequest {
             agent: adapter,
             project_dir: sandbox.workdir().to_path_buf(),
             prompt,
             session_id: None,
+            git: Some(sandbox.git().clone()),
+            // Confirmation : uniquement pour un membre réellement configuré au
+            // niveau non isolé, et seulement parce que la course d'équipe a été
+            // approuvée (acquittement explicite inclus dans l'empreinte).
+            confirm_unsandboxed: unsandboxed,
         }) {
             Ok(session) => supervisor
                 .wait(&session, task_timeout)
@@ -708,6 +863,16 @@ pub fn run_team_tasks_with_events(
 // ---------------------------------------------------------------------------
 // Empreinte d'approbation d'une course d'équipe.
 // ---------------------------------------------------------------------------
+
+/// Une course d'équipe contenant au moins un agent au niveau `none` exige un
+/// acquittement explicite de l'utilisateur, comme en Mode Agent.
+pub fn team_requires_unsandboxed_ack(
+    levels: impl IntoIterator<Item = ih_core::config::SecurityLevel>,
+) -> bool {
+    levels
+        .into_iter()
+        .any(|level| level == ih_core::config::SecurityLevel::None)
+}
 
 /// Empreinte couvrant **tous** les paramètres qui changent l'exécution :
 /// objectif, lead, workers (ordre inclus), relecteur et répertoire de travail.
@@ -812,5 +977,23 @@ mod team_fingerprint_tests {
         // Le détail d'une autre course ne couvre pas cette empreinte.
         let other = "Objectif : y\nEmpreinte : zzz999\n";
         assert!(!approval_covers(other, "abc123"));
+    }
+
+    /// V3 : l'acquittement explicite est exigé dès qu'un membre de l'équipe
+    /// s'exécute sans sandbox, et seulement dans ce cas.
+    #[test]
+    fn l_acquittement_est_exige_des_qu_un_membre_est_non_isole() {
+        use super::team_requires_unsandboxed_ack;
+        use ih_core::config::SecurityLevel;
+        assert!(!team_requires_unsandboxed_ack([]));
+        assert!(!team_requires_unsandboxed_ack([
+            SecurityLevel::Isolated,
+            SecurityLevel::IsolatedNetwork,
+        ]));
+        assert!(team_requires_unsandboxed_ack([
+            SecurityLevel::IsolatedNetwork,
+            SecurityLevel::None,
+        ]));
+        assert!(team_requires_unsandboxed_ack([SecurityLevel::None]));
     }
 }

@@ -396,7 +396,21 @@
     "refresh_state": "Rafraîchir l'état",
     "session_unknown": "Aucun état disponible pour cette session.",
     "session_active_hint": "Une session est déjà en cours pour ce projet.",
-    "adapter_disabled": "Cet adaptateur est désactivé dans la configuration."
+    "adapter_disabled": "Cet adaptateur est désactivé dans la configuration.",
+    "version_resolved": "Version : {version}",
+    "kind_claude_code": "Claude Code",
+    "kind_codex": "Codex",
+    "kind_gemini_cli": "Gemini CLI",
+    "kind_opencode": "OpenCode",
+    "kind_pi": "pi",
+    "kind_kilo": "Kilo",
+    "kind_dsh": "DSH CLI",
+    "kind_goose": "Goose",
+    "kind_custom": "Personnalisé",
+    "launch_via_agent_mode": "Lancement depuis le mode Agent",
+    "launch_via_agent_mode_hint": "Les sessions d'agents se lancent depuis l'onglet Agent : approbation explicite, worktree isolé, puis revue du diff avant application. Aucune session n'est lancée directement dans le projet depuis cette page.",
+    "open_agent_mode": "Ouvrir le mode Agent",
+    "selected_agent": "Agent sélectionné : {label}"
   },
   "models": {
     "title": "Modèles IA",
@@ -1506,5 +1520,19 @@
     "role_worker": "Worker",
     "role_reviewer": "Reviewer",
     "roles_saved": "Permissions du rôle « {role} » enregistrées."
+  },
+  "agent_security": {
+    "level_isolated": "Isolé",
+    "level_isolated_network": "Isolé + réseau",
+    "level_none": "Non isolé",
+    "network_on": "Réseau autorisé",
+    "network_off": "Réseau désactivé",
+    "sandbox": "Sandbox : {engine}",
+    "sandbox_ready": "Sandbox opérationnelle",
+    "sandbox_unavailable": "Sandbox indisponible",
+    "none_ack": "Je comprends que l'agent s'exécutera sans sandbox, avec les droits de mon compte Linux (fichiers, réseau, processus).",
+    "none_warning": "Niveau non isolé : confirmation explicite requise avant approbation.",
+    "team_summary": "Niveaux de sécurité : {levels}",
+    "team_none_ack": "Je comprends qu'au moins un membre de l'équipe s'exécutera sans sandbox, avec les droits de mon compte Linux, hors du worktree isolé."
   }
 }

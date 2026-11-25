@@ -3,6 +3,11 @@
 Le mode Agent d'IH (0.2.2) exécute un CLI d'agent de développement sur une
 tâche en langage naturel, dans une **copie isolée du projet**.
 
+> **Depuis 0.6.3 (post-audit)** : la page Agents ne lance plus de session
+> directement (l'ancienne commande IPC `agent_start`, sans approbation ni
+> worktree, a été supprimée). Tout lancement passe par le mode Agent :
+> approbation liée à l'empreinte, worktree isolé, puis revue du diff.
+
 ## Principe
 
 1. Vous choisissez un adaptateur **réellement détecté** dans votre `PATH`.
@@ -32,6 +37,104 @@ accord explicite.
 5. Suivez la progression, annulez si nécessaire.
 6. **Voir les modifications** → examinez chaque fichier, acceptez ou rejetez.
 
+## Détection des trois CLI supplémentaires
+
+La détection ne se limite pas au `PATH` du lanceur graphique :
+
+1. le nom configuré (`kilo`, `dsh`, `goose`) et ses alias connus
+   (`kilocode` pour Kilo, `dsh-cli` pour DSH) ;
+2. le `PATH` courant de l'application ;
+3. le `PATH` du **shell de connexion** (comme pour OpenCode) ;
+4. des dossiers connus : `~/.local/bin`, `~/.cargo/bin`, `~/.bun/bin`,
+   `~/.npm-global/bin`, `/usr/local/bin`, `/snap/bin`,
+   `/var/lib/flatpak/exports/bin` et les paquets d'application
+   `/opt/apps/<app>/files/bin` (cas de DSH, absent du `PATH` graphique).
+
+Quand plusieurs binaires portent le même nom (par exemple un `dsh` npm via nvm
+et le paquet d'application), seule l'installation qui répond correctement à
+`--version` est retenue : un binaire homonyme non fonctionnel est signalé comme
+tel dans l'interface et **n'est pas sélectionnable**. Les versions lues sur la
+machine de validation sont `kilo 7.8.32`, `dsh 0.1.0-rc.7` et `goose 1.61.0`.
+
+## Notes d'intégration par CLI
+
+- **Kilo** : `--auto` est requis en mode non interactif ; sans lui, kilo
+  auto-rejette sa première demande de permission d'outil et la session échoue.
+  La portée réelle de `--auto` et les limites de l'isolation IH sont détaillées
+  ci-dessous — **le worktree n'est pas une sandbox système**.
+- **DSH CLI** : le profil `headless` répond une seule tâche et sort ; il
+  n'imprime que le message final de l'assistant (pas d'interface structurée).
+- **Goose** : `stream-json` fournit des événements NDJSON normalisés par IH
+  (`message` assistant → texte lisible, `complete` masqué) ; `--quiet` supprime
+  la bannière d'accueil qui polluait la sortie.
+
+## Isolation système : voir [AGENT_SECURITY.md](AGENT_SECURITY.md)
+
+Depuis cette version, chaque agent s'exécute dans une **sandbox bubblewrap**
+selon un niveau configuré par agent (`isolated`, `isolated_network` par défaut,
+`none` avec confirmation explicite). Le worktree reste l'isolation Git ; la
+sandbox ajoute l'isolation des fichiers, de l'environnement et du réseau.
+Détails, permissions et tests réels : [AGENT_SECURITY.md](AGENT_SECURITY.md).
+
+## Portée réelle de `--auto` (Kilo) — audit du 25/11/2026
+
+La portée décrite ci-dessous est celle de Kilo **hors sandbox** (niveau
+`none`). Dans la sandbox par défaut, l'agent ne peut plus écrire, exécuter ou
+lire hors de son worktree.
+
+Audit mené avec le binaire réel (`kilo 7.8.32`) dans un worktree jetable,
+avec variables et fichiers canaris, et un service HTTP local :
+
+| Action observée en `--auto` | Résultat |
+|---|---|
+| Écrire un fichier **dans** le worktree | ✅ (outil `write`) |
+| Écrire un fichier **hors** du worktree (chemin absolu) | ✅ (`/tmp/…/outside.txt`) |
+| Exécuter des commandes shell | ✅ (`whoami` → utilisateur courant) |
+| Lire un fichier hors worktree | ✅ (fichier canari lu) |
+| Supprimer un fichier hors worktree | ✅ (`rm` exécuté) |
+| Accéder au réseau | ✅ (HTTP 200 sur un service local) |
+| Lire les variables d'environnement | ✅ (canari visible) |
+| Lire ses propres identifiants (`~/.local/share/kilo/auth.json`) | ✅ lisible |
+
+Conséquences : `--auto` désactive les demandes de permission internes de Kilo
+(écriture, édition, bash, lecture) ; l'agent agit **avec les droits du compte
+utilisateur**, sans aucune frontière système.
+
+### Ce que l'isolation IH couvre — et ne couvre pas
+
+- ✅ **Approbation humaine avant lancement** : la demande d'approbation est
+  émise avant toute exécution, liée à une empreinte SHA-256
+  (agent + commande exacte + répertoire + tâche), expirée à 5 minutes, usage
+  unique. `--auto` figure dans la commande approuvée.
+- ✅ **Isolation Git** : le projet n'est pas modifié ; seuls les changements du
+  worktree sont collectés et présentés en diff.
+- ❌ **Isolation du système d'exploitation** : rien n'empêche l'agent d'écrire
+  hors du worktree, d'exécuter des commandes ou de joindre le réseau.
+- ❌ **Diff incomplet** : une écriture ou suppression hors worktree n'apparaît
+  pas dans la revue des modifications.
+- ❌ **Environnement** : l'agent hérite des variables d'environnement d'IH.
+
+### Corrections minimales appliquées
+
+1. Le détail d'approbation signale explicitement le **mode autonome** quand la
+   commande contient un drapeau connu (`--auto`, `--yolo`, `--full-auto`,
+   `--dangerously-skip-permissions`, …), avec la portée exacte du risque
+   (écriture/exécution/réseau hors worktree, droits utilisateur, diff partiel).
+2. Ces drapeaux sont exposés dans les **capacités** de l'adaptateur
+   (`outils-autonomes (--auto)`), visibles dans le rapport de détection.
+
+### Recommandations (non implémentées ici)
+
+- Ne jamais lancer un agent autonome avec des secrets dans l'environnement
+  (l'agent peut les lire) ; utiliser un compte utilisateur dédié ou un bac à
+  sable système (`bubblewrap`, `firejail`, `systemd-run --user --scope` avec
+  `ProtectHome`, réseau restreint) si l'on veut une isolation réelle.
+- Considérer les actions hors worktree comme **non revues** : le diff IH ne les
+  montre pas.
+- Pour Kilo, un profil de permissions explicite (`kilo.json`) peut restreindre
+  certains outils ; `--auto` les contourne, donc il ne doit être activé que
+  pour une tâche dont on accepte la portée.
+
 ## Approbations
 
 - Une approbation est **ponctuelle** : usage unique, liée à une empreinte
@@ -48,6 +151,9 @@ accord explicite.
 | Codex | `codex exec "<tâche>"` | CLI `codex` |
 | Gemini CLI | `gemini -p "<tâche>"` | CLI `gemini` |
 | OpenCode | `opencode run --format json --archived --standalone "<tâche>"` | CLI `opencode` ≥ 2.x |
+| Kilo | `kilo run --format json --auto "<tâche>"` | CLI `kilo` (Kilo Code) ; NDJSON `text`/`tool_use` |
+| DSH CLI | `dsh --profile headless "<tâche>"` | CLI `dsh` (DeepSeek Harness) ; profil `headless` fourni |
+| Goose | `goose run --no-session --quiet --output-format stream-json -t "<tâche>"` | CLI `goose` ≥ 1.61 ; NDJSON `message`/`complete` |
 | Personnalisé | `args` contenant `{prompt}`, sinon tâche ajoutée | exécutable de votre choix |
 
 IH affiche le nom, la version (via `--version`), le chemin et le diagnostic de

@@ -552,9 +552,13 @@ export function agentLaunchReducer(
 
 // ---------------------------------------------------- sélection adaptateur
 
-/** Un adaptateur n'est sélectionnable que s'il a réellement été détecté. */
+/**
+ * Un adaptateur n'est sélectionnable que s'il a réellement été détecté **et**
+ * qu'il répond correctement à `--version` : un binaire homonyme non
+ * fonctionnel ne doit jamais être lancé (faux positif).
+ */
 export function isAdapterSelectable(adapter: AgentAdapterReport): boolean {
-  return adapter.detected;
+  return adapter.detected && adapter.functional !== false;
 }
 
 /** Adaptateurs réellement lançables. */
@@ -562,6 +566,42 @@ export function selectableAdapters(
   adapters: readonly AgentAdapterReport[],
 ): AgentAdapterReport[] {
   return adapters.filter(isAdapterSelectable);
+}
+
+/**
+ * Clé i18n du badge de niveau de sécurité d'un agent (`agent_security.level_*`).
+ * Le backend est la seule source de vérité : un niveau absent retombe sur le
+ * défaut documenté (`isolated_network`).
+ */
+export function securityLabelKey(level: string | undefined): string {
+  return `agent_security.level_${level ?? "isolated_network"}`;
+}
+
+/** Clé i18n de l'état réseau affiché à côté du niveau de sécurité. */
+export function networkLabelKey(level: string | undefined, network: boolean | undefined): string {
+  if (level === "isolated") return "agent_security.network_off";
+  return network ? "agent_security.network_on" : "agent_security.network_off";
+}
+
+/**
+ * Clé i18n du diagnostic du moteur de sandbox : une sandbox non fonctionnelle
+ * est signalée comme indisponible (aucun lancement isolé possible).
+ */
+export function sandboxLabelKey(sandbox: {
+  engine_ready?: boolean;
+  level?: string;
+} | undefined): string {
+  if (!sandbox || sandbox.level === "none") return "";
+  return sandbox.engine_ready ? "agent_security.sandbox_ready" : "agent_security.sandbox_unavailable";
+}
+
+/**
+ * Une confirmation explicite est exigée uniquement pour le niveau non isolé :
+ * c'est elle qui autorise l'exécution hors sandbox, et elle est liée à
+ * l'empreinte d'approbation.
+ */
+export function requiresUnsandboxedAck(security: string | undefined): boolean {
+  return security === "none";
 }
 
 /** Premier adaptateur détecté, ou `null` si aucun ne l'est. */

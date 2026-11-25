@@ -445,6 +445,11 @@ pub fn workflow_run_now(state: State<'_, AppState>, id: String) -> IhResult<Work
             project_dir: root.clone(),
             prompt: prompt.to_string(),
             session_id: None,
+            // Automatisations : aucune confirmation interactive par étape.
+            confirm_unsandboxed: false,
+            // Pas de worktree ici : le projet est monté tel quel, sans montage
+            // Git supplémentaire (l'agent reste dans la sandbox système).
+            git: None,
         });
         match session {
             Ok(session_id) => {

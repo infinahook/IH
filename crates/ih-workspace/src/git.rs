@@ -110,6 +110,67 @@ impl GitRepo {
     pub fn root(&self) -> &Path {
         &self.root
     }
+    /// Répertoire Git **commun** du dépôt (`<racine>/.git`, même quand le
+    /// projet est lui-même un worktree lié), canonicalisé et non symbolique.
+    pub fn git_common_dir(&self) -> IhResult<std::path::PathBuf> {
+        let output = self.checked(&["rev-parse", "--git-common-dir"])?;
+        let raw = text(&output.stdout);
+        if raw.is_empty() {
+            return Err(IhError::Invalid(
+                "git rev-parse --git-common-dir sans résultat".into(),
+            ));
+        }
+        let candidate = if std::path::Path::new(&raw).is_absolute() {
+            std::path::PathBuf::from(&raw)
+        } else {
+            self.root.join(&raw)
+        };
+        let meta = std::fs::symlink_metadata(&candidate).map_err(|error| {
+            IhError::Invalid(format!(
+                "répertoire Git commun introuvable ({}) : {error}",
+                candidate.display()
+            ))
+        })?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err(IhError::Unsupported(format!(
+                "répertoire Git commun non réel (lien symbolique ou fichier) : {}",
+                candidate.display()
+            )));
+        }
+        std::fs::canonicalize(&candidate).map_err(|error| {
+            IhError::Internal(format!(
+                "répertoire Git commun non canonicalisable : {error}"
+            ))
+        })
+    }
+
+    /// Chemin absolu du répertoire Git (`<racine>/.git` ou celui d'un dépôt
+    /// lié), canonicalisé. Refuse un chemin qui n'est pas un répertoire réel.
+    pub fn git_dir(&self) -> IhResult<std::path::PathBuf> {
+        let output = self.checked(&["rev-parse", "--absolute-git-dir"])?;
+        let raw = text(&output.stdout);
+        if raw.is_empty() {
+            return Err(IhError::Invalid(
+                "git rev-parse --absolute-git-dir sans résultat".into(),
+            ));
+        }
+        let path = std::path::PathBuf::from(raw);
+        let meta = std::fs::symlink_metadata(&path).map_err(|error| {
+            IhError::Invalid(format!(
+                "répertoire Git introuvable ({}) : {error}",
+                path.display()
+            ))
+        })?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err(IhError::Unsupported(format!(
+                "répertoire Git non réel (lien symbolique ou fichier) : {}",
+                path.display()
+            )));
+        }
+        std::fs::canonicalize(&path).map_err(|error| {
+            IhError::Internal(format!("répertoire Git non canonicalisable : {error}"))
+        })
+    }
 
     /// Branche courante, `HEAD` si l'état est détaché.
     pub fn current_branch(&self) -> IhResult<String> {

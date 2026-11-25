@@ -33,6 +33,10 @@ pub struct TeamRequest {
     /// Nombre de tâches d'exécution (1 à 4).
     #[serde(default = "default_workers")]
     pub work_items: usize,
+    /// Acquittement explicite exigé si un membre est configuré au niveau non
+    /// isolé (`none`). Sans lui, ni l'approbation ni la course ne démarrent.
+    #[serde(default)]
+    pub unsandboxed_ack: Option<bool>,
 }
 
 fn default_workers() -> usize {
@@ -47,6 +51,65 @@ fn fingerprint(request: &TeamRequest, root: &std::path::Path) -> IhResult<String
         &request.workers,
         request.reviewer.as_deref(),
         root,
+    ))
+}
+
+/// Niveaux de sécurité réels des membres de l'équipe, dans l'ordre du plan.
+fn team_levels(
+    request: &TeamRequest,
+    config: &ih_core::config::AppConfig,
+) -> Vec<ih_core::config::SecurityLevel> {
+    std::iter::once(&request.lead)
+        .chain(request.workers.iter())
+        .chain(request.reviewer.iter())
+        .filter_map(|id| config.agent(id).map(|agent| agent.security))
+        .collect()
+}
+
+/// Vrai si au moins un membre s'exécutera **sans sandbox** : la course exige
+/// alors un acquittement explicite.
+fn requires_unsandboxed_ack(request: &TeamRequest, config: &ih_core::config::AppConfig) -> bool {
+    ih_agent_mode::team_requires_unsandboxed_ack(team_levels(request, config))
+}
+
+/// Acquittement effectif, inscrit dans l'empreinte : sans lui, l'approbation
+/// d'une course non isolée n'est ni délivrée ni acceptée.
+fn ack_flag(request: &TeamRequest) -> bool {
+    request.unsandboxed_ack == Some(true)
+}
+
+/// Niveau de sécurité de chaque agent de l'équipe, tel qu'il sera exécuté.
+/// Inscrit dans l'empreinte : changer un niveau invalide l'approbation.
+fn security_summary(request: &TeamRequest, config: &ih_core::config::AppConfig) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut push = |agent_id: &str| {
+        if let Some(agent) = config.agent(agent_id) {
+            parts.push(format!("{agent_id}={}", agent.security.as_str()));
+        } else {
+            parts.push(format!("{agent_id}=absent"));
+        }
+    };
+    push(&request.lead);
+    for worker in &request.workers {
+        push(worker);
+    }
+    if let Some(reviewer) = request.reviewer.as_deref() {
+        push(reviewer);
+    }
+    parts.join(",")
+}
+
+/// Empreinte complète : course + niveaux de sécurité réels.
+fn full_fingerprint(
+    request: &TeamRequest,
+    root: &std::path::Path,
+    config: &ih_core::config::AppConfig,
+) -> IhResult<String> {
+    let base = fingerprint(request, root)?;
+    Ok(format!(
+        "{base}|securite:{}|ack:{}",
+        security_summary(request, config),
+        ack_flag(request)
     ))
 }
 
@@ -86,10 +149,18 @@ pub fn team_request_approval(
     let root = project_path(&state, request.project_id.as_str())?;
     let config = state.config_snapshot()?;
     let team = build_team(&request, &config)?;
+    if requires_unsandboxed_ack(&request, &config) && !ack_flag(&request) {
+        return Err(IhError::Denied(
+            "au moins un membre de l'équipe s'exécute sans sandbox : confirmez explicitement \
+             l'exécution hors sandbox avant de demander l'approbation"
+                .into(),
+        ));
+    }
     let plan = plan_goal(&request.goal, &team, request.work_items)?;
     plan.graph.validate()?;
 
-    let fingerprint = fingerprint(&request, &root)?;
+    let fingerprint = full_fingerprint(&request, &root, &config)?;
+    let security = security_summary(&request, &config);
     let summary = plan
         .graph
         .topological_order()
@@ -97,18 +168,27 @@ pub fn team_request_approval(
         .map(|node| format!("- [{}] {}", node.role.as_str(), node.title))
         .collect::<Vec<_>>()
         .join("\n");
-    let detail = format!(
-        "Objectif : {}\nRépertoire isolé sous : {}\nEmpreinte : {fingerprint}\n\nPlan :\n{summary}\n\n\
+    let mut detail = format!(
+        "Objectif : {}\nRépertoire isolé sous : {}\nEmpreinte : {fingerprint}\n\
+         Niveaux de sécurité : {security}\n\nPlan :\n{summary}\n\n\
          Chaque tâche s'exécute dans un worktree git isolé ; le projet n'est pas modifié. \
          Les fichiers produits seront présentés en diff avant application.",
         request.goal,
         root.display()
     );
-    let approval = state.approvals.ask(
+    if requires_unsandboxed_ack(&request, &config) {
+        detail.push_str(
+            "\n\n⚠ Au moins un membre de l'équipe s'exécute SANS SANDBOX (niveau « none ») : \
+             il agit avec les droits de votre compte utilisateur, hors du worktree, sans \
+             isolation système. Cette exécution ne doit être autorisée qu'en connaissance de cause.",
+        );
+    }
+    let approval = state.approvals.ask_with_fingerprint(
         TEAM_CATEGORY,
         &format!("Lancer une équipe sur : {}", truncate(&request.goal, 100)),
         &detail,
         ih_security::risk::RiskLevel::High,
+        Some(fingerprint.clone()),
     )?;
 
     Ok(TeamApprovalView {
@@ -151,19 +231,21 @@ pub fn team_run(
     let root = project_path(&state, request.project_id.as_str())?;
     let config = state.config_snapshot()?;
     let team = build_team(&request, &config)?;
-
-    // Approbation : doit correspondre exactement à cette course.
-    let expected = fingerprint(&request, &root)?;
-    let pending = state
-        .approvals
-        .get(&approval_id)?
-        .ok_or_else(|| IhError::NotFound(format!("approbation {approval_id}")))?;
-    if !ih_agent_mode::approval_covers(&pending.detail, &expected) {
+    // Seconde barrière : sans acquittement, une course contenant un agent non
+    // isolé est refusée même si une approbation existe.
+    if requires_unsandboxed_ack(&request, &config) && !ack_flag(&request) {
         return Err(IhError::Denied(
-            "l'approbation ne correspond pas à cet objectif ou à ces agents".into(),
+            "exécution hors sandbox non confirmée pour cette course d'équipe".into(),
         ));
     }
-    state.approvals.consume(&approval_id, TEAM_CATEGORY)?;
+
+    // Approbation : doit correspondre exactement à cette course (niveaux de
+    // sécurité et acquittement compris).
+    let expected = full_fingerprint(&request, &root, &config)?;
+    // NV9 : comparaison du champ d'empreinte (jamais le texte du détail).
+    state
+        .approvals
+        .consume_with_fingerprint(&approval_id, TEAM_CATEGORY, &expected)?;
 
     let plan = plan_goal(&request.goal, &team, request.work_items)?;
     plan.graph.validate()?;
@@ -314,4 +396,76 @@ fn truncate(text: &str, max: usize) -> String {
         out.push('…');
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ih_core::config::{AgentConfig, AgentKind, AppConfig, SecurityLevel};
+
+    fn agent(id: &str, security: SecurityLevel) -> AgentConfig {
+        AgentConfig {
+            id: id.into(),
+            kind: AgentKind::Custom,
+            label: id.into(),
+            program: "agent".into(),
+            enabled: true,
+            security,
+            ..Default::default()
+        }
+    }
+
+    fn request(ack: Option<bool>) -> TeamRequest {
+        TeamRequest {
+            project_id: "prj-1".into(),
+            goal: "objectif".into(),
+            lead: "lead".into(),
+            workers: vec!["worker".into()],
+            reviewer: Some("reviewer".into()),
+            work_items: 2,
+            unsandboxed_ack: ack,
+        }
+    }
+
+    fn config(level: SecurityLevel) -> AppConfig {
+        let mut config = AppConfig::default();
+        config.agents.clear();
+        config.agents.push(agent("lead", level));
+        config.agents.push(agent("worker", level));
+        config
+            .agents
+            .push(agent("reviewer", SecurityLevel::IsolatedNetwork));
+        config
+    }
+
+    #[test]
+    fn l_equipe_sandboxee_ne_demande_pas_d_acquittement() {
+        let config = config(SecurityLevel::Isolated);
+        assert!(!requires_unsandboxed_ack(&request(None), &config));
+        assert!(!ack_flag(&request(None)));
+    }
+
+    #[test]
+    fn l_equipe_avec_un_membre_non_isole_demande_l_acquittement() {
+        let config = config(SecurityLevel::None);
+        assert!(requires_unsandboxed_ack(&request(None), &config));
+        assert!(
+            !ack_flag(&request(None)),
+            "sans case cochée, pas d'acquittement"
+        );
+        assert!(ack_flag(&request(Some(true))), "case cochée = acquittement");
+        assert!(!ack_flag(&request(Some(false))));
+    }
+
+    #[test]
+    fn l_empreinte_change_avec_l_acquittement_et_les_niveaux() {
+        let root = std::path::Path::new("/tmp/projet");
+        let sandboxed = config(SecurityLevel::Isolated);
+        let unsandboxed = config(SecurityLevel::None);
+        let base = full_fingerprint(&request(None), root, &sandboxed).unwrap();
+        let with_ack = full_fingerprint(&request(Some(true)), root, &sandboxed).unwrap();
+        let other_level = full_fingerprint(&request(None), root, &unsandboxed).unwrap();
+        assert_ne!(base, with_ack, "l'acquittement entre dans l'empreinte");
+        assert_ne!(base, other_level, "les niveaux entrent dans l'empreinte");
+    }
 }

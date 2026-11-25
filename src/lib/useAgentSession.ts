@@ -46,6 +46,9 @@ export interface AgentSessionController {
   setTask: (value: string) => void;
   launchBlocked: AgentLaunchBlocked;
   canLaunch: boolean;
+  /** Confirmation explicite exigée pour exécuter un agent sans sandbox. */
+  unsandboxedAck: boolean;
+  setUnsandboxedAck: (value: boolean) => void;
   approval: AgentApprovalView | null;
   phase: AgentPhase;
   active: boolean;
@@ -106,6 +109,12 @@ const TERMINAL_KINDS: ReadonlySet<string> = new Set(["completed", "cancelled", "
  * `agent.ts` et restent testables sans WebView.
  */
 export function useAgentSession(projectId: string | null): AgentSessionController {
+  const [unsandboxedAck, setUnsandboxedAckState] = useState(false);
+  const unsandboxedAckRef = useRef(false);
+  const setUnsandboxedAck = useCallback((value: boolean) => {
+    unsandboxedAckRef.current = value;
+    setUnsandboxedAckState(value);
+  }, []);
   const { t } = useApp();
   const adapters = useAsync<AgentAdapterReport[]>(() => api.agent.adapters(), []);
   const sessions = useAsync<AgentSessionDetail[]>(
@@ -201,7 +210,7 @@ export function useAgentSession(projectId: string | null): AgentSessionControlle
       dispatchStream({ type: "select", sessionId: null });
       dispatchLaunch({ type: "reset" });
       const approval = await launchAction.run(() =>
-        api.agent.requestApproval(scope, agentId, trimmed),
+        api.agent.requestApproval(scope, agentId, trimmed, unsandboxedAckRef.current),
       );
       if (!approval || projectRef.current !== scope) {
         return;
@@ -388,6 +397,8 @@ export function useAgentSession(projectId: string | null): AgentSessionControlle
     setTask,
     launchBlocked,
     canLaunch: launchBlocked === null,
+    unsandboxedAck,
+    setUnsandboxedAck,
     approval: launch.approval,
     phase,
     active,

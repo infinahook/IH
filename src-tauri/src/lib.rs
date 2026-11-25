@@ -75,7 +75,6 @@ pub fn run() {
             commands::workspace::terminal_close,
             // agents & fournisseurs
             commands::ai::agents_list,
-            commands::ai::agent_start,
             commands::ai::agent_cancel,
             commands::ai::agent_state,
             commands::ai::agent_sessions,
