@@ -103,6 +103,7 @@ fn run_session(
             prompt: prompt.into(),
             session_id: None,
             confirm_unsandboxed: false,
+            git: None,
         })
         .expect("lancement sandboxé");
     let timeout = Duration::from_secs(240);
@@ -264,6 +265,7 @@ fn annulation_sandbox_arrete_bwrap_et_les_enfants() {
                 prompt: "Compte lentement de 1 à 50 en détaillant chaque nombre.".into(),
                 session_id: None,
                 confirm_unsandboxed: false,
+                git: None,
             })
             .expect("lancement");
         let started = Instant::now();

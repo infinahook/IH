@@ -84,6 +84,45 @@
   exécution) ; les canaris des tests sont créés dans un dossier temporaire et
   ne touchent plus le `$HOME` réel.
 
+### Corrigé (audit final indépendant — NV1 à NV9)
+- **NV1 (critique) — évasion de sandbox via `.git`** : le contenu du fichier
+  `.git` d'un worktree est inscriptible par l'agent et **ne fait plus
+  autorité**. Les montages Git sont calculés par IH à la création du worktree
+  (`GitMounts`, depuis le dépôt découvert puis canonicalisé et confiné),
+  conservés côté Rust et transmis au superviseur. Un `.git` absent, symbolique,
+  malformé, relatif ou pointant ailleurs **refuse le lancement** : aucun montage
+  alternatif n'est créé.
+- **NV2** : `commondir` est vérifié à chaque lancement ; il doit désigner
+  exactement le répertoire Git commun attendu, sinon refus explicite.
+- **NV3/NV4 (architecture Git)** : le répertoire Git commun **et** les
+  métadonnées du worktree sont montés en **lecture seule** ; l'index de session
+  vit dans le home privé (`GIT_INDEX_FILE=/home/agent/.git-index`). Le dépôt
+  n'est donc jamais inscriptible et rien de contrôlé par l'agent ne devient un
+  montage.
+- **NV4 (hôte)** : les inspections Git d'IH sur un worktree d'agent sont
+  exécutées avec un environnement minimal et une configuration explicite
+  (`core.fsmonitor=false`, `core.hooksPath=/dev/null`, `diff.external=`,
+  `protocol.allow=never`, …) : fsmonitor/hooks/textconv/`GIT_*` du dépôt ne
+  peuvent plus faire exécuter un programme sur l'hôte (test canari).
+- **NV3 (dossier privé)** : le marqueur `.ih-owner` est **obligatoire** (échec
+  d'écriture ⇒ création refusée et dossier supprimé) et un **verrou `flock`**
+  est tenu pendant toute la session : le nettoyage des orphelins ne supprime
+  jamais un dossier vivant, même avec un PID réutilisé (NV8 : PID + instant de
+  démarrage de `/proc/<pid>/stat`).
+- **NV5** : la racine de montage d'un exécutable est canonicalisée et un
+  répertoire symbolique est refusé ; la fenêtre TOCTOU résiduelle est
+  documentée.
+- **NV6** : le moteur de sandbox est **revalidé à chaque lancement**
+  (identité dev/ino/taille/mtime/uid puis nouvelle sonde si changement).
+- **NV9** : les approbations d'agent et d'équipe utilisent un **champ
+  d'empreinte dédié** (`ask_with_fingerprint` / `consume_with_fingerprint`)
+  au lieu d'une recherche dans le texte du détail.
+- Tests de régression : canaris `.git`/`commondir` (HOME factice, `.ssh`
+  factice, `..`, lien symbolique, chemin inexistant, chemin valide), Team Mode
+  (empoisonnement refusé à la session suivante), Git normal (`status`/`diff`,
+  index dans le home privé), exécution contrôlée par le dépôt (canari
+  fsmonitor/textconv), dossier privé (marqueur obligatoire, verrou).
+
 ### Vérifié
 - Tests réels exécutés sur la machine de validation (`IH_REAL_AGENTS=1`) :
   détection et version (`kilo 7.8.32`, `dsh 0.1.0-rc.7`, `goose 1.61.0`),
@@ -94,7 +133,7 @@
   avec un accès hôte refusé (canaris `$HOME`, `~/.ssh`, sockets), un prompt
   hostile ne fait fuiter aucun canari, et le niveau `isolated` échoue
   explicitement chez les trois (DNS/transport coupés).
-- 437 tests Rust (+15 tests d'isolation/agents ignorés explicitement), 188 tests frontend,
+- 442 tests Rust (+17 tests d'isolation/agents ignorés explicitement), 188 tests frontend,
   `tsc --noEmit` et build de production verts.
 
 ## 0.6.3 — Cohérence visuelle de l'interface

@@ -78,24 +78,59 @@ exemple `~/.local/bin`). Vérifié par canaris (`~/.ssh`, `~/.aws`, `~/.config`,
 
 ### Git dans le worktree sandboxé
 
-Le fichier `.git` d'un worktree pointe vers `<dépôt>/.git/worktrees/<nom>`.
-IH monte ce dossier de métadonnées **en écriture** (index et HEAD propres à la
-session) et le répertoire Git commun **en lecture seule** : `git status` et
-`git diff` fonctionnent dans la sandbox, mais le dépôt principal — dont
-`.git/config` — n'est jamais inscriptible (`tests/sandbox_git.rs`).
+Le fichier `.git` d'un worktree est **inscriptible par l'agent** : il ne fait
+jamais autorité.
+
+- Les chemins Git (`GitMounts` : `<dépôt>/.git` commun et
+  `<dépôt>/.git/worktrees/<nom>`) sont **calculés par IH** à la création du
+  worktree, canonicalisés et confinés au dépôt, puis conservés côté Rust
+  (`Sandbox::git`, transmis au superviseur).
+- À chaque lancement, IH vérifie que `.git` est un **fichier régulier**
+  (jamais un lien), que son contenu désigne exactement le gitdir attendu, et
+  que `commondir` désigne exactement le répertoire Git commun attendu. Toute
+  divergence **refuse le lancement** ; aucun montage alternatif n'est créé.
+- Les deux chemins sont montés en **lecture seule** ; l'index de la session vit
+  dans le home privé (`GIT_INDEX_FILE=/home/agent/.git-index`). Le dépôt n'est
+  donc jamais inscriptible, y compris pendant une course d'équipe qui partage
+  un worktree entre plusieurs tâches.
+- `git status` et `git diff` fonctionnent dans la sandbox
+  (`tests/sandbox_git.rs`), et les tests `tests/git_mounts.rs` couvrent les cas
+  `.git`/`commondir` détournés (HOME factice, `.ssh` factice, `..`, lien
+  symbolique, chemin inexistant, chemin valide).
+
+### Inspection Git côté hôte
+
+Les inspections d'IH sur un worktree d'agent (`changed_files`,
+`collect_changes`) utilisent un environnement minimal (`env_clear`,
+`GIT_CONFIG_NOSYSTEM`, `GIT_ASKPASS=/bin/false`) et une configuration explicite
+prioritaire sur celle du dépôt : `core.fsmonitor=false`,
+`core.hooksPath=/dev/null`, `core.sshCommand=`, `core.askPass=`,
+`diff.external=`, `protocol.allow=never`, `submodule.recurse=false`,
+`gc.auto=0`. Un dépôt piégé ne peut donc pas faire exécuter un programme sur
+l'hôte (test canari `tests/host_git_hardening.rs`).
 
 ### Cycle de vie des dossiers privés
 
 Le dossier privé (ses copies d'identifiants comprises) est créé en **`0700`**,
-marqué par le PID de l'instance propriétaire, et détruit par un **garde RAII** :
-succès, erreur, échec de lancement, expiration ou annulation. Au démarrage, IH
-purge les dossiers orphelins (propriétaire mort) sans supprimer ceux d'une
-instance encore active.
+marqué par le PID **et l'instant de démarrage** (`/proc/<pid>/stat`) de
+l'instance propriétaire, protégé par un **verrou `flock`** tenu pendant toute la
+session, et détruit par un **garde RAII** : succès, erreur, échec de lancement,
+expiration ou annulation.
+
+- Le marqueur `.ih-owner` est **obligatoire** : une écriture impossible fait
+  échouer la création et le dossier partiel est supprimé.
+- Le nettoyage des orphelins ne supprime **jamais** un dossier verrouillé, et
+  ne supprime un dossier sans verrou que si le couple PID + instant de
+  démarrage est périmé ; un dossier sans marqueur exploitable est conservé.
+- Le moteur de sandbox est **revalidé à chaque lancement** (identité du fichier
+  puis nouvelle sonde si elle a changé).
 
 ### Acquittement du niveau non isolé en Mode Équipe
 
 Comme en Mode Agent, une course d'équipe contenant **au moins un agent au
-niveau `none`** exige une confirmation dédiée : case explicite dans l'interface,
+niveau `none`** exige une confirmation dédiée, et les approbations (agent comme
+équipe) sont liées par un **champ d'empreinte dédié** (jamais une recherche dans
+le texte du détail) : case explicite dans l'interface,
 refus côté Rust sans cette confirmation, et inclusion de l'acquittement **et**
 des niveaux dans l'empreinte d'approbation (cocher ou décocher invalide une
 approbation déjà délivrée).
@@ -177,7 +212,10 @@ réussis sans exécution. Exécution explicite :
 
 ```sh
 IH_REQUIRE_SANDBOX=1 cargo test -p ih-agents --test sandbox_runtime \
-  --test home_protection --test sandbox_git -- --ignored --test-threads=1
+  --test home_protection --test sandbox_git --test git_mounts \
+  -- --ignored --test-threads=1
+IH_REQUIRE_SANDBOX=1 cargo test -p ih-agent-mode --test team_git_isolation \
+  -- --ignored --test-threads=1
 ```
 
 En CI, un job dédié (« Sandbox réelle (bubblewrap) ») installe bubblewrap,

@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 437 tests Rust + 188 tests frontend, tous verts.
+Dernière vérification : 442 tests Rust + 188 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -117,7 +117,7 @@ Dernière vérification : 437 tests Rust + 188 tests frontend, tous verts.
 | `ih-store` | 25 | migrations (**v4, v5 et v6**), CRUD, cascade, pagination, concurrence, recherche, **MCP : catalogue et appels**, **propositions d'outils du chat (transitions, réclamation atomique, reprise)**, **sauvegarde cohérente avant migration** |
 | `ih-security` | 47 | approbations (dont empreintes), expiration/rejeu, classification de risque, **politique réseau MCP (SSRF)**, trousseau |
 | `ih-providers` | 28 | 4 fournisseurs, SSE/NDJSON, erreurs 401, timeout, clé absente, **tool calling natif (capacité, sérialisation, appels, streaming fragmenté)** |
-| `ih-agents` | 47 | adaptateurs (dont Kilo/DSH/Goose), **sandbox bubblewrap (niveaux, moteur authentifié, sonde négative, protection du HOME, RAII, git dans le worktree)**, supervision, annulation, timeout, limite ; **9 tests réels ignorés** (bubblewrap ou agents requis) |
+| `ih-agents` | 51 | adaptateurs (dont Kilo/DSH/Goose), **sandbox bubblewrap (niveaux, moteur authentifié, sonde négative, protection du HOME, RAII, git dans le worktree)**, supervision, annulation, timeout, limite ; **9 tests réels ignorés** (bubblewrap ou agents requis) |
 | `ih-extensions` | 27 | manifestes, empreinte, installation, prison, MCP stdio, serveur muet |
 | `ih-workspace` | 33 | Git, prison de chemins, PTY, **diff LCS**, métadonnées, écriture vérifiée |
 | `ih-orchestrator` | 23 | cycles, disponibilité, équipes, ordonnanceur, budget mémoire |
@@ -125,12 +125,12 @@ Dernière vérification : 437 tests Rust + 188 tests frontend, tous verts.
 | `ih-i18n` | 5 | parité FR/EN, repli, substitution |
 | `ih-chat` | 19 | streaming, annulation, historique borné, contexte injecté, erreurs, titre, recherche, continueur d'outils + **e2e Ollama réel** |
 | `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
-| `ih-agent-mode` | 10 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action, **acquittement du niveau non isolé en équipe** ; **5 tests réels ignorés** (agents requis) |
+| `ih-agent-mode` | 11 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action, **acquittement du niveau non isolé en équipe** ; **5 tests réels ignorés** (agents requis) |
 | `ih-mcp` | 48 | schémas, politique URL, session unifiée ; **9 tests d'intégration Streamable HTTP**, **4 tests SSE** et **le cycle chat natif complet** (fournisseur simulé + serveur MCP local réel) |
 | `ih-desktop` | 23 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions, **bornes d'appels et de cycles**, **garde-fou MCP stdio (activation, schéma, classification, isolation du modèle)** |
-| **Rust total** | **437** | |
+| **Rust total** | **442** | |
 | Frontend (`vitest`) | 188 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent (**niveaux de sécurité**), **MCP** |
-| **Total** | **625** | |
+| **Total** | **630** | |
 
 ## Vérifications manuelles effectuées
 

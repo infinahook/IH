@@ -78,6 +78,7 @@ fn un_faux_bwrap_qui_ignore_les_drapeaux_est_refuse() {
         &workdir,
         &[],
         "engine-test",
+        None,
     );
     assert!(command.is_err(), "aucune commande sandboxée ne doit sortir");
     let _ = std::fs::remove_dir_all(&workdir);

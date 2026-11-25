@@ -91,6 +91,7 @@ fn lancement_instruction_et_reponse_reelles() {
                         .into(),
                 session_id: None,
                 confirm_unsandboxed: false,
+                git: None,
             })
             .expect("lancement");
         let state = supervisor
@@ -163,6 +164,7 @@ fn annulation_reelle_tue_le_processus() {
                 prompt: "Compte lentement de 1 à 50 en détaillant chaque nombre.".into(),
                 session_id: None,
                 confirm_unsandboxed: false,
+                git: None,
             })
             .expect("lancement");
         // Laisse le CLI démarrer réellement, puis annule.
@@ -266,6 +268,7 @@ fn erreur_reelle_est_signalee() {
                 prompt: "OK".into(),
                 session_id: None,
                 confirm_unsandboxed: false,
+                git: None,
             })
             .expect("lancement");
         let state = supervisor

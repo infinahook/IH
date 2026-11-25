@@ -174,4 +174,7 @@ jobs:
           cargo test -p ih-agents --test sandbox_runtime -- --ignored --test-threads=1
           cargo test -p ih-agents --test home_protection -- --ignored --test-threads=1
           cargo test -p ih-agents --test sandbox_git -- --ignored --test-threads=1
+          cargo test -p ih-agents --test git_mounts
+          cargo test -p ih-agent-mode --test team_git_isolation -- --ignored --test-threads=1
+          cargo test -p ih-agent-mode --test host_git_hardening
           cargo test -p ih-agent-mode --lib

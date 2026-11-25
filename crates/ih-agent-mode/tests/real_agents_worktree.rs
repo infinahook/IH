@@ -85,6 +85,7 @@ fn worktree_isole_et_changements_reels() {
                 session_id: None,
 
 confirm_unsandboxed: false,
+            git: None,
             })
             .expect("lancement");
         let state = supervisor

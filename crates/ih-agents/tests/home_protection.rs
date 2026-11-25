@@ -82,6 +82,7 @@ fn run_plan(
         workdir,
         &[],
         "home-test",
+        None,
     )
     .expect("plan de sandbox");
     let output = Command::new(&plan.program)
@@ -120,6 +121,7 @@ fn un_executable_a_la_racine_du_home_est_refuse() {
         &workdir,
         &[],
         "home-refus",
+        None,
     )
     .err()
     .map(|error| error.to_string())

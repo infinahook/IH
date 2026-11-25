@@ -58,6 +58,7 @@ fn run_in_sandbox(
         workdir,
         env,
         "test",
+        None,
     )
     .expect("plan de sandbox");
     let output = Command::new(&plan.program)

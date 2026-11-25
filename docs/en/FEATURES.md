@@ -6,7 +6,7 @@ This is the **honest** reference. Three statuses:
 - ⚠️ **partial**: genuinely works, but part of the need is uncovered — stated explicitly.
 - ❌ **missing**: not implemented. No UI button pretends otherwise.
 
-Last verified: 437 Rust tests + 188 frontend tests, all green.
+Last verified: 442 Rust tests + 188 frontend tests, all green.
 
 | # | Feature | Status | Detail |
 |---|---|---|---|
@@ -85,7 +85,7 @@ Last verified: 437 Rust tests + 188 frontend tests, all green.
 | `ih-store` | 25 | migrations (incl. **v4, v5 and v6**), CRUD, cascade, pagination, concurrency, search, **MCP catalog and calls**, **chat tool proposals (transitions, atomic claim, restart)**, **consistent backup before migration** |
 | `ih-security` | 47 | approvals (fingerprint-bound), expiry/replay, risk classification, **MCP network policy (SSRF)**, keyring |
 | `ih-providers` | 28 | 4 providers, SSE/NDJSON, 401 errors, timeout, missing key, **native tool calling (capability, serialization, calls, fragmented streaming)** |
-| `ih-agents` | 47 | adapters (incl. Kilo/DSH/Goose), **bubblewrap sandbox (levels, authenticated engine, negative probe, HOME protection, RAII, git in worktree)**, supervision, cancel, timeout, limit; **9 real tests ignored** (bubblewrap or agents required) |
+| `ih-agents` | 51 | adapters (incl. Kilo/DSH/Goose), **bubblewrap sandbox (levels, authenticated engine, negative probe, HOME protection, RAII, git in worktree)**, supervision, cancel, timeout, limit; **9 real tests ignored** (bubblewrap or agents required) |
 | `ih-extensions` | 27 | manifests, digest, install, path jail, MCP stdio, silent server |
 | `ih-workspace` | 33 | Git, path jail, PTY, **LCS diff**, metadata, checked write |
 | `ih-orchestrator` | 23 | cycles, readiness, teams, scheduler, memory budget |
@@ -93,12 +93,12 @@ Last verified: 437 Rust tests + 188 frontend tests, all green.
 | `ih-i18n` | 5 | FR/EN parity, fallback, substitution |
 | `ih-chat` | 19 | streaming, cancellation, bounded history, injected context, errors, title, search, tool continuation + **real Ollama e2e** |
 | `ih-context` | 23 | exclusions, secrets, truncation, budget, path jail, fuzzy mentions |
-| `ih-agent-mode` | 10 | worktree sandbox, change collection, adapter detection, action fingerprint, **team unsandboxed acknowledgment**; **5 real tests ignored** (agents required) |
+| `ih-agent-mode` | 11 | worktree sandbox, change collection, adapter detection, action fingerprint, **team unsandboxed acknowledgment**; **5 real tests ignored** (agents required) |
 | `ih-mcp` | 48 | schemas, URL policy, unified session; **9 Streamable HTTP integration tests**, **4 SSE tests** and **the full native chat cycle** (simulated provider + real local MCP server) |
 | `ih-desktop` | 23 | IPC commands: exposed tool catalog (names, collisions, schemas, budgets), chat tool proposals, decisions, **call and cycle bounds**, **stdio MCP guard (activation, schema, classification, model isolation)** |
-| **Rust total** | **437** | |
+| **Rust total** | **442** | |
 | Frontend (`vitest`) | 188 | i18n, formatting, ANSI, Git, file tree, chat, layout, mentions, tabs, diff, agent (**security levels**), **MCP** |
-| **Total** | **625** | |
+| **Total** | **630** | |
 
 ## Manual verifications performed
 
