@@ -45,6 +45,61 @@ Refusé par construction : lecture de `~`, `~/.ssh`, `~/.gnupg`, `~/.config`,
 fichiers de secrets, sockets de session (keyring), écriture/suppression hors
 worktree, accès aux services de l'utilisateur.
 
+### Authentification du moteur
+
+Un moteur n'est accepté que s'il est **absolument** identifié :
+
+- chemin absolu, fichier régulier, non inscriptible par le groupe ou le monde
+  (et possédé par `root` dans un binaire de production) ;
+- **sonde positive** : une sandbox minimale doit démarrer ;
+- **sonde négative** : la sandbox doit **refuser** d'écrire sur un fichier de
+  l'hôte placé hors de ses montages. Un faux `bwrap` qui ignore les drapeaux
+  échoue donc à cette étape et est refusé (`tests/engine_auth.rs`).
+
+La surcharge de test `IH_SANDBOX_ENGINE` n'est honorée que dans les builds de
+test/débogage (`debug_assertions`) : un binaire de production l'ignore, et
+exigerait de toute façon un moteur possédé par root.
+
+### Protection du dossier personnel
+
+Le montage d'un exécutable utilisateur ne doit jamais faire entrer `$HOME` dans
+la sandbox. IH calcule la racine strictement nécessaire (dossier du binaire ou
+paquet `node_modules`) et **refuse** la configuration si cette racine est :
+
+- le dossier personnel lui-même ;
+- un de ses ancêtres (`/home`, `/`) ;
+- un dossier contenant des secrets personnels (`~/.ssh`, `~/.aws`, `~/.gnupg`,
+  `~/.config`, `~/.local/share`, `~/.kube`, `~/.docker`, `~/.npmrc`, …).
+
+Un agent dont le binaire se trouve directement dans `$HOME` n'est plus lancé :
+le message demande de déplacer l'exécutable dans un sous-dossier dédié (par
+exemple `~/.local/bin`). Vérifié par canaris (`~/.ssh`, `~/.aws`, `~/.config`,
+`~/.local/share`) dans `crates/ih-agents/tests/home_protection.rs`.
+
+### Git dans le worktree sandboxé
+
+Le fichier `.git` d'un worktree pointe vers `<dépôt>/.git/worktrees/<nom>`.
+IH monte ce dossier de métadonnées **en écriture** (index et HEAD propres à la
+session) et le répertoire Git commun **en lecture seule** : `git status` et
+`git diff` fonctionnent dans la sandbox, mais le dépôt principal — dont
+`.git/config` — n'est jamais inscriptible (`tests/sandbox_git.rs`).
+
+### Cycle de vie des dossiers privés
+
+Le dossier privé (ses copies d'identifiants comprises) est créé en **`0700`**,
+marqué par le PID de l'instance propriétaire, et détruit par un **garde RAII** :
+succès, erreur, échec de lancement, expiration ou annulation. Au démarrage, IH
+purge les dossiers orphelins (propriétaire mort) sans supprimer ceux d'une
+instance encore active.
+
+### Acquittement du niveau non isolé en Mode Équipe
+
+Comme en Mode Agent, une course d'équipe contenant **au moins un agent au
+niveau `none`** exige une confirmation dédiée : case explicite dans l'interface,
+refus côté Rust sans cette confirmation, et inclusion de l'acquittement **et**
+des niveaux dans l'empreinte d'approbation (cocher ou décocher invalide une
+approbation déjà délivrée).
+
 ## Secrets par agent (méthode contrôlée)
 
 L'agent ne reçoit **que** ses propres identifiants, copiés (0600) dans son
@@ -117,6 +172,19 @@ demandent explicitement le niveau non isolé et les tests d'isolation sont
 ignorés — la CI reste donc verte sans jamais faire croire que la sandbox a
 été exercée.
 
+Ces tests sont marqués `#[ignore]` : ils ne sont jamais présentés comme
+réussis sans exécution. Exécution explicite :
+
+```sh
+IH_REQUIRE_SANDBOX=1 cargo test -p ih-agents --test sandbox_runtime \
+  --test home_protection --test sandbox_git -- --ignored --test-threads=1
+```
+
+En CI, un job dédié (« Sandbox réelle (bubblewrap) ») installe bubblewrap,
+vérifie les user namespaces, exige une sandbox qui refuse réellement une
+écriture hors worktree, puis exécute ces tests avec `IH_REQUIRE_SANDBOX=1` :
+l'absence de sandbox y est une **erreur**, jamais un succès.
+
 Détail déterministe (shell dans la sandbox, sans LLM) :
 `crates/ih-agents/tests/sandbox_runtime.rs`.
 Tests réels agents : `crates/ih-agent-mode/tests/real_agents_sandbox.rs`
@@ -132,6 +200,8 @@ Tests réels agents : `crates/ih-agent-mode/tests/real_agents_sandbox.rs`
   binaire monté en lecture seule, **aucun** de leurs identifiants n'est copié
   automatiquement — configurez `env`/`args` ou le niveau non isolé si leur
   authentification l'exige. Non testés en réel (absents de la machine).
+- Le niveau `isolated_network` partage l'espace de noms réseau de l'hôte :
+  aucune liste blanche de destinations n'est appliquée.
 - Team Mode : l'isolation sandbox s'applique à chaque session d'équipe, mais la
   course complète n'a pas été rejouée en réel.
 - Résolution des exécutables : le chemin **résolu** (liens symboliques et paquet

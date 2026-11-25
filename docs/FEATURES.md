@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 430 tests Rust + 186 tests frontend, tous verts.
+Dernière vérification : 434 tests Rust + 188 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -14,7 +14,7 @@ Dernière vérification : 430 tests Rust + 186 tests frontend, tous verts.
 |---|---|---|---|
 | 1 | Noyau IH complet | ✅ | `ih-core` : configuration TOML validée, identifiants typés, événements, politique de ressources, détection de plateforme, redaction |
 | 2 | Gestionnaire multi-agents | ✅ | Registre d'adaptateurs, détection dans le `PATH`, sessions supervisées, limite de parallélisme appliquée par le noyau |
-| 3 | Claude Code, Codex, Gemini CLI, OpenCode, pi, Kilo, DSH CLI, Goose | ✅ | Commandes non interactives documentées et surchargeables par `args` avec `{prompt}`. **Kilo, DSH CLI et Goose sont testés contre les binaires réels** (détection, version, lancement, réponse, annulation, erreur, worktree isolé et collecte des fichiers modifiés — tests gated par `IH_REAL_AGENTS=1`). Les autres CLI restent supervisés par les mêmes tests d'interface sur faux agent |
+| 3 | Claude Code, Codex, Gemini CLI, OpenCode, pi, Kilo, DSH CLI, Goose | ✅ | Commandes non interactives documentées et surchargeables par `args` avec `{prompt}`. **Kilo, DSH CLI et Goose sont testés contre les binaires réels** (détection, version, lancement, réponse, annulation, erreur, worktree isolé et collecte des fichiers modifiés — **tests `#[ignore]`** à exécuter avec `--ignored` et `IH_REAL_AGENTS=1`). Les autres CLI restent supervisés par les mêmes tests d'interface sur faux agent |
 | 4 | Fournisseurs IA cloud et locaux | ✅ | OpenAI-compatible (OpenAI, OpenRouter, custom), Anthropic, Gemini, Ollama ; chat, streaming SSE/NDJSON, modèles, santé. **Écran de conversation complet** : streaming temps réel, annulation, historique, sélection provider/modèle, réessai |
 | 5 | Gestionnaire de modèles | ✅ | Découverte réelle par API, modèle par défaut, activation par fournisseur, capacités seulement si exposées par l'API |
 | 6 | Skills : installation et mises à jour | ⚠️ | Installation depuis un dossier avec validation stricte du manifeste, empreinte SHA-256, vérification d'intégrité, activation, désinstallation. **Mise à jour depuis un registre distant : absente** |
@@ -113,11 +113,11 @@ Dernière vérification : 430 tests Rust + 186 tests frontend, tous verts.
 
 | Suite | Nombre | Portée |
 |---|---|---|
-| `ih-core` | 39 | configuration (dont **niveaux de sécurité des agents**), erreurs, événements, ressources, chemins, redaction, plateforme |
+| `ih-core` | 40 | configuration (dont **niveaux de sécurité des agents**), erreurs, événements, ressources, chemins, redaction, plateforme |
 | `ih-store` | 25 | migrations (**v4, v5 et v6**), CRUD, cascade, pagination, concurrence, recherche, **MCP : catalogue et appels**, **propositions d'outils du chat (transitions, réclamation atomique, reprise)**, **sauvegarde cohérente avant migration** |
 | `ih-security` | 47 | approbations (dont empreintes), expiration/rejeu, classification de risque, **politique réseau MCP (SSRF)**, trousseau |
 | `ih-providers` | 28 | 4 fournisseurs, SSE/NDJSON, erreurs 401, timeout, clé absente, **tool calling natif (capacité, sérialisation, appels, streaming fragmenté)** |
-| `ih-agents` | 40 | adaptateurs (dont Kilo/DSH/Goose : commandes, alias, résolution hors PATH, versions), **sandbox bubblewrap (niveaux, refus sans moteur, commande construite)**, supervision, annulation, timeout, limite, sortie bornée ; **4 tests réels** gated par `IH_REAL_AGENTS=1` |
+| `ih-agents` | 47 | adaptateurs (dont Kilo/DSH/Goose), **sandbox bubblewrap (niveaux, moteur authentifié, sonde négative, protection du HOME, RAII, git dans le worktree)**, supervision, annulation, timeout, limite ; **9 tests réels ignorés** (bubblewrap ou agents requis) |
 | `ih-extensions` | 27 | manifestes, empreinte, installation, prison, MCP stdio, serveur muet |
 | `ih-workspace` | 33 | Git, prison de chemins, PTY, **diff LCS**, métadonnées, écriture vérifiée |
 | `ih-orchestrator` | 23 | cycles, disponibilité, équipes, ordonnanceur, budget mémoire |
@@ -125,12 +125,12 @@ Dernière vérification : 430 tests Rust + 186 tests frontend, tous verts.
 | `ih-i18n` | 5 | parité FR/EN, repli, substitution |
 | `ih-chat` | 19 | streaming, annulation, historique borné, contexte injecté, erreurs, titre, recherche, continueur d'outils + **e2e Ollama réel** |
 | `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
-| `ih-agent-mode` | 13 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action ; **2 tests d'isolation réelle** et **3 tests réels sandboxés** gated par `IH_REAL_AGENTS=1` |
+| `ih-agent-mode` | 10 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action, **acquittement du niveau non isolé en équipe** ; **5 tests réels ignorés** (agents requis) |
 | `ih-mcp` | 48 | schémas, politique URL, session unifiée ; **9 tests d'intégration Streamable HTTP**, **4 tests SSE** et **le cycle chat natif complet** (fournisseur simulé + serveur MCP local réel) |
-| `ih-desktop` | 21 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions, **bornes d'appels et de cycles**, **garde-fou MCP stdio (activation, schéma, classification, isolation du modèle)** |
-| **Rust total** | **430** | |
-| Frontend (`vitest`) | 186 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent (**niveaux de sécurité**), **MCP** |
-| **Total** | **616** | |
+| `ih-desktop` | 24 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions, **bornes d'appels et de cycles**, **garde-fou MCP stdio (activation, schéma, classification, isolation du modèle)** |
+| **Rust total** | **434** | |
+| Frontend (`vitest`) | 188 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent (**niveaux de sécurité**), **MCP** |
+| **Total** | **622** | |
 
 ## Vérifications manuelles effectuées
 

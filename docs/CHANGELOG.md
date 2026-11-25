@@ -46,6 +46,44 @@
 - Interface : niveau, moteur, état du réseau et avertissements affichés dans la page Agents, le mode Agent, l'approbation et le résumé d'équipe.
 - Tests réels (agents installés, canaris) : lecture/écriture dans le worktree autorisées ; canari `$HOME`, `~/.ssh`, sockets, écriture/suppression hors worktree refusés ; réseau coupé en `isolated` ; annulation effective ; diff limité au worktree. Détails : `docs/AGENT_SECURITY.md`.
 
+### Corrigé (audit indépendant de sécurité)
+- **Protection du dossier personnel** : un exécutable placé directement dans
+  `$HOME` (ou dont la racine de montage contiendrait `$HOME`, `~/.ssh`,
+  `~/.aws`, `~/.config`, `~/.local/share`) est **refusé** au lieu de faire
+  entrer tout le home en lecture seule dans la sandbox.
+- **Moteur de sandbox authentifié** : `IH_SANDBOX_ENGINE` n'est honorée qu'en
+  build de test/débogage ; le moteur doit être un binaire absolu, non
+  inscriptible par le groupe ou le monde (et possédé par root en production).
+  Une **sonde négative** vérifie qu'il refuse réellement une écriture hors
+  sandbox : un faux `bwrap` qui ignore les drapeaux est refusé.
+- **Acquittement explicite en Mode Équipe** : si un membre s'exécute au niveau
+  `none`, la course exige une confirmation dédiée, transmise par l'interface,
+  inscrite dans l'empreinte d'approbation et revérifiée au lancement.
+- **Sondes sans environnement hérité** : `--version` des agents et le shell de
+  connexion sont exécutés avec un environnement minimal (`env_clear`) : plus
+  aucune variable de l'application n'est transmise avant la sandbox.
+- **Nettoyage garanti des dossiers privés** : garde RAII (succès, erreur,
+  échec de lancement, timeout, annulation), permissions `0700`, marqueur de
+  propriétaire et purge des dossiers orphelins au démarrage — sans toucher aux
+  instances IH encore actives.
+- **Identifiants validés** : tout identifiant utilisé comme composant de chemin
+  est restreint à `[A-Za-z0-9._-]` (sans `..`, sans `/`, 64 caractères max)
+  avant toute opération de fichier, notamment `remove_dir_all`.
+- **Git dans le worktree sandboxé** : `git status` et `git diff` fonctionnent
+  dans la sandbox (métadonnées du worktree en écriture, dépôt principal monté
+  en **lecture seule** : le `.git/config` du dépôt reste intangible).
+- **Commande IPC obsolète supprimée** : `agent_start` (lancement sans
+  approbation ni worktree) est retirée ; la page Agents renvoie vers le Mode
+  Agent, seul chemin avec approbation, worktree et revue de diff.
+- **CI** : nouveau job « Sandbox réelle (bubblewrap) » qui installe
+  bubblewrap, vérifie les user namespaces, exige que la sandbox refuse une
+  écriture hors worktree, puis exécute les tests d'isolation. Les jobs Ubuntu
+  et Arch sont conservés.
+- **Tests honnêtes** : les tests exigeant bubblewrap ou des agents réels sont
+  désormais `#[ignore]` (visibles comme ignorés, jamais « réussis » sans
+  exécution) ; les canaris des tests sont créés dans un dossier temporaire et
+  ne touchent plus le `$HOME` réel.
+
 ### Vérifié
 - Tests réels exécutés sur la machine de validation (`IH_REAL_AGENTS=1`) :
   détection et version (`kilo 7.8.32`, `dsh 0.1.0-rc.7`, `goose 1.61.0`),
@@ -56,8 +94,8 @@
   avec un accès hôte refusé (canaris `$HOME`, `~/.ssh`, sockets), un prompt
   hostile ne fait fuiter aucun canari, et le niveau `isolated` échoue
   explicitement chez les trois (DNS/transport coupés).
-- 430 tests Rust, 186 tests frontend, `tsc --noEmit` et build de production
-  verts.
+- 434 tests Rust (+14 tests d'isolation ignorés explicitement), 188 tests frontend,
+  `tsc --noEmit` et build de production verts.
 
 ## 0.6.3 — Cohérence visuelle de l'interface
 

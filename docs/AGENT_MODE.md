@@ -3,6 +3,11 @@
 Le mode Agent d'IH (0.2.2) exécute un CLI d'agent de développement sur une
 tâche en langage naturel, dans une **copie isolée du projet**.
 
+> **Depuis 0.6.3 (post-audit)** : la page Agents ne lance plus de session
+> directement (l'ancienne commande IPC `agent_start`, sans approbation ni
+> worktree, a été supprimée). Tout lancement passe par le mode Agent :
+> approbation liée à l'empreinte, worktree isolé, puis revue du diff.
+
 ## Principe
 
 1. Vous choisissez un adaptateur **réellement détecté** dans votre `PATH`.
