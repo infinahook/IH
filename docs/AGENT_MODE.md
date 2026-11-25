@@ -32,6 +32,37 @@ accord explicite.
 5. Suivez la progression, annulez si nécessaire.
 6. **Voir les modifications** → examinez chaque fichier, acceptez ou rejetez.
 
+## Détection des trois CLI supplémentaires
+
+La détection ne se limite pas au `PATH` du lanceur graphique :
+
+1. le nom configuré (`kilo`, `dsh`, `goose`) et ses alias connus
+   (`kilocode` pour Kilo, `dsh-cli` pour DSH) ;
+2. le `PATH` courant de l'application ;
+3. le `PATH` du **shell de connexion** (comme pour OpenCode) ;
+4. des dossiers connus : `~/.local/bin`, `~/.cargo/bin`, `~/.bun/bin`,
+   `~/.npm-global/bin`, `/usr/local/bin`, `/snap/bin`,
+   `/var/lib/flatpak/exports/bin` et les paquets d'application
+   `/opt/apps/<app>/files/bin` (cas de DSH, absent du `PATH` graphique).
+
+Quand plusieurs binaires portent le même nom (par exemple un `dsh` npm via nvm
+et le paquet d'application), seule l'installation qui répond correctement à
+`--version` est retenue : un binaire homonyme non fonctionnel est signalé comme
+tel dans l'interface et **n'est pas sélectionnable**. Les versions lues sur la
+machine de validation sont `kilo 7.8.32`, `dsh 0.1.0-rc.7` et `goose 1.61.0`.
+
+## Notes d'intégration par CLI
+
+- **Kilo** : `--auto` est requis en mode non interactif ; sans lui, kilo
+  auto-rejette sa première demande de permission d'outil et la session échoue.
+  L'autorisation IH (approbation liée à l'empreinte, avant lancement) et le
+  worktree isolé restent les frontières de sécurité.
+- **DSH CLI** : le profil `headless` répond une seule tâche et sort ; il
+  n'imprime que le message final de l'assistant (pas d'interface structurée).
+- **Goose** : `stream-json` fournit des événements NDJSON normalisés par IH
+  (`message` assistant → texte lisible, `complete` masqué) ; `--quiet` supprime
+  la bannière d'accueil qui polluait la sortie.
+
 ## Approbations
 
 - Une approbation est **ponctuelle** : usage unique, liée à une empreinte
@@ -48,6 +79,9 @@ accord explicite.
 | Codex | `codex exec "<tâche>"` | CLI `codex` |
 | Gemini CLI | `gemini -p "<tâche>"` | CLI `gemini` |
 | OpenCode | `opencode run --format json --archived --standalone "<tâche>"` | CLI `opencode` ≥ 2.x |
+| Kilo | `kilo run --format json --auto "<tâche>"` | CLI `kilo` (Kilo Code) ; NDJSON `text`/`tool_use` |
+| DSH CLI | `dsh --profile headless "<tâche>"` | CLI `dsh` (DeepSeek Harness) ; profil `headless` fourni |
+| Goose | `goose run --no-session --quiet --output-format stream-json -t "<tâche>"` | CLI `goose` ≥ 1.61 ; NDJSON `message`/`complete` |
 | Personnalisé | `args` contenant `{prompt}`, sinon tâche ajoutée | exécutable de votre choix |
 
 IH affiche le nom, la version (via `--version`), le chemin et le diagnostic de

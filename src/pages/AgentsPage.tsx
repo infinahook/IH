@@ -265,10 +265,18 @@ export function AgentsPage() {
                         {adapter.label}
                       </span>
                       <span className="mono small">{adapter.program}</span>
+                      {adapter.version ? (
+                        <span className="muted small">
+                          {t("agents.version_resolved", { version: adapter.version })}
+                        </span>
+                      ) : null}
                       {adapter.resolved_path ? (
                         <span className="muted small">
                           {t("agents.path_resolved", { path: adapter.resolved_path })}
                         </span>
+                      ) : null}
+                      {adapter.error ? (
+                        <span className="small warning-text">{adapter.error}</span>
                       ) : null}
                     </span>
                     <span className="inline-status">

@@ -48,6 +48,9 @@ pub struct AdapterReport {
     pub detected: bool,
     pub path: Option<String>,
     pub version: Option<String>,
+    /// Vrai si l'exécutable existe ET répond correctement à `--version` : un
+    /// binaire homonyme non fonctionnel ne doit pas être proposé au lancement.
+    pub functional: bool,
     /// Capacités réellement garanties par le contrat d'IH.
     pub capabilities: Vec<String>,
     pub diagnostic: String,
@@ -69,6 +72,7 @@ pub fn detect_adapters(configs: &[AgentConfig]) -> Vec<AdapterReport> {
                 path.as_deref().and_then(probe_version)
             };
             let detected = path.is_some();
+            let functional = detected && (config.kind == AgentKind::Custom || version.is_some());
             AdapterReport {
                 id: config.id.clone(),
                 label: config.label.clone(),
@@ -77,11 +81,20 @@ pub fn detect_adapters(configs: &[AgentConfig]) -> Vec<AdapterReport> {
                 detected,
                 path: path.map(|p| p.display().to_string()),
                 version,
+                functional,
                 capabilities: capabilities_for(&config.kind),
-                diagnostic: if detected {
-                    "exécutable trouvé".into()
+                diagnostic: if functional {
+                    "exécutable trouvé et fonctionnel".into()
+                } else if detected {
+                    format!(
+                        "« {} » trouvé mais ne répond pas à --version : CLI attendu ?",
+                        config.program
+                    )
                 } else {
-                    format!("« {} » introuvable dans le PATH", config.program)
+                    format!(
+                        "« {} » introuvable (PATH, PATH du shell de connexion, dossiers connus)",
+                        config.program
+                    )
                 },
             }
         })
@@ -97,6 +110,18 @@ fn capabilities_for(kind: &AgentKind) -> Vec<String> {
         "annulation".to_string(),
         "timeout".to_string(),
     ];
+    match kind {
+        // Interfaces structurées officielles : événements normalisés par IH.
+        AgentKind::Opencode | AgentKind::Kilo => caps.push("sortie-json".to_string()),
+        AgentKind::Goose => caps.push("sortie-json".to_string()),
+        // DSH headless n'imprime que le message final : sortie texte.
+        AgentKind::Dsh => caps.push("sortie-texte-finale".to_string()),
+        AgentKind::ClaudeCode
+        | AgentKind::Codex
+        | AgentKind::GeminiCli
+        | AgentKind::Pi
+        | AgentKind::Custom => {}
+    }
     if matches!(kind, AgentKind::Custom) {
         caps.push("arguments-personnalises".to_string());
     }

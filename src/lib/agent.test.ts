@@ -76,6 +76,7 @@ function adapter(id: string, detected: boolean): AgentAdapterReport {
     detected,
     path: detected ? `/usr/bin/${id}` : null,
     version: detected ? "1.0.0" : null,
+    functional: detected,
     capabilities: [],
     diagnostic: detected ? "exécutable trouvé" : "introuvable dans le PATH",
   };

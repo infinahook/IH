@@ -552,9 +552,13 @@ export function agentLaunchReducer(
 
 // ---------------------------------------------------- sélection adaptateur
 
-/** Un adaptateur n'est sélectionnable que s'il a réellement été détecté. */
+/**
+ * Un adaptateur n'est sélectionnable que s'il a réellement été détecté **et**
+ * qu'il répond correctement à `--version` : un binaire homonyme non
+ * fonctionnel ne doit jamais être lancé (faux positif).
+ */
 export function isAdapterSelectable(adapter: AgentAdapterReport): boolean {
-  return adapter.detected;
+  return adapter.detected && adapter.functional !== false;
 }
 
 /** Adaptateurs réellement lançables. */

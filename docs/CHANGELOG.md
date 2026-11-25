@@ -1,5 +1,37 @@
 # Journal des versions
 
+## Non publié — agents CLI supplémentaires (Kilo, DSH CLI, Goose)
+
+### Ajouté
+- **Trois nouveaux adaptateurs d'agents CLI**, au même niveau que les agents
+  existants : Kilo (`kilo run --format json --auto "<tâche>"`), DSH CLI
+  (`dsh --profile headless "<tâche>"`) et Goose
+  (`goose run --no-session --quiet --output-format stream-json -t "<tâche>"`).
+- **Détection renforcée** : nom configuré et alias connus, `PATH` de
+  l'application, `PATH` du shell de connexion (comme OpenCode) et dossiers
+  connus (`~/.local/bin`, `~/.cargo/bin`, `~/.bun/bin`, `~/.npm-global/bin`,
+  `/usr/local/bin`, `/snap/bin`, `flatpak`, paquets `/opt/apps/*/files/bin`).
+  En cas d'homonymes, seule l'installation qui répond correctement à
+  `--version` est retenue ; un faux positif est signalé et non sélectionnable.
+- **Normalisation** : Kilo réutilise le parseur JSON d'OpenCode (même famille
+  d'événements) ; Goose a son parseur `stream-json` ; DSH affiche son message
+  final (interface texte officielle du profil `headless`).
+- **Versions et chemins** affichés dans la page Agents ; l'état du moteur
+  signale les exécutables trouvés mais non fonctionnels.
+
+### Modifié
+- Le superviseur lance l'**exécutable résolu** (chemin absolu) et transmet les
+  variables d'environnement déclarées dans la configuration de l'agent.
+- Sélection d'adaptateur : un binaire seulement détecté mais non fonctionnel
+  n'est plus sélectionnable.
+
+### Vérifié
+- Tests réels exécutés sur la machine de validation (`IH_REAL_AGENTS=1`) :
+  détection et version (`kilo 7.8.32`, `dsh 0.1.0-rc.7`, `goose 1.61.0`),
+  lancement et réponse, annulation effective du groupe de processus, erreur
+  volontairement provoquée, isolation par worktree git et collecte des fichiers
+  modifiés — pour les trois CLI.
+
 ## 0.6.3 — Cohérence visuelle de l'interface
 
 ### Corrigé

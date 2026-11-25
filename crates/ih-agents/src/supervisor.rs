@@ -133,12 +133,16 @@ impl AgentSupervisor {
                 request.agent.id
             )));
         }
-        if request.agent.detection().is_none() {
-            return Err(IhError::Agent(format!(
-                "programme introuvable dans le PATH : {}",
+        // Résolution réelle : PATH, PATH du shell de connexion, dossiers connus
+        // (ex. `/opt/apps/<app>/files/bin` pour DSH). Le binaire résolu est
+        // lancé par chemin absolu : un dossier absent du PATH graphique ne
+        // suffit plus à empêcher l'exécution.
+        let executable = request.agent.detection().ok_or_else(|| {
+            IhError::Agent(format!(
+                "programme introuvable (PATH, PATH du shell de connexion, dossiers connus) : {}",
                 request.agent.program
-            )));
-        }
+            ))
+        })?;
         if request.prompt.trim().is_empty() {
             return Err(IhError::Invalid("instruction vide".into()));
         }
@@ -156,11 +160,15 @@ impl AgentSupervisor {
         }
 
         let session_id = request.session_id.clone().unwrap_or_default().into_string();
-        let (program, args) = request.agent.build_command(&request.prompt);
+        let (_, args) = request.agent.build_command(&request.prompt);
 
-        let mut command = Command::new(&program);
+        let mut command = Command::new(&executable);
         command
             .args(&args)
+            // Variables d'environnement de la configuration de l'agent
+            // (jamais de secret implicite : uniquement ce que l'utilisateur
+            // a déclaré dans son adaptateur).
+            .envs(&request.agent.env)
             .current_dir(&request.project_dir)
             // Certains CLI (OpenCode v2.3.2 vérifié) résolvent leur projet via
             // `$PWD` et ignorent le répertoire courant réel : sans cela, ils
@@ -531,6 +539,7 @@ mod tests {
             args: vec![],
             enabled: true,
             timeout_secs: 5,
+            env: Default::default(),
         }
     }
 

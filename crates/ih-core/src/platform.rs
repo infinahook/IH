@@ -191,6 +191,14 @@ fn recommend_agents(ram_mb: u64) -> u8 {
 /// invisible pour IH. On interroge le shell avec un marqueur (la sortie du
 /// profil peut contenir autre chose) et un délai borné.
 pub fn login_shell_path() -> Option<String> {
+    // Le PATH du shell de connexion ne change pas pendant la vie du processus :
+    // le calculer une seule fois évite de relancer un shell à chaque détection
+    // d'agent (le résultat alimente aussi la résolution des exécutables).
+    static CACHE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(compute_login_shell_path).clone()
+}
+
+fn compute_login_shell_path() -> Option<String> {
     use std::process::{Command, Stdio};
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
     let mut child = Command::new(shell)

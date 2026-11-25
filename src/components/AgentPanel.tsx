@@ -307,7 +307,11 @@ export function AgentPanel({
                         <span className="agent-option-title">
                           <Bot size={14} aria-hidden="true" />
                           {adapter.label}
-                          <span className="small muted">{adapter.kind}</span>
+                          <span className="small muted">
+                            {t(`agents.kind_${adapter.kind}`, {
+                              defaultValue: adapter.kind,
+                            })}
+                          </span>
                         </span>
                         <span className="mono small">
                           {adapter.program}

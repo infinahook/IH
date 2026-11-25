@@ -36,6 +36,12 @@ pub enum AgentKind {
     Opencode,
     /// `pi` — assistant de code avec outils read/bash/edit/write.
     Pi,
+    /// Kilo CLI (`kilo`) — TUI/CLI compatible OpenCode, NDJSON via `run --format json`.
+    Kilo,
+    /// DSH CLI (`dsh`) — DeepSeek Harness en mode `headless` (une tâche, réponse, sortie).
+    Dsh,
+    /// Goose CLI (`goose`) — Block Goose, NDJSON via `run --output-format stream-json`.
+    Goose,
     Custom,
 }
 
@@ -372,6 +378,30 @@ fn default_agents() -> Vec<AgentConfig> {
             ..Default::default()
         },
         AgentConfig {
+            id: "kilo".into(),
+            kind: AgentKind::Kilo,
+            label: "Kilo".into(),
+            program: "kilo".into(),
+            enabled: true,
+            ..Default::default()
+        },
+        AgentConfig {
+            id: "dsh-cli".into(),
+            kind: AgentKind::Dsh,
+            label: "DSH CLI".into(),
+            program: "dsh".into(),
+            enabled: true,
+            ..Default::default()
+        },
+        AgentConfig {
+            id: "goose".into(),
+            kind: AgentKind::Goose,
+            label: "Goose".into(),
+            program: "goose".into(),
+            enabled: true,
+            ..Default::default()
+        },
+        AgentConfig {
             id: "pi".into(),
             kind: AgentKind::Pi,
             label: "pi".into(),
@@ -694,7 +724,8 @@ mod tests {
         config.validate().unwrap();
         assert_eq!(config.locale, "fr");
         assert_eq!(config.providers.len(), 5);
-        assert_eq!(config.agents.len(), 5);
+        // claude-code, codex, gemini-cli, opencode, kilo, dsh-cli, goose, pi
+        assert_eq!(config.agents.len(), 8);
         assert!(config.providers.iter().all(|p| !p.has_secret));
     }
 

@@ -378,3 +378,34 @@ fn project_sha(root: &std::path::Path, path: &str) -> Option<String> {
         .ok()
         .map(|meta| meta.sha256)
 }
+
+#[cfg(test)]
+mod real_agent_detection_tests {
+
+    /// Vérifie la charge utile réellement renvoyée par `agent_adapters` sur une
+    /// configuration par défaut, avec les CLI installés (Kilo, DSH CLI, Goose).
+    /// Gated par `IH_REAL_AGENTS=1` : la CI n'a pas ces binaires.
+    #[test]
+    fn les_trois_nouveaux_agents_sont_detectes_avec_version() {
+        if std::env::var("IH_REAL_AGENTS").ok().as_deref() != Some("1") {
+            return;
+        }
+        let config = ih_core::config::AppConfig::default();
+        let reports = ih_agent_mode::detect_adapters(&config.agents);
+        for expected in ["kilo", "dsh-cli", "goose"] {
+            let report = reports
+                .iter()
+                .find(|report| report.id == expected)
+                .unwrap_or_else(|| {
+                    panic!("agent {expected} absent de la configuration par défaut")
+                });
+            println!(
+                "[{}] path={:?} version={:?} functional={} diagnostic={}",
+                expected, report.path, report.version, report.functional, report.diagnostic
+            );
+            assert!(report.detected, "{expected} non détecté");
+            assert!(report.functional, "{expected} non fonctionnel");
+            assert!(report.version.is_some(), "{expected} sans version");
+        }
+    }
+}

@@ -396,7 +396,17 @@
     "refresh_state": "Refresh state",
     "session_unknown": "No state available for this session.",
     "session_active_hint": "A session is already running for this project.",
-    "adapter_disabled": "This adapter is disabled in the configuration."
+    "adapter_disabled": "This adapter is disabled in the configuration.",
+    "version_resolved": "Version: {version}",
+    "kind_claude_code": "Claude Code",
+    "kind_codex": "Codex",
+    "kind_gemini_cli": "Gemini CLI",
+    "kind_opencode": "OpenCode",
+    "kind_pi": "pi",
+    "kind_kilo": "Kilo",
+    "kind_dsh": "DSH CLI",
+    "kind_goose": "Goose",
+    "kind_custom": "Custom"
   },
   "models": {
     "title": "AI models",

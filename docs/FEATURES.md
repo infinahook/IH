@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 403 tests Rust + 182 tests frontend, tous verts.
+Dernière vérification : 417 tests Rust + 182 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -14,7 +14,7 @@ Dernière vérification : 403 tests Rust + 182 tests frontend, tous verts.
 |---|---|---|---|
 | 1 | Noyau IH complet | ✅ | `ih-core` : configuration TOML validée, identifiants typés, événements, politique de ressources, détection de plateforme, redaction |
 | 2 | Gestionnaire multi-agents | ✅ | Registre d'adaptateurs, détection dans le `PATH`, sessions supervisées, limite de parallélisme appliquée par le noyau |
-| 3 | Claude Code, Codex, Gemini CLI, OpenCode | ✅ | Arguments non interactifs documentés (`claude -p`, `codex exec`, `gemini -p`, `opencode run`), surchargeables par `args` avec `{prompt}`. **Non testés contre les binaires réels** (absents de la machine) : la supervision est testée sur un faux agent |
+| 3 | Claude Code, Codex, Gemini CLI, OpenCode, pi, Kilo, DSH CLI, Goose | ✅ | Commandes non interactives documentées et surchargeables par `args` avec `{prompt}`. **Kilo, DSH CLI et Goose sont testés contre les binaires réels** (détection, version, lancement, réponse, annulation, erreur, worktree isolé et collecte des fichiers modifiés — tests gated par `IH_REAL_AGENTS=1`). Les autres CLI restent supervisés par les mêmes tests d'interface sur faux agent |
 | 4 | Fournisseurs IA cloud et locaux | ✅ | OpenAI-compatible (OpenAI, OpenRouter, custom), Anthropic, Gemini, Ollama ; chat, streaming SSE/NDJSON, modèles, santé. **Écran de conversation complet** : streaming temps réel, annulation, historique, sélection provider/modèle, réessai |
 | 5 | Gestionnaire de modèles | ✅ | Découverte réelle par API, modèle par défaut, activation par fournisseur, capacités seulement si exposées par l'API |
 | 6 | Skills : installation et mises à jour | ⚠️ | Installation depuis un dossier avec validation stricte du manifeste, empreinte SHA-256, vérification d'intégrité, activation, désinstallation. **Mise à jour depuis un registre distant : absente** |
@@ -117,7 +117,7 @@ Dernière vérification : 403 tests Rust + 182 tests frontend, tous verts.
 | `ih-store` | 25 | migrations (**v4, v5 et v6**), CRUD, cascade, pagination, concurrence, recherche, **MCP : catalogue et appels**, **propositions d'outils du chat (transitions, réclamation atomique, reprise)**, **sauvegarde cohérente avant migration** |
 | `ih-security` | 47 | approbations (dont empreintes), expiration/rejeu, classification de risque, **politique réseau MCP (SSRF)**, trousseau |
 | `ih-providers` | 28 | 4 fournisseurs, SSE/NDJSON, erreurs 401, timeout, clé absente, **tool calling natif (capacité, sérialisation, appels, streaming fragmenté)** |
-| `ih-agents` | 20 | adaptateurs, succès/échec, annulation, timeout, limite, sortie bornée |
+| `ih-agents` | 32 | adaptateurs (dont Kilo/DSH/Goose : commandes, alias, résolution hors PATH, versions), supervision, annulation, timeout, limite, sortie bornée ; **4 tests réels** gated par `IH_REAL_AGENTS=1` |
 | `ih-extensions` | 27 | manifestes, empreinte, installation, prison, MCP stdio, serveur muet |
 | `ih-workspace` | 33 | Git, prison de chemins, PTY, **diff LCS**, métadonnées, écriture vérifiée |
 | `ih-orchestrator` | 23 | cycles, disponibilité, équipes, ordonnanceur, budget mémoire |
@@ -125,12 +125,12 @@ Dernière vérification : 403 tests Rust + 182 tests frontend, tous verts.
 | `ih-i18n` | 5 | parité FR/EN, repli, substitution |
 | `ih-chat` | 19 | streaming, annulation, historique borné, contexte injecté, erreurs, titre, recherche, continueur d'outils + **e2e Ollama réel** |
 | `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
-| `ih-agent-mode` | 8 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
+| `ih-agent-mode` | 9 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
 | `ih-mcp` | 48 | schémas, politique URL, session unifiée ; **9 tests d'intégration Streamable HTTP**, **4 tests SSE** et **le cycle chat natif complet** (fournisseur simulé + serveur MCP local réel) |
-| `ih-desktop` | 20 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions, **bornes d'appels et de cycles**, **garde-fou MCP stdio (activation, schéma, classification, isolation du modèle)** |
-| **Rust total** | **403** | |
+| `ih-desktop` | 21 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions, **bornes d'appels et de cycles**, **garde-fou MCP stdio (activation, schéma, classification, isolation du modèle)** |
+| **Rust total** | **417** | |
 | Frontend (`vitest`) | 182 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent, **MCP** |
-| **Total** | **585** | |
+| **Total** | **599** | |
 
 ## Vérifications manuelles effectuées
 

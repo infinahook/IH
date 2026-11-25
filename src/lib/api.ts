@@ -89,7 +89,16 @@ export type RiskLevel = "low" | "medium" | "high" | "critical";
 export type ApprovalState = "pending" | "approved" | "denied" | "consumed" | "expired";
 export type ApprovalDecision = "approve" | "deny";
 export type ProviderKind = "openai_compatible" | "anthropic" | "google" | "ollama";
-export type AgentKind = "claude_code" | "codex" | "gemini_cli" | "opencode" | "custom";
+export type AgentKind =
+  | "claude_code"
+  | "codex"
+  | "gemini_cli"
+  | "opencode"
+  | "pi"
+  | "kilo"
+  | "dsh"
+  | "goose"
+  | "custom";
 export type DistroFamily = "arch" | "debian" | "other";
 export type ThemeName = "dark" | "light" | "system";
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error";
@@ -327,6 +336,10 @@ export interface AgentInfo {
   enabled: boolean;
   detected: boolean;
   resolved_path: string | null;
+  /** Version réellement lue par `<exécutable> --version`. */
+  version: string | null;
+  /** Diagnostic quand la détection ou la sonde de version échoue. */
+  error: string | null;
 }
 
 export interface SessionSnapshot {
@@ -767,6 +780,8 @@ export interface AgentAdapterReport {
   detected: boolean;
   path: string | null;
   version: string | null;
+  /** Exécutable trouvé **et** répondant correctement à `--version`. */
+  functional: boolean;
   capabilities: string[];
   diagnostic: string;
 }
