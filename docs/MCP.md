@@ -229,6 +229,39 @@ Cette restriction s'applique au chemin d'exécution d'IH. Pour les CLI
 d'agents, elle est portée par la configuration exportée (par rôle) que
 l'utilisateur branche lui-même ; aucune injection automatique n'existe.
 
+## Serveurs MCP stdio hérités (chemin contrôlé)
+
+Le transport **stdio** (client `ih-extensions::mcp::McpClient`, commande IPC
+`mcp_call_tool`) est un chemin historique, conservé comme fonctionnalité
+utilisateur de la page Plugins (ajout, connexion, appel d'outil).
+
+**Il n'est atteignable ni par le chat, ni par le modèle, ni par le mode Agent,
+ni par le mode Équipe, ni par les automatisations** : le catalogue du chat ne
+lit que la table des serveurs distants (`mcp_servers`), `propose_calls` résout
+uniquement des noms de ce catalogue, et les automatisations passent par
+`invoke_mcp_tool`. Un nom d'outil stdio est donc « inconnu » pour le modèle.
+
+Depuis 0.6.2 (correction pré-merge), il applique les mêmes contrôles que le
+garde-fou distant, adaptés au transport :
+
+| Contrôle | Mise en œuvre |
+|---|---|
+| Activation du serveur | `mcp_stdio_set_enabled` ; serveur désactivé ⇒ connexion et appels refusés (`Denied`), session fermée à la désactivation |
+| Connexion utilisateur | la session doit exister (`mcp_connect`), sinon `NotFound` |
+| Outil réellement annoncé | `tools/list` à chaque appel ; nom inconnu ⇒ `NotFound` |
+| Arguments | objet JSON borné (256 Kio) et **validés contre le schéma `inputSchema`** du serveur (mêmes règles que le distant) |
+| Classification du risque | locale, par nom, description et heuristiques (le protocole stdio historique ne transporte pas d'annotations d'outil) — un nom destructif est classé `critical` |
+| Approbation | **interactive obligatoire, à usage unique, liée à l'empreinte SHA-256** (serveur + outil + paramètres) ; aucune pré-autorisation stdio n'existe |
+| Trace | entrée d'audit `mcp_tool` (décision `approved`) avec paramètres **redactés** |
+| Arguments affichés | redactés avant la demande d'approbation et l'audit |
+
+Différences assumées avec `invoke_mcp_tool` (distants) : pas de catalogue
+persistant d'outils activables un par un, pas de permissions par rôle
+(l'appelant est l'interface), pas d'historique `mcp_calls` (la table est liée
+par clé étrangère aux serveurs distants). **Migration prévue dans une version
+ultérieure** : router ce transport par le garde-fou commun avec un catalogue
+d'outils stdio persisté.
+
 ## Intégration Automatisations
 
 Les étapes de workflow acceptent deux formes : un prompt d'agent

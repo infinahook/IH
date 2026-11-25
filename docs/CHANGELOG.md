@@ -68,6 +68,15 @@
   `claim_chat_tool_call`, une décision `deny` est refusée après réclamation) ;
   un événement de continuation ne peut pas contourner la décision ; toute
   issue d'exécution autre que `completed` est traitée comme un échec explicite.
+- **MCP stdio historique** : les appels de la page Plugins (`mcp_call_tool`)
+  appliquent désormais les mêmes contrôles que le garde-fou distant — serveur
+  activé (nouvelle commande `mcp_stdio_set_enabled`, session fermée à la
+  désactivation) et connecté, outil réellement annoncé par `tools/list`,
+  arguments validés contre son `inputSchema`, classification locale du risque,
+  approbation interactive à usage unique liée à l'empreinte et trace d'audit
+  redactée. Le chemin reste isolé du chat, du modèle, des agents, de l'équipe
+  et des automatisations (catalogue distant uniquement), ce qui est
+  désormais couvert par un test de régression.
 - **Protection des données locales** : sauvegarde cohérente (API backup SQLite,
   WAL inclus) écrite automatiquement avant toute migration de schéma, un échec
   interrompant l'ouverture plutôt que de migrer sans filet ; script

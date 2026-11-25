@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 396 tests Rust + 182 tests frontend, tous verts.
+Dernière vérification : 403 tests Rust + 182 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -18,7 +18,7 @@ Dernière vérification : 396 tests Rust + 182 tests frontend, tous verts.
 | 4 | Fournisseurs IA cloud et locaux | ✅ | OpenAI-compatible (OpenAI, OpenRouter, custom), Anthropic, Gemini, Ollama ; chat, streaming SSE/NDJSON, modèles, santé. **Écran de conversation complet** : streaming temps réel, annulation, historique, sélection provider/modèle, réessai |
 | 5 | Gestionnaire de modèles | ✅ | Découverte réelle par API, modèle par défaut, activation par fournisseur, capacités seulement si exposées par l'API |
 | 6 | Skills : installation et mises à jour | ⚠️ | Installation depuis un dossier avec validation stricte du manifeste, empreinte SHA-256, vérification d'intégrité, activation, désinstallation. **Mise à jour depuis un registre distant : absente** |
-| 7 | Plugins MCP | ⚠️ | **Serveurs MCP natifs distants : Streamable HTTP et SSE historique** (transports réels, testés contre un serveur local), découverte d'outils, catalogue avec activation explicite, appels contrôlés par approbation liée à l'empreinte des paramètres, jeton au trousseau, anti-SSRF, tailles et délais bornés, historique et audit ; serveurs stdio existants conservés. **Tool calling natif livré en 0.6.2** (famille OpenAI-compatible : cartes dans la conversation, décision humaine, résultat réinjecté, continuations bornées). **Reste : resources/prompts/sampling, tool use natif pour Anthropic/Gemini/Ollama, injection automatique dans les CLI d'agents** |
+| 7 | Plugins MCP | ⚠️ | **Serveurs MCP natifs distants : Streamable HTTP et SSE historique** (transports réels, testés contre un serveur local), découverte d'outils, catalogue avec activation explicite, appels contrôlés par approbation liée à l'empreinte des paramètres, jeton au trousseau, anti-SSRF, tailles et délais bornés, historique et audit ; serveurs stdio existants conservés et **durcis** (activation, schéma d'arguments, approbation à usage unique, audit, isolés du modèle). **Tool calling natif livré en 0.6.2** (famille OpenAI-compatible : cartes dans la conversation, décision humaine, résultat réinjecté, continuations bornées). **Reste : resources/prompts/sampling, tool use natif pour Anthropic/Gemini/Ollama, injection automatique dans les CLI d'agents** |
 | 8 | Gestion des projets | ✅ | Ouverture par sélecteur de dossier, persistance, projets récents, retrait de liste **sans jamais supprimer le dossier** |
 | 9 | Éditeur de code | ✅ | CodeMirror 6 : coloration Rust/TS/JS/Python/JSON/TOML/Markdown/YAML/CSS/HTML, numéros de ligne, Ctrl+F, Ctrl+S, onglets, détection de conflit d'écriture |
 | 10 | Terminal Linux intégré | ⚠️ | PTY réel (`portable-pty`), saisie, redimensionnement, fermeture, filtrage ANSI/OSC. **Pas d'émulation VT complète** (curseur, écran alterné, IME) |
@@ -127,10 +127,10 @@ Dernière vérification : 396 tests Rust + 182 tests frontend, tous verts.
 | `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
 | `ih-agent-mode` | 8 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action |
 | `ih-mcp` | 48 | schémas, politique URL, session unifiée ; **9 tests d'intégration Streamable HTTP**, **4 tests SSE** et **le cycle chat natif complet** (fournisseur simulé + serveur MCP local réel) |
-| `ih-desktop` | 13 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions, **bornes d'appels et de cycles** |
-| **Rust total** | **396** | |
+| `ih-desktop` | 20 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions, **bornes d'appels et de cycles**, **garde-fou MCP stdio (activation, schéma, classification, isolation du modèle)** |
+| **Rust total** | **403** | |
 | Frontend (`vitest`) | 182 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent, **MCP** |
-| **Total** | **578** | |
+| **Total** | **585** | |
 
 ## Vérifications manuelles effectuées
 

@@ -6,7 +6,7 @@ This is the **honest** reference. Three statuses:
 - ⚠️ **partial**: genuinely works, but part of the need is uncovered — stated explicitly.
 - ❌ **missing**: not implemented. No UI button pretends otherwise.
 
-Last verified: 396 Rust tests + 182 frontend tests, all green.
+Last verified: 403 Rust tests + 182 frontend tests, all green.
 
 | # | Feature | Status | Detail |
 |---|---|---|---|
@@ -95,10 +95,10 @@ Last verified: 396 Rust tests + 182 frontend tests, all green.
 | `ih-context` | 23 | exclusions, secrets, truncation, budget, path jail, fuzzy mentions |
 | `ih-agent-mode` | 8 | worktree sandbox, change collection, adapter detection, action fingerprint |
 | `ih-mcp` | 48 | schemas, URL policy, unified session; **9 Streamable HTTP integration tests**, **4 SSE tests** and **the full native chat cycle** (simulated provider + real local MCP server) |
-| `ih-desktop` | 13 | IPC commands: exposed tool catalog (names, collisions, schemas, budgets), chat tool proposals, decisions, **call and cycle bounds** |
-| **Rust total** | **396** | |
+| `ih-desktop` | 20 | IPC commands: exposed tool catalog (names, collisions, schemas, budgets), chat tool proposals, decisions, **call and cycle bounds**, **stdio MCP guard (activation, schema, classification, model isolation)** |
+| **Rust total** | **403** | |
 | Frontend (`vitest`) | 182 | i18n, formatting, ANSI, Git, file tree, chat, layout, mentions, tabs, diff, agent, **MCP** |
-| **Total** | **578** | |
+| **Total** | **585** | |
 
 ## Manual verifications performed
 
