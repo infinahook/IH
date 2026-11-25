@@ -6,7 +6,7 @@ This is the **honest** reference. Three statuses:
 - ⚠️ **partial**: genuinely works, but part of the need is uncovered — stated explicitly.
 - ❌ **missing**: not implemented. No UI button pretends otherwise.
 
-Last verified: 430 Rust tests + 182 frontend tests, all green.
+Last verified: 430 Rust tests + 186 frontend tests, all green.
 
 | # | Feature | Status | Detail |
 |---|---|---|---|
@@ -97,8 +97,8 @@ Last verified: 430 Rust tests + 182 frontend tests, all green.
 | `ih-mcp` | 48 | schemas, URL policy, unified session; **9 Streamable HTTP integration tests**, **4 SSE tests** and **the full native chat cycle** (simulated provider + real local MCP server) |
 | `ih-desktop` | 21 | IPC commands: exposed tool catalog (names, collisions, schemas, budgets), chat tool proposals, decisions, **call and cycle bounds**, **stdio MCP guard (activation, schema, classification, model isolation)** |
 | **Rust total** | **430** | |
-| Frontend (`vitest`) | 182 | i18n, formatting, ANSI, Git, file tree, chat, layout, mentions, tabs, diff, agent, **MCP** |
-| **Total** | **612** | |
+| Frontend (`vitest`) | 186 | i18n, formatting, ANSI, Git, file tree, chat, layout, mentions, tabs, diff, agent (**security levels**), **MCP** |
+| **Total** | **616** | |
 
 ## Manual verifications performed
 

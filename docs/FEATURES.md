@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 430 tests Rust + 182 tests frontend, tous verts.
+Dernière vérification : 430 tests Rust + 186 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -129,8 +129,8 @@ Dernière vérification : 430 tests Rust + 182 tests frontend, tous verts.
 | `ih-mcp` | 48 | schémas, politique URL, session unifiée ; **9 tests d'intégration Streamable HTTP**, **4 tests SSE** et **le cycle chat natif complet** (fournisseur simulé + serveur MCP local réel) |
 | `ih-desktop` | 21 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions, **bornes d'appels et de cycles**, **garde-fou MCP stdio (activation, schéma, classification, isolation du modèle)** |
 | **Rust total** | **430** | |
-| Frontend (`vitest`) | 182 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent, **MCP** |
-| **Total** | **612** | |
+| Frontend (`vitest`) | 186 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent (**niveaux de sécurité**), **MCP** |
+| **Total** | **616** | |
 
 ## Vérifications manuelles effectuées
 
