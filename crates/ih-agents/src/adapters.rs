@@ -103,6 +103,30 @@ impl AgentAdapter {
         }
     }
 
+    /// Drapeaux d'autonomie que la commande réelle contiendra (ex. `--auto`).
+    ///
+    /// L'approbation IH porte sur la commande exacte : ces drapeaux doivent être
+    /// visibles dans le détail d'approbation, car ils élargissent les pouvoirs
+    /// de l'agent (outils sans confirmation, écriture/exécution hors worktree).
+    pub fn autonomy_flags(&self) -> Vec<String> {
+        const KNOWN: [&str; 6] = [
+            "--auto",
+            "--yolo",
+            "--full-auto",
+            "--always-approve",
+            "--dangerously-skip-permissions",
+            "--dangerously-bypass-approvals-and-sandbox",
+        ];
+        let (_, args) = self.build_command("");
+        let mut flags: Vec<String> = args
+            .iter()
+            .filter(|arg| KNOWN.contains(&arg.as_str()))
+            .cloned()
+            .collect();
+        flags.dedup();
+        flags
+    }
+
     /// Construit le couple (programme, arguments) pour une instruction.
     ///
     /// Si `args` contient `{prompt}`, la substitution a lieu sur place ; sinon
@@ -607,6 +631,32 @@ mod tests {
                 "-t",
                 "explique"
             ]
+        );
+    }
+
+    #[test]
+    fn les_drapeaux_d_autonomie_sont_detectes() {
+        // Kilo : le drapeau est ajouté par IH (indispensable en non interactif).
+        assert_eq!(
+            adapter(AgentKind::Kilo, vec![]).autonomy_flags(),
+            vec!["--auto".to_string()]
+        );
+        // Les autres familles n'élargissent rien.
+        for kind in [
+            AgentKind::Opencode,
+            AgentKind::Pi,
+            AgentKind::ClaudeCode,
+            AgentKind::Codex,
+            AgentKind::GeminiCli,
+            AgentKind::Dsh,
+            AgentKind::Goose,
+        ] {
+            assert!(adapter(kind, vec![]).autonomy_flags().is_empty());
+        }
+        // Un agent personnalisé qui reçoit un drapeau connu est signalé.
+        assert_eq!(
+            adapter(AgentKind::Custom, vec!["--yolo"]).autonomy_flags(),
+            vec!["--yolo".to_string()]
         );
     }
 

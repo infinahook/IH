@@ -62,6 +62,7 @@ pub fn detect_adapters(configs: &[AgentConfig]) -> Vec<AdapterReport> {
         .iter()
         .map(|config| {
             let adapter = AgentAdapter::from_config(config);
+            let autonomy = adapter.autonomy_flags();
             let path = adapter.detection();
             // Un adaptateur personnalisé peut être un script : exécuter
             // `--version` y produirait des effets de bord. On ne sonde que les
@@ -82,7 +83,13 @@ pub fn detect_adapters(configs: &[AgentConfig]) -> Vec<AdapterReport> {
                 path: path.map(|p| p.display().to_string()),
                 version,
                 functional,
-                capabilities: capabilities_for(&config.kind),
+                capabilities: {
+                    let mut caps = capabilities_for(&config.kind);
+                    if !autonomy.is_empty() {
+                        caps.push(format!("outils-autonomes ({})", autonomy.join(" ")));
+                    }
+                    caps
+                },
                 diagnostic: if functional {
                     "exécutable trouvé et fonctionnel".into()
                 } else if detected {
@@ -505,6 +512,39 @@ mod tests {
         assert!(matches!(error, IhError::Unsupported(_)));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn les_drapeaux_d_autonomie_sont_exposes_dans_les_capacites() {
+        // Script factice identifié comme Kilo : la sonde de version réussit et
+        // le rapport expose l'autonomie apportée par `--auto`.
+        let dir = std::env::temp_dir().join(format!("ih-mode-autonomy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("kilo");
+        std::fs::write(&script, "#!/bin/sh\necho 7.8.32\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let configs = vec![AgentConfig {
+            id: "kilo".into(),
+            kind: AgentKind::Kilo,
+            label: "Kilo".into(),
+            program: script.display().to_string(),
+            enabled: true,
+            ..Default::default()
+        }];
+        let reports = detect_adapters(&configs);
+        assert!(
+            reports[0]
+                .capabilities
+                .iter()
+                .any(|capability| capability == "outils-autonomes (--auto)"),
+            "capacités : {:?}",
+            reports[0].capabilities
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -18,6 +18,12 @@
   final (interface texte officielle du profil `headless`).
 - **Versions et chemins** affichés dans la page Agents ; l'état du moteur
   signale les exécutables trouvés mais non fonctionnels.
+- **Avertissement « mode autonome »** : quand la commande contient un drapeau
+  d'autonomie (`--auto` pour Kilo, `--yolo`, …), le détail d'approbation précise
+  que l'agent peut écrire, exécuter, supprimer et accéder au réseau hors du
+  worktree avec les droits de l'utilisateur, et que ces actions ne sont pas
+  couvertes par le diff. Ces drapeaux apparaissent aussi dans les capacités de
+  l'adaptateur (audit du 25/11 : portée réelle vérifiée sur kilo 7.8.32).
 
 ### Modifié
 - Le superviseur lance l'**exécutable résolu** (chemin absolu) et transmet les

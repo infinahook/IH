@@ -55,13 +55,68 @@ machine de validation sont `kilo 7.8.32`, `dsh 0.1.0-rc.7` et `goose 1.61.0`.
 
 - **Kilo** : `--auto` est requis en mode non interactif ; sans lui, kilo
   auto-rejette sa première demande de permission d'outil et la session échoue.
-  L'autorisation IH (approbation liée à l'empreinte, avant lancement) et le
-  worktree isolé restent les frontières de sécurité.
+  La portée réelle de `--auto` et les limites de l'isolation IH sont détaillées
+  ci-dessous — **le worktree n'est pas une sandbox système**.
 - **DSH CLI** : le profil `headless` répond une seule tâche et sort ; il
   n'imprime que le message final de l'assistant (pas d'interface structurée).
 - **Goose** : `stream-json` fournit des événements NDJSON normalisés par IH
   (`message` assistant → texte lisible, `complete` masqué) ; `--quiet` supprime
   la bannière d'accueil qui polluait la sortie.
+
+## Portée réelle de `--auto` (Kilo) — audit du 25/11/2026
+
+Audit mené avec le binaire réel (`kilo 7.8.32`) dans un worktree jetable,
+avec variables et fichiers canaris, et un service HTTP local :
+
+| Action observée en `--auto` | Résultat |
+|---|---|
+| Écrire un fichier **dans** le worktree | ✅ (outil `write`) |
+| Écrire un fichier **hors** du worktree (chemin absolu) | ✅ (`/tmp/…/outside.txt`) |
+| Exécuter des commandes shell | ✅ (`whoami` → utilisateur courant) |
+| Lire un fichier hors worktree | ✅ (fichier canari lu) |
+| Supprimer un fichier hors worktree | ✅ (`rm` exécuté) |
+| Accéder au réseau | ✅ (HTTP 200 sur un service local) |
+| Lire les variables d'environnement | ✅ (canari visible) |
+| Lire ses propres identifiants (`~/.local/share/kilo/auth.json`) | ✅ lisible |
+
+Conséquences : `--auto` désactive les demandes de permission internes de Kilo
+(écriture, édition, bash, lecture) ; l'agent agit **avec les droits du compte
+utilisateur**, sans aucune frontière système.
+
+### Ce que l'isolation IH couvre — et ne couvre pas
+
+- ✅ **Approbation humaine avant lancement** : la demande d'approbation est
+  émise avant toute exécution, liée à une empreinte SHA-256
+  (agent + commande exacte + répertoire + tâche), expirée à 5 minutes, usage
+  unique. `--auto` figure dans la commande approuvée.
+- ✅ **Isolation Git** : le projet n'est pas modifié ; seuls les changements du
+  worktree sont collectés et présentés en diff.
+- ❌ **Isolation du système d'exploitation** : rien n'empêche l'agent d'écrire
+  hors du worktree, d'exécuter des commandes ou de joindre le réseau.
+- ❌ **Diff incomplet** : une écriture ou suppression hors worktree n'apparaît
+  pas dans la revue des modifications.
+- ❌ **Environnement** : l'agent hérite des variables d'environnement d'IH.
+
+### Corrections minimales appliquées
+
+1. Le détail d'approbation signale explicitement le **mode autonome** quand la
+   commande contient un drapeau connu (`--auto`, `--yolo`, `--full-auto`,
+   `--dangerously-skip-permissions`, …), avec la portée exacte du risque
+   (écriture/exécution/réseau hors worktree, droits utilisateur, diff partiel).
+2. Ces drapeaux sont exposés dans les **capacités** de l'adaptateur
+   (`outils-autonomes (--auto)`), visibles dans le rapport de détection.
+
+### Recommandations (non implémentées ici)
+
+- Ne jamais lancer un agent autonome avec des secrets dans l'environnement
+  (l'agent peut les lire) ; utiliser un compte utilisateur dédié ou un bac à
+  sable système (`bubblewrap`, `firejail`, `systemd-run --user --scope` avec
+  `ProtectHome`, réseau restreint) si l'on veut une isolation réelle.
+- Considérer les actions hors worktree comme **non revues** : le diff IH ne les
+  montre pas.
+- Pour Kilo, un profil de permissions explicite (`kilo.json`) peut restreindre
+  certains outils ; `--auto` les contourne, donc il ne doit être activé que
+  pour une tâche dont on accepte la portée.
 
 ## Approbations
 

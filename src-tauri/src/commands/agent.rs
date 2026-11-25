@@ -69,12 +69,26 @@ pub fn agent_session_request_approval(
     // répertoire de session (le worktree est créé sous ce dernier).
     let fingerprint = action_fingerprint(&agent_id, &command, &root, &task);
 
-    let detail = format!(
+    let mut detail = format!(
         "Commande : {command}\nRépertoire isolé créé sous : {}\nEmpreinte : {fingerprint}\n\
          L'agent s'exécute dans une copie (worktree git) : le projet n'est pas modifié \
          pendant la session. Les changements seront présentés en diff avant application.",
         root.display()
     );
+    // Le worktree est une isolation Git, pas une sandbox système : un drapeau
+    // d'autonomie (ex. `--auto`) permet à l'agent d'écrire, d'exécuter des
+    // commandes ou de lire des fichiers hors du worktree avec les droits de
+    // l'utilisateur. Ce risque doit être explicite au moment d'approuver.
+    let autonomy = adapter.autonomy_flags();
+    if !autonomy.is_empty() {
+        detail.push_str(&format!(
+            "\n\n⚠ Mode autonome ({}) : l'agent peut écrire, supprimer, exécuter des commandes \
+             et accéder au réseau ou à des fichiers HORS du worktree, avec les droits de votre \
+             compte utilisateur. L'isolation par worktree ne couvre que les changements Git du \
+             projet ; les actions externes ne sont pas récupérées par le diff.",
+            autonomy.join(" ")
+        ));
+    }
     let request = state.approvals.ask(
         AGENT_CATEGORY,
         &format!("Lancer {} sur : {}", adapter.label, truncate(&task, 120)),
