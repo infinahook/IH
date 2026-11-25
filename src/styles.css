@@ -35,7 +35,19 @@
   --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
   --topbar-bg: rgba(16, 18, 22, 0.82);
   --accent-soft: rgba(189, 233, 143, 0.18);
-  --radius: 11px;
+  --radius: 12px;
+  /* Jetons de mise en page : grille de 8 px (4 px pour les micro-écarts). */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-8: 64px;
+  --control-sm: 24px;
+  --control: 32px;
+  --radius-control: 8px;
+  --radius-pill: 999px;
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-family: var(--font-sans);
@@ -5040,4 +5052,560 @@ body,
 .mcp-call pre.code-block {
   max-height: 220px;
   overflow: auto;
+}
+
+/* ===================================================== cohérence visuelle ===
+   Normalisation de la grille (8 px), des hauteurs de contrôles et des rayons.
+
+   Objectif : une seule source de vérité pour le shell, l'en-tête, le menu
+   latéral, la barre fournisseur/modèle, la barre d'onglets et le composeur,
+   afin que les espacements, alignements et proportions restent identiques sur
+   toutes les pages et à toutes les résolutions. Les règles ci-dessous portent
+   les mêmes sélecteurs que les bases historiques et s'appuient sur les jetons
+   `--space-*`, `--control*` et `--radius*` définis dans `:root`. */
+
+/* --- shell : menu latéral, barre supérieure, contenu ------------------- */
+
+.sidebar {
+  width: 240px;
+  flex: 0 0 240px;
+  padding: var(--space-5) var(--space-3) var(--space-4);
+}
+
+.brand {
+  gap: var(--space-3);
+  padding: 0 var(--space-2) var(--space-5);
+}
+
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-control);
+}
+
+.brand small {
+  font-size: 10px;
+  line-height: 1.4;
+  margin-top: var(--space-1);
+}
+
+.nav {
+  gap: var(--space-1);
+}
+
+.nav-item {
+  min-height: 36px;
+  padding: var(--space-2) 10px;
+  gap: var(--space-2);
+  border-radius: var(--radius-control);
+  font-size: 12.5px;
+}
+
+.sidebar-bottom {
+  padding: var(--space-4) var(--space-2) 0;
+  gap: var(--space-2);
+}
+
+.topbar {
+  height: 64px;
+  padding: 0 var(--space-5);
+  gap: var(--space-4);
+}
+
+.breadcrumb {
+  gap: var(--space-2);
+  font-size: 12px;
+}
+
+.topbar-actions {
+  gap: var(--space-3);
+}
+
+.project-switch {
+  gap: var(--space-2);
+}
+
+.project-switch-label {
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.project-switch select {
+  height: var(--control);
+  min-width: 160px;
+  max-width: 240px;
+  padding: 0 10px;
+  border-radius: var(--radius-control);
+  font-size: 12px;
+}
+
+.lang-switch {
+  height: var(--control);
+  padding: 0 6px;
+  gap: var(--space-1);
+  border-radius: var(--radius-control);
+}
+
+.lang-button {
+  height: var(--control-sm);
+  min-width: 28px;
+  padding: 0 var(--space-2);
+  border-radius: 6px;
+  font-size: 10.5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.content {
+  max-width: 1368px;
+  padding: var(--space-5) var(--space-5) var(--space-8);
+}
+
+.page-header {
+  margin-bottom: var(--space-5);
+  gap: var(--space-4);
+}
+
+.page-header h1 {
+  font-size: 26px;
+  margin-bottom: var(--space-2);
+}
+
+.eyebrow {
+  margin-bottom: var(--space-2);
+}
+
+.page-subtitle {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.page-actions {
+  gap: var(--space-2);
+}
+
+.icon-button {
+  width: var(--control);
+  height: var(--control);
+  padding: 0;
+  border-radius: var(--radius-control);
+  flex: 0 0 auto;
+}
+
+/* --- surfaces et contrôles partagés ------------------------------------ */
+
+.card {
+  padding: var(--space-4);
+  border-radius: var(--radius);
+}
+
+.card h2,
+.card h3 {
+  margin-bottom: var(--space-2);
+}
+
+.section-heading {
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  min-height: var(--control);
+}
+
+.section-title {
+  margin: var(--space-5) 0 var(--space-2);
+}
+
+.primary,
+.danger,
+.ghost {
+  height: var(--control);
+  padding: 0 var(--space-3);
+  gap: var(--space-2);
+  border-radius: var(--radius-control);
+  font-size: 12px;
+}
+
+button.small {
+  height: var(--control-sm);
+  padding: 0 var(--space-2);
+  gap: var(--space-1);
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+.button-row {
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.button-row.compact {
+  gap: var(--space-2);
+}
+
+.input {
+  height: var(--control);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
+  font-size: 12.5px;
+}
+
+textarea.input {
+  height: auto;
+  min-height: 72px;
+  padding: 10px var(--space-3);
+  line-height: 1.5;
+}
+
+select.input {
+  height: var(--control);
+  padding: 0 10px;
+}
+
+.input.compact {
+  height: var(--control-sm);
+  padding: 0 var(--space-2);
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+.field {
+  gap: 6px;
+  margin-bottom: var(--space-3);
+}
+
+.field-label {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
+.badge {
+  height: var(--control-sm);
+  padding: 0 var(--space-2);
+  gap: var(--space-1);
+  border-radius: var(--radius-pill);
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.checkbox-row {
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+
+.form-grid {
+  gap: 0 var(--space-4);
+}
+
+/* --- conversation : colonnes, barre d'onglets, en-tête fournisseur ----- */
+
+.workspace-shell {
+  height: calc(100vh - 232px);
+  min-height: 480px;
+}
+
+.chat-layout {
+  grid-template-columns: 264px minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+.workspace-chat > .chat-layout {
+  grid-template-columns: 208px minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+.chat-search {
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.chat-search .input {
+  padding-left: var(--space-6);
+}
+
+.chat-search-icon {
+  left: 10px;
+}
+
+.chat-new-thread {
+  height: var(--control);
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+.chat-thread-list {
+  gap: var(--space-2);
+}
+
+.chat-thread-row {
+  padding: var(--space-1);
+  gap: var(--space-1);
+  border-radius: var(--radius-control);
+}
+
+.chat-thread-button {
+  padding: var(--space-2);
+  gap: var(--space-1);
+  border-radius: 6px;
+}
+
+.chat-mode-bar {
+  min-height: var(--control);
+  gap: var(--space-2);
+}
+
+.mode-switch {
+  padding: var(--space-1);
+  gap: var(--space-1);
+  border-radius: var(--radius-control);
+}
+
+.mode-option {
+  height: var(--control-sm);
+  padding: 0 var(--space-3);
+  gap: 6px;
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+
+.chat-mode-title {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-sm);
+  line-height: 1.4;
+}
+
+.chat-mode-actions {
+  gap: var(--space-1);
+}
+
+.chat-mode-stats {
+  gap: var(--space-1);
+  margin-right: var(--space-1);
+}
+
+/* Barre fournisseur / modèle : une seule rangée alignée sur 32 px. */
+.chat-provider-bar {
+  height: 48px;
+  min-height: 48px;
+  padding: 0 var(--space-3);
+  gap: var(--space-2);
+}
+
+.chat-provider-bar .input {
+  height: var(--control);
+  min-height: var(--control);
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: var(--radius-control);
+  line-height: normal;
+}
+
+.chat-provider-select {
+  flex: 0 0 auto;
+  width: 208px;
+  min-width: 120px;
+  max-width: 240px;
+}
+
+.chat-model-select {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 120px;
+}
+
+.provider-status {
+  height: var(--control);
+  padding: 0 10px;
+  gap: 6px;
+  font-size: 11px;
+  max-width: 160px;
+}
+
+.chat-config-button {
+  width: var(--control);
+  height: var(--control);
+  padding: 0;
+}
+
+/* --- zone centrale, composeur et barre inférieure --------------------- */
+
+.chat-message-area {
+  padding: var(--space-4) var(--space-4) 0;
+  margin-top: 0;
+}
+
+.chat-message-list {
+  padding: 0 0 var(--space-2) 0;
+  gap: var(--space-3);
+}
+
+.chat-message {
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+}
+
+.chat-message-head {
+  margin-bottom: var(--space-2);
+  gap: var(--space-2);
+}
+
+.chat-message-content {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.chat-message-meta {
+  margin-top: var(--space-2);
+  gap: var(--space-3);
+  font-size: 10.5px;
+}
+
+.chat-inline-error {
+  padding: var(--space-2) var(--space-4) 0;
+}
+
+.chat-composer {
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+.chat-prompt {
+  min-height: 72px;
+  max-height: 120px;
+  padding: 10px var(--space-3);
+  line-height: 1.5;
+}
+
+.chat-composer-footer {
+  gap: var(--space-2);
+  min-height: var(--control);
+}
+
+.composer-left {
+  gap: var(--space-2);
+}
+
+.context-toggle {
+  height: var(--control-sm);
+  padding: 0 var(--space-2);
+  gap: var(--space-1);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.chat-composer-alert {
+  gap: var(--space-2);
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-control);
+  font-size: 11px;
+}
+
+/* Espaceurs de disposition et séparateurs alignés sur la grille. */
+.workspace-chat,
+.chat-conversation-column {
+  gap: var(--space-2);
+}
+
+.resizer {
+  flex-basis: var(--space-2);
+}
+
+/* --- adaptations aux largeurs réduites (mêmes seuils que le shell) ---- */
+
+@media (max-width: 1040px) {
+  .sidebar {
+    width: 208px;
+    flex-basis: 208px;
+  }
+
+  .content {
+    padding: var(--space-4) var(--space-4) var(--space-8);
+  }
+
+  .topbar {
+    padding: 0 var(--space-4);
+  }
+
+  .project-switch select {
+    max-width: 176px;
+    min-width: 120px;
+  }
+
+  .workspace-chat > .chat-layout,
+  .chat-layout {
+    grid-template-columns: 208px minmax(0, 1fr);
+  }
+
+  .provider-status {
+    max-width: 120px;
+  }
+}
+
+@media (max-width: 960px) {
+  .sidebar {
+    width: 192px;
+    flex-basis: 192px;
+    padding: var(--space-4) var(--space-2) var(--space-3);
+  }
+
+  .chat-message-area {
+    padding: var(--space-3) var(--space-3) 0;
+  }
+
+  .chat-composer {
+    padding: var(--space-2) var(--space-3) var(--space-3);
+  }
+
+  .chat-provider-select {
+    width: 168px;
+  }
+}
+
+/* --- contrôles natifs : un seul rendu, aligné sur les jetons ----------- */
+
+/* Sans `appearance: none`, WebKitGTK dessine les <select> avec le thème GTK :
+   fond gris, hauteur et padding imposés, rayon différent des champs. On force
+   le rendu CSS pour que sélecteurs, champs et boutons partagent la même
+   hauteur, le même rayon et la même palette. */
+select.input,
+.project-switch select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--input-bg);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239aa3af' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  line-height: normal;
+}
+
+select.input:focus,
+.project-switch select:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+select.input option,
+.project-switch select option,
+select option {
+  background: var(--panel);
+  color: var(--text);
+}
+
+select.input optgroup,
+select optgroup {
+  color: var(--text-dim);
+  background: var(--panel);
+}
+
+/* Le sélecteur de conversation (barre fournisseur) garde exactement 32 px :
+   la liste native pouvait dépasser cette hauteur et casser l'alignement. */
+.chat-provider-bar select.input {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
 }
