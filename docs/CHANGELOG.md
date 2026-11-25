@@ -94,7 +94,7 @@
   avec un accès hôte refusé (canaris `$HOME`, `~/.ssh`, sockets), un prompt
   hostile ne fait fuiter aucun canari, et le niveau `isolated` échoue
   explicitement chez les trois (DNS/transport coupés).
-- 434 tests Rust (+14 tests d'isolation ignorés explicitement), 188 tests frontend,
+- 437 tests Rust (+15 tests d'isolation/agents ignorés explicitement), 188 tests frontend,
   `tsc --noEmit` et build de production verts.
 
 ## 0.6.3 — Cohérence visuelle de l'interface

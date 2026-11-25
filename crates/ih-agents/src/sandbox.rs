@@ -581,12 +581,6 @@ pub fn sandboxed_command(
             "niveau non isolé : utiliser la commande directe, après confirmation".into(),
         ));
     }
-    let bwrap = check_engine(&availability())?;
-    // Garde RAII : le dossier privé (et ses copies d'identifiants) disparaît à
-    // la destruction de la commande, y compris sur un chemin d'erreur.
-    let private_home = PrivateHome::create(session_tag)?;
-    let private_home_path = private_home.path().to_path_buf();
-
     // Le binaire système est lié tel quel ; un binaire utilisateur est monté
     // en lecture seule. La cible est d'abord RÉSOLUE : beaucoup de CLI sont des
     // liens symboliques (`dsh -> ../lib/node_modules/@deepseek-ai/dsh/lib/bin.js`)
@@ -595,7 +589,16 @@ pub fn sandboxed_command(
         .ok()
         .filter(|path| path.exists())
         .unwrap_or_else(|| executable.to_path_buf());
+    // La validité du montage est vérifiée AVANT tout le reste : une
+    // configuration qui exposerait le dossier personnel est refusée même si
+    // aucun moteur n'est disponible (le diagnostic porte sur la cause réelle).
     let executable_grants = executable_grant_roots(&resolved_executable, workdir)?;
+
+    let bwrap = check_engine(&availability())?;
+    // Garde RAII : le dossier privé (et ses copies d'identifiants) disparaît à
+    // la destruction de la commande, y compris sur un chemin d'erreur.
+    let private_home = PrivateHome::create(session_tag)?;
+    let private_home_path = private_home.path().to_path_buf();
 
     let staging = staging_for(kind, &private_home_path);
 

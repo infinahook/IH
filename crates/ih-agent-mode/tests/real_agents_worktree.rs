@@ -1,6 +1,6 @@
 //! Vérifications réelles des trois CLI dans le sandbox worktree d'IH.
 //!
-//! Gated par `IH_REAL_AGENTS=1` (la CI n'a ni les binaires ni les identifiants).
+//! Marqués `#[ignore]` (binaires réels requis) : exécution avec `--ignored`.
 //! Chaque agent est lancé dans un worktree git détaché, reçoit la consigne de
 //! créer un fichier, puis IH collecte les changements : le projet d'origine
 //! doit rester intact (isolation) et le fichier doit apparaître comme modifié.

@@ -6,7 +6,7 @@ Ce document est la **référence honnête** de l'avancement. Trois statuts :
 - ⚠️ **partiel** : fonctionne réellement, mais une partie du besoin n'est pas couverte — c'est écrit explicitement.
 - ❌ **absent** : non implémenté. Aucun bouton de l'interface ne prétend le contraire.
 
-Dernière vérification : 434 tests Rust + 188 tests frontend, tous verts.
+Dernière vérification : 437 tests Rust + 188 tests frontend, tous verts.
 
 ## Les 22 fonctionnalités demandées
 
@@ -127,10 +127,10 @@ Dernière vérification : 434 tests Rust + 188 tests frontend, tous verts.
 | `ih-context` | 23 | exclusions, secrets, troncature, budget, path jail, mentions floues |
 | `ih-agent-mode` | 10 | sandbox worktree, collecte des changements, détection d'adaptateurs, empreinte d'action, **acquittement du niveau non isolé en équipe** ; **5 tests réels ignorés** (agents requis) |
 | `ih-mcp` | 48 | schémas, politique URL, session unifiée ; **9 tests d'intégration Streamable HTTP**, **4 tests SSE** et **le cycle chat natif complet** (fournisseur simulé + serveur MCP local réel) |
-| `ih-desktop` | 24 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions, **bornes d'appels et de cycles**, **garde-fou MCP stdio (activation, schéma, classification, isolation du modèle)** |
-| **Rust total** | **434** | |
+| `ih-desktop` | 23 | commandes IPC : catalogue d'outils exposés (noms, collisions, schémas, budgets), propositions d'outils du chat, décisions, **bornes d'appels et de cycles**, **garde-fou MCP stdio (activation, schéma, classification, isolation du modèle)** |
+| **Rust total** | **437** | |
 | Frontend (`vitest`) | 188 | i18n, formatage, ANSI, Git, arborescence, chat, layout, mentions, onglets, diff, agent (**niveaux de sécurité**), **MCP** |
-| **Total** | **622** | |
+| **Total** | **625** | |
 
 ## Vérifications manuelles effectuées
 

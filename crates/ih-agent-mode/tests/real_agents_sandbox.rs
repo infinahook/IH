@@ -1,6 +1,6 @@
 //! Tests réels des trois agents CLI **dans la sandbox bubblewrap**.
 //!
-//! Gated par `IH_REAL_AGENTS=1` (la CI n'a ni les binaires ni les identifiants).
+//! Marqués `#[ignore]` (binaires réels requis) : exécution avec `--ignored`.
 //! Chaque scénario passe par le superviseur IH et le worktree isolé ; les
 //! canaris prouvent que l'agent, même autonome (Kilo `--auto`), ne peut pas
 //! sortir de la sandbox.

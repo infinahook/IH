@@ -467,12 +467,12 @@ mod real_agent_detection_tests {
 
     /// Vérifie la charge utile réellement renvoyée par `agent_adapters` sur une
     /// configuration par défaut, avec les CLI installés (Kilo, DSH CLI, Goose).
-    /// Gated par `IH_REAL_AGENTS=1` : la CI n'a pas ces binaires.
+    ///
+    /// `#[ignore]` : la CI n'a pas ces binaires. Exécution explicite :
+    /// `IH_REAL_AGENTS=1 cargo test -p ih-desktop --lib -- --ignored`.
     #[test]
+    #[ignore = "agents CLI réels requis : exécuter avec --ignored (IH_REAL_AGENTS=1)"]
     fn les_trois_nouveaux_agents_sont_detectes_avec_version() {
-        if std::env::var("IH_REAL_AGENTS").ok().as_deref() != Some("1") {
-            return;
-        }
         let config = ih_core::config::AppConfig::default();
         let reports = ih_agent_mode::detect_adapters(&config.agents);
         for expected in ["kilo", "dsh-cli", "goose"] {

@@ -1,7 +1,8 @@
 //! Tests réels contre les CLI d'agents installés (Kilo, DSH CLI, Goose).
 //!
-//! Ces tests ne s'exécutent **que** si `IH_REAL_AGENTS=1` : la CI n'a ni les
-//! binaires ni les identifiants. Ils lancent réellement chaque agent dans un
+//! Ces tests sont marqués `#[ignore]` : ils exigent les binaires réels et un
+//! environnement de test. Exécution : `--ignored` (avec `IH_REAL_AGENTS=1` comme
+//! garde-fou documentaire). Ils lancent réellement chaque agent dans un
 //! répertoire temporaire, avec une consigne minimale, et vérifient le contrat
 //! d'intégration : détection, version, lancement, réponse, annulation et erreur.
 //!
