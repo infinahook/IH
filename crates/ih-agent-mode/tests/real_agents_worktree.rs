@@ -14,10 +14,6 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-fn enabled() -> bool {
-    std::env::var("IH_REAL_AGENTS").ok().as_deref() == Some("1")
-}
-
 fn adapter(kind: AgentKind, id: &str, program: &str) -> AgentAdapter {
     AgentAdapter {
         id: id.into(),
@@ -64,10 +60,9 @@ fn project_with_commit(tag: &str) -> PathBuf {
 }
 
 #[test]
+#[ignore = "agent réel requis : exécuter avec --ignored"]
 fn worktree_isole_et_changements_reels() {
-    if !enabled() {
-        return;
-    }
+    // Agent réellement indispensable : échec explicite, jamais un succès muet.
     let cases = vec![
         adapter(AgentKind::Kilo, "kilo", "kilo"),
         adapter(AgentKind::Dsh, "dsh-cli", "dsh"),

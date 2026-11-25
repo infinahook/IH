@@ -743,15 +743,16 @@ pub fn run_team_tasks_with_events(
             node.title,
             node.description
         );
+        let unsandboxed = adapter.security == ih_core::config::SecurityLevel::None;
         let state = match supervisor.start(StartRequest {
             agent: adapter,
             project_dir: sandbox.workdir().to_path_buf(),
             prompt,
             session_id: None,
-            // La course d'équipe n'est lancée qu'après l'approbation d'équipe
-            // (goal + agents + répertoire) consommée par IH ; le détail
-            // d'approbation indique le niveau de sécurité de chaque agent.
-            confirm_unsandboxed: true,
+            // Confirmation : uniquement pour un membre réellement configuré au
+            // niveau non isolé, et seulement parce que la course d'équipe a été
+            // approuvée (acquittement explicite inclus dans l'empreinte).
+            confirm_unsandboxed: unsandboxed,
         }) {
             Ok(session) => supervisor
                 .wait(&session, task_timeout)
@@ -782,6 +783,16 @@ pub fn run_team_tasks_with_events(
 // ---------------------------------------------------------------------------
 // Empreinte d'approbation d'une course d'équipe.
 // ---------------------------------------------------------------------------
+
+/// Une course d'équipe contenant au moins un agent au niveau `none` exige un
+/// acquittement explicite de l'utilisateur, comme en Mode Agent.
+pub fn team_requires_unsandboxed_ack(
+    levels: impl IntoIterator<Item = ih_core::config::SecurityLevel>,
+) -> bool {
+    levels
+        .into_iter()
+        .any(|level| level == ih_core::config::SecurityLevel::None)
+}
 
 /// Empreinte couvrant **tous** les paramètres qui changent l'exécution :
 /// objectif, lead, workers (ordre inclus), relecteur et répertoire de travail.
@@ -886,5 +897,23 @@ mod team_fingerprint_tests {
         // Le détail d'une autre course ne couvre pas cette empreinte.
         let other = "Objectif : y\nEmpreinte : zzz999\n";
         assert!(!approval_covers(other, "abc123"));
+    }
+
+    /// V3 : l'acquittement explicite est exigé dès qu'un membre de l'équipe
+    /// s'exécute sans sandbox, et seulement dans ce cas.
+    #[test]
+    fn l_acquittement_est_exige_des_qu_un_membre_est_non_isole() {
+        use super::team_requires_unsandboxed_ack;
+        use ih_core::config::SecurityLevel;
+        assert!(!team_requires_unsandboxed_ack([]));
+        assert!(!team_requires_unsandboxed_ack([
+            SecurityLevel::Isolated,
+            SecurityLevel::IsolatedNetwork,
+        ]));
+        assert!(team_requires_unsandboxed_ack([
+            SecurityLevel::IsolatedNetwork,
+            SecurityLevel::None,
+        ]));
+        assert!(team_requires_unsandboxed_ack([SecurityLevel::None]));
     }
 }

@@ -406,7 +406,11 @@
     "kind_kilo": "Kilo",
     "kind_dsh": "DSH CLI",
     "kind_goose": "Goose",
-    "kind_custom": "Custom"
+    "kind_custom": "Custom",
+    "launch_via_agent_mode": "Launch from Agent mode",
+    "launch_via_agent_mode_hint": "Agent sessions are launched from the Agent tab: explicit approval, isolated worktree, then diff review before applying. No session is started directly in the project from this page.",
+    "open_agent_mode": "Open Agent mode",
+    "selected_agent": "Selected agent: {label}"
   },
   "models": {
     "title": "AI models",
@@ -1528,6 +1532,7 @@
     "sandbox_unavailable": "Sandbox unavailable",
     "none_ack": "I understand the agent will run without a sandbox with my Linux account rights (files, network, processes).",
     "none_warning": "Not isolated: explicit confirmation required before approval.",
-    "team_summary": "Security levels: {levels}"
+    "team_summary": "Security levels: {levels}",
+    "team_none_ack": "I understand that at least one team member will run without a sandbox, with my Linux account's rights, outside the isolated worktree."
   }
 }

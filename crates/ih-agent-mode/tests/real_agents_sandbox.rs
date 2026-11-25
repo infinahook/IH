@@ -15,10 +15,6 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-fn enabled() -> bool {
-    std::env::var("IH_REAL_AGENTS").ok().as_deref() == Some("1")
-}
-
 fn sandbox_ready() -> bool {
     sandbox::availability().functional
 }
@@ -116,10 +112,13 @@ fn run_session(
 }
 
 #[test]
+#[ignore = "agents réels + bubblewrap requis : exécuter avec --ignored"]
 fn les_trois_agents_travaillent_dans_la_sandbox_sans_sortir() {
-    if !enabled() || !sandbox_ready() {
-        return;
-    }
+    // Sandbox réellement indispensable : échec explicite, jamais un succès muet.
+    assert!(
+        sandbox_ready(),
+        "sandbox bubblewrap fonctionnelle requise pour ce test réel"
+    );
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
@@ -206,10 +205,13 @@ fn les_trois_agents_travaillent_dans_la_sandbox_sans_sortir() {
 }
 
 #[test]
+#[ignore = "agents réels + bubblewrap requis : exécuter avec --ignored"]
 fn niveau_isole_coupe_le_reseau_pour_les_agents() {
-    if !enabled() || !sandbox_ready() {
-        return;
-    }
+    // Sandbox réellement indispensable : échec explicite, jamais un succès muet.
+    assert!(
+        sandbox_ready(),
+        "sandbox bubblewrap fonctionnelle requise pour ce test réel"
+    );
     for mut agent in agents() {
         agent.security = SecurityLevel::Isolated;
         let project_dir = project(&agent.id);
@@ -238,10 +240,13 @@ fn niveau_isole_coupe_le_reseau_pour_les_agents() {
 }
 
 #[test]
+#[ignore = "agents réels + bubblewrap requis : exécuter avec --ignored"]
 fn annulation_sandbox_arrete_bwrap_et_les_enfants() {
-    if !enabled() || !sandbox_ready() {
-        return;
-    }
+    // Sandbox réellement indispensable : échec explicite, jamais un succès muet.
+    assert!(
+        sandbox_ready(),
+        "sandbox bubblewrap fonctionnelle requise pour ce test réel"
+    );
     for agent in agents() {
         let project_dir = project(&format!("cancel-{}", agent.id));
         let base = std::env::temp_dir().join(format!("ih-sbxreal-cancel-{}", std::process::id()));

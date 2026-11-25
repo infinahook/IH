@@ -45,6 +45,8 @@ export interface TeamForm {
   workers: readonly string[];
   reviewer: string | null;
   workItems: number;
+  /** Case « exécution hors sandbox » cochée par l'utilisateur. */
+  unsandboxedAck?: boolean;
 }
 
 export type TeamFieldError =
@@ -112,9 +114,23 @@ export function buildTeamRequest(form: TeamForm): TeamRequestBuild {
       workers,
       reviewer: reviewer.length > 0 ? reviewer : null,
       work_items: workItems,
+      unsandboxed_ack: form.unsandboxedAck === true,
     },
     error: null,
   };
+}
+
+/**
+ * Vrai si au moins un agent sélectionné s'exécute sans sandbox : la course
+ * exige alors un acquittement explicite, comme en Mode Agent.
+ */
+export function teamRequiresUnsandboxedAck(
+  ids: readonly (string | null | undefined)[],
+  securityOf: (id: string) => string | undefined,
+): boolean {
+  return ids
+    .filter((id): id is string => typeof id === "string" && id.length > 0)
+    .some((id) => securityOf(id) === "none");
 }
 
 /** Clé i18n du blocage du bouton « Lancer l'équipe » (`null` = lançable). */

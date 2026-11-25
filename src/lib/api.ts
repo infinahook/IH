@@ -857,6 +857,8 @@ export interface TeamRunRequest {
   workers: string[];
   reviewer: string | null;
   work_items: number;
+  /** Acquittement explicite exigé si un membre s'exécute sans sandbox. */
+  unsandboxed_ack?: boolean;
 }
 
 /** Demande d'approbation d'une course d'équipe (`team_request_approval`). */
@@ -971,8 +973,6 @@ export const api = {
   // agents
   agents: {
     list: () => call<AgentInfo[]>("agents_list"),
-    start: (projectId: string, agentId: string, prompt: string) =>
-      call<string>("agent_start", { projectId, agentId, prompt }),
     cancel: (sessionId: string) => call<void>("agent_cancel", { sessionId }),
     state: (sessionId: string) =>
       call<SessionSnapshot | null>("agent_state", { sessionId }),

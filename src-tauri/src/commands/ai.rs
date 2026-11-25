@@ -1,11 +1,9 @@
 //! Commandes agents et fournisseurs IA.
 
-use super::project_path;
 use crate::state::AppState;
-use ih_agents::{AgentRegistry, StartRequest};
+use ih_agents::AgentRegistry;
 use ih_core::config::{ProviderConfig, ProviderKind};
-use ih_core::events::AgentState;
-use ih_core::{IhError, IhResult, SessionId};
+use ih_core::{IhError, IhResult};
 use ih_providers::{build_provider, HealthReport, ModelEntry};
 use ih_security::secrets::provider_account;
 use serde::Serialize;
@@ -15,42 +13,6 @@ use tauri::State;
 pub fn agents_list(state: State<'_, AppState>) -> IhResult<Vec<ih_agents::AgentInfo>> {
     let config = state.config_snapshot()?;
     Ok(AgentRegistry::from_configs(&config.agents).list())
-}
-
-#[tauri::command]
-pub fn agent_start(
-    state: State<'_, AppState>,
-    project_id: String,
-    agent_id: String,
-    prompt: String,
-) -> IhResult<String> {
-    let config = state.config_snapshot()?;
-    let agent_config = config
-        .agent(&agent_id)
-        .ok_or_else(|| IhError::NotFound(format!("agent {agent_id}")))?
-        .clone();
-    let root = project_path(&state, &project_id)?;
-    let adapter = ih_agents::AgentAdapter::from_config(&agent_config);
-    let session_id = SessionId::new();
-    let session = state.store.create_session(&ih_store::NewSession {
-        project_id: ih_core::ProjectId::parse(project_id)?,
-        agent_id: agent_id.clone(),
-        thread_id: None,
-        prompt: prompt.clone(),
-    })?;
-    let id = state.supervisor.start(StartRequest {
-        agent: adapter,
-        project_dir: root,
-        prompt,
-        session_id: Some(session_id.clone()),
-        // Page Agents : lancement direct sans approbation dédiée, donc jamais
-        // de repli implicite vers une exécution non isolée.
-        confirm_unsandboxed: false,
-    })?;
-    state
-        .store
-        .update_session_state(&session.id, AgentState::Running, None)?;
-    Ok(id)
 }
 
 #[tauri::command]
