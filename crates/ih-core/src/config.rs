@@ -27,6 +27,52 @@ impl ProviderKind {
     }
 }
 
+/// Niveau de sécurité d'exécution d'un agent CLI.
+///
+/// - `isolated` : sandbox système, réseau désactivé.
+/// - `isolated_network` : sandbox système, réseau de l'hôte (provider distant).
+/// - `none` : aucune sandbox (droits de l'utilisateur, confirmation explicite).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SecurityLevel {
+    /// Sandbox système, réseau désactivé.
+    Isolated,
+    /// Sandbox système, réseau de l'hôte.
+    #[default]
+    IsolatedNetwork,
+    /// Aucune sandbox.
+    None,
+}
+
+impl SecurityLevel {
+    pub fn parse(value: &str) -> IhResult<Self> {
+        match value {
+            "isolated" => Ok(Self::Isolated),
+            "isolated_network" => Ok(Self::IsolatedNetwork),
+            "none" => Ok(Self::None),
+            other => Err(IhError::Invalid(format!(
+                "niveau de sécurité inconnu : {other}"
+            ))),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Isolated => "isolated",
+            Self::IsolatedNetwork => "isolated_network",
+            Self::None => "none",
+        }
+    }
+
+    pub fn network_enabled(self) -> bool {
+        matches!(self, Self::IsolatedNetwork | Self::None)
+    }
+
+    pub fn sandboxed(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentKind {
@@ -125,6 +171,10 @@ pub struct AgentConfig {
     pub env: BTreeMap<String, String>,
     /// Délai maximal d'exécution d'une session (secondes).
     pub timeout_secs: u64,
+    /// Niveau de sécurité d'exécution (sandbox système). Défaut :
+    /// `isolated_network` — jamais de repli silencieux vers le non isolé.
+    #[serde(default)]
+    pub security: SecurityLevel,
 }
 
 impl Default for AgentConfig {
@@ -138,6 +188,7 @@ impl Default for AgentConfig {
             enabled: false,
             env: BTreeMap::new(),
             timeout_secs: 1_800,
+            security: SecurityLevel::default(),
         }
     }
 }
@@ -727,6 +778,27 @@ mod tests {
         // claude-code, codex, gemini-cli, opencode, kilo, dsh-cli, goose, pi
         assert_eq!(config.agents.len(), 8);
         assert!(config.providers.iter().all(|p| !p.has_secret));
+    }
+
+    #[test]
+    fn niveau_de_securite_par_defaut_et_compatibilite() {
+        // Les configurations existantes (sans champ `security`) restent
+        // lisibles et héritent du niveau isolé avec réseau.
+        let toml = r#"
+schema = 1
+
+[[agents]]
+id = "kilo"
+kind = "kilo"
+label = "Kilo"
+program = "kilo"
+"#;
+        let config: AppConfig = toml::from_str(toml).expect("configuration lisible");
+        assert_eq!(config.agents[0].security, SecurityLevel::IsolatedNetwork);
+        assert!(config.agents[0].security.sandboxed());
+        // Le niveau est sérialisé explicitement dans les nouvelles configs.
+        let saved = toml::to_string_pretty(&config).unwrap();
+        assert!(saved.contains("security = \"isolated_network\""));
     }
 
     #[test]

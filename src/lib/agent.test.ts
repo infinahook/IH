@@ -17,6 +17,10 @@ import {
   filterAgentPendingDiffs,
   isActiveAgentPhase,
   isAdapterSelectable,
+  networkLabelKey,
+  requiresUnsandboxedAck,
+  sandboxLabelKey,
+  securityLabelKey,
   isTerminalAgentPhase,
   mapAgentState,
   pickDefaultAdapter,
@@ -77,6 +81,16 @@ function adapter(id: string, detected: boolean): AgentAdapterReport {
     path: detected ? `/usr/bin/${id}` : null,
     version: detected ? "1.0.0" : null,
     functional: detected,
+    security: "isolated_network",
+    sandbox: {
+      level: "isolated_network",
+      network: true,
+      sandboxed: true,
+      engine: "bubblewrap",
+      engine_ready: true,
+      error: null,
+      warnings: [],
+    },
     capabilities: [],
     diagnostic: detected ? "exécutable trouvé" : "introuvable dans le PATH",
   };
@@ -514,4 +528,40 @@ describe("revue des modifications d'une session", () => {
     expect(agentDiffOrigin("session-1")).toBe("agent:session-1");
     expect(filterAgentPendingDiffs(diffs, null)).toEqual([]);
   });
+
+describe("présentation des niveaux de sécurité", () => {
+  it("mappe chaque niveau sur son badge i18n", () => {
+    expect(securityLabelKey("isolated")).toBe("agent_security.level_isolated");
+    expect(securityLabelKey("isolated_network")).toBe(
+      "agent_security.level_isolated_network",
+    );
+    expect(securityLabelKey("none")).toBe("agent_security.level_none");
+    // Niveau absent : défaut documenté, jamais un niveau plus permissif.
+    expect(securityLabelKey(undefined)).toBe("agent_security.level_isolated_network");
+  });
+
+  it("déduit l'état réseau du niveau réel", () => {
+    expect(networkLabelKey("isolated", true)).toBe("agent_security.network_off");
+    expect(networkLabelKey("isolated_network", true)).toBe("agent_security.network_on");
+    expect(networkLabelKey("isolated_network", false)).toBe("agent_security.network_off");
+  });
+
+  it("signale une sandbox indisponible et n'en affiche pas pour un niveau non isolé", () => {
+    expect(sandboxLabelKey({ level: "isolated_network", engine_ready: true })).toBe(
+      "agent_security.sandbox_ready",
+    );
+    expect(sandboxLabelKey({ level: "isolated", engine_ready: false })).toBe(
+      "agent_security.sandbox_unavailable",
+    );
+    expect(sandboxLabelKey({ level: "none", engine_ready: false })).toBe("");
+    expect(sandboxLabelKey(undefined)).toBe("");
+  });
+
+  it("n'exige la confirmation hors sandbox que pour le niveau non isolé", () => {
+    expect(requiresUnsandboxedAck("none")).toBe(true);
+    expect(requiresUnsandboxedAck("isolated")).toBe(false);
+    expect(requiresUnsandboxedAck("isolated_network")).toBe(false);
+    expect(requiresUnsandboxedAck(undefined)).toBe(false);
+  });
+});
 });

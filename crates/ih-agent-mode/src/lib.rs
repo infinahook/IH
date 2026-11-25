@@ -51,6 +51,9 @@ pub struct AdapterReport {
     /// Vrai si l'exécutable existe ET répond correctement à `--version` : un
     /// binaire homonyme non fonctionnel ne doit pas être proposé au lancement.
     pub functional: bool,
+    /// Niveau de sécurité configuré et état réel de la sandbox.
+    pub security: ih_core::config::SecurityLevel,
+    pub sandbox: ih_agents::sandbox::SandboxSummary,
     /// Capacités réellement garanties par le contrat d'IH.
     pub capabilities: Vec<String>,
     pub diagnostic: String,
@@ -83,6 +86,8 @@ pub fn detect_adapters(configs: &[AgentConfig]) -> Vec<AdapterReport> {
                 path: path.map(|p| p.display().to_string()),
                 version,
                 functional,
+                security: config.security,
+                sandbox: ih_agents::sandbox::summary(config.security),
                 capabilities: {
                     let mut caps = capabilities_for(&config.kind);
                     if !autonomy.is_empty() {
@@ -743,6 +748,10 @@ pub fn run_team_tasks_with_events(
             project_dir: sandbox.workdir().to_path_buf(),
             prompt,
             session_id: None,
+            // La course d'équipe n'est lancée qu'après l'approbation d'équipe
+            // (goal + agents + répertoire) consommée par IH ; le détail
+            // d'approbation indique le niveau de sécurité de chaque agent.
+            confirm_unsandboxed: true,
         }) {
             Ok(session) => supervisor
                 .wait(&session, task_timeout)

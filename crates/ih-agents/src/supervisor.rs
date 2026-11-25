@@ -5,6 +5,7 @@
 //! `ResourcePolicy` et n'est pas contournable par l'interface.
 
 use crate::adapters::AgentAdapter;
+use crate::sandbox::{self, SecurityLevel};
 use ih_core::events::{AgentState, CoreEvent, OutputStream};
 use ih_core::{IhError, IhResult, ResourcePolicy, SessionId};
 use std::collections::HashMap;
@@ -25,6 +26,9 @@ pub struct StartRequest {
     pub prompt: String,
     /// Identifiant de session fourni par l'appelant (persisté en base).
     pub session_id: Option<SessionId>,
+    /// Confirmation explicite pour un agent configuré en niveau non isolé.
+    /// Sans elle, un agent non sandboxé est refusé (aucun repli silencieux).
+    pub confirm_unsandboxed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -161,14 +165,65 @@ impl AgentSupervisor {
 
         let session_id = request.session_id.clone().unwrap_or_default().into_string();
         let (_, args) = request.agent.build_command(&request.prompt);
+        let level = request.agent.security;
 
-        let mut command = Command::new(&executable);
+        // Niveau non isolé : refus tant que l'appelant n'a pas confirmé
+        // explicitement (approbation dédiée côté IH).
+        if level == SecurityLevel::None && !request.confirm_unsandboxed {
+            return Err(IhError::Denied(
+                "niveau non isolé : confirmation explicite requise (aucun repli silencieux vers l'exécution non sandboxée)"
+                    .into(),
+            ));
+        }
+
+        // Environnement déclaré pour l'agent (jamais hérité de l'hôte en mode
+        // sandboxé : l'environnement hôte contient des secrets).
+        let declared_env: Vec<(String, String)> = request
+            .agent
+            .env
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+
+        // Sandbox système (bubblewrap) : isolation réelle des fichiers, de
+        // l'environnement et du réseau selon le niveau.
+        let sandboxed = if level != SecurityLevel::None {
+            Some(sandbox::sandboxed_command(
+                level,
+                &request.agent.kind,
+                &executable,
+                &args,
+                &request.project_dir,
+                &declared_env,
+                &session_id,
+            )?)
+        } else {
+            None
+        };
+
+        let (program, final_args): (std::path::PathBuf, Vec<String>) = match &sandboxed {
+            Some(plan) => (plan.program.clone(), plan.args.clone()),
+            None => (executable.clone(), args.clone()),
+        };
+        let private_home = sandboxed
+            .as_ref()
+            .and_then(|plan| plan.private_home.clone());
+
+        let mut command = Command::new(&program);
+        command.args(&final_args);
+        match &sandboxed {
+            // Environnement vidé puis reconstruit explicitement par la sandbox.
+            Some(plan) => {
+                command.env_clear();
+                command.envs(plan.env.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+            None => {
+                // Compatibilité : un agent explicitement non isolé conserve
+                // l'environnement historique, plus ses variables déclarées.
+                command.envs(&request.agent.env);
+            }
+        }
         command
-            .args(&args)
-            // Variables d'environnement de la configuration de l'agent
-            // (jamais de secret implicite : uniquement ce que l'utilisateur
-            // a déclaré dans son adaptateur).
-            .envs(&request.agent.env)
             .current_dir(&request.project_dir)
             // Certains CLI (OpenCode v2.3.2 vérifié) résolvent leur projet via
             // `$PWD` et ignorent le répertoire courant réel : sans cela, ils
@@ -285,6 +340,7 @@ impl AgentSupervisor {
         let watchdog_running = running.clone();
         let timeout = Duration::from_secs(request.agent.timeout_secs.max(1));
         let active = self.active.clone();
+        let watched_home = private_home.clone();
         std::thread::spawn(move || {
             let started = Instant::now();
             let mut final_state = AgentState::Completed;
@@ -333,6 +389,11 @@ impl AgentSupervisor {
                 if let Some(child) = guard.as_mut() {
                     let _ = child.wait();
                 }
+            }
+            // Les copies de secrets de la session sandboxée ne survivent pas
+            // à la session.
+            if let Some(home) = &watched_home {
+                sandbox::cleanup_private_home(home);
             }
 
             if let Ok(mut guard) = watchdog_running.state.lock() {
@@ -540,6 +601,7 @@ mod tests {
             enabled: true,
             timeout_secs: 5,
             env: Default::default(),
+            security: ih_core::config::SecurityLevel::default(),
         }
     }
 
@@ -561,6 +623,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "salut".to_string(),
                 session_id: None,
+                confirm_unsandboxed: false,
             })
             .unwrap();
         let state = supervisor.wait(&id, Duration::from_secs(5)).unwrap();
@@ -598,6 +661,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: false,
             })
             .unwrap();
         assert_eq!(
@@ -627,6 +691,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: false,
             })
             .unwrap();
         std::thread::sleep(Duration::from_millis(200));
@@ -664,6 +729,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: false,
             })
             .unwrap();
         let _ = supervisor.wait(&id, Duration::from_secs(5));
@@ -692,6 +758,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: false,
             })
             .unwrap();
         let second = supervisor.start(StartRequest {
@@ -699,6 +766,7 @@ mod tests {
             project_dir: dir.clone(),
             prompt: "y".to_string(),
             session_id: None,
+            confirm_unsandboxed: false,
         });
         assert!(matches!(second, Err(IhError::Limit(_))));
         supervisor.cancel(&first).ok();
@@ -718,6 +786,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: false,
             })
             .unwrap_err();
         assert!(err.to_string().contains("introuvable"));
@@ -729,6 +798,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "   ".to_string(),
                 session_id: None,
+                confirm_unsandboxed: false,
             })
             .unwrap_err();
         assert!(matches!(err, IhError::Invalid(_)));
@@ -755,6 +825,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: false,
             })
             .unwrap();
         let _ = supervisor.wait(&id, Duration::from_secs(10));
@@ -788,6 +859,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
+                confirm_unsandboxed: false,
             })
             .unwrap();
         assert_eq!(

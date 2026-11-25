@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Ban, Bot, Eraser, FolderOpen, Play, RefreshCw } from "lucide-react";
 import { api, type AgentInfo, type AgentState, type SessionRow } from "../lib/api";
+import { securityLabelKey } from "../lib/agent";
 import { formatDate, shortHash } from "../lib/format";
 import { useAsync, useAction } from "../lib/hooks";
 import { useTauriEvent } from "../lib/events";
@@ -281,6 +282,22 @@ export function AgentsPage() {
                     </span>
                     <span className="inline-status">
                       {!adapter.enabled ? <Badge>{t("common.disabled")}</Badge> : null}
+                      <Badge
+                        tone={
+                          adapter.sandbox?.sandboxed === false
+                            ? "warning"
+                            : adapter.sandbox?.engine_ready
+                              ? "success"
+                              : "danger"
+                        }
+                        title={
+                          adapter.sandbox?.engine
+                            ? t("agent_security.sandbox", { engine: adapter.sandbox.engine })
+                            : undefined
+                        }
+                      >
+                        {t(securityLabelKey(adapter.security))}
+                      </Badge>
                       <Badge tone={adapter.detected ? "success" : "danger"}>
                         {adapter.detected ? t("agents.detected") : t("agents.missing")}
                       </Badge>

@@ -43,6 +43,9 @@ pub fn agent_start(
         project_dir: root,
         prompt,
         session_id: Some(session_id.clone()),
+        // Page Agents : lancement direct sans approbation dédiée, donc jamais
+        // de repli implicite vers une exécution non isolée.
+        confirm_unsandboxed: false,
     })?;
     state
         .store

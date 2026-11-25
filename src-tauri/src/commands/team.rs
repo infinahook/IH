@@ -50,6 +50,40 @@ fn fingerprint(request: &TeamRequest, root: &std::path::Path) -> IhResult<String
     ))
 }
 
+/// Niveau de sécurité de chaque agent de l'équipe, tel qu'il sera exécuté.
+/// Inscrit dans l'empreinte : changer un niveau invalide l'approbation.
+fn security_summary(request: &TeamRequest, config: &ih_core::config::AppConfig) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut push = |agent_id: &str| {
+        if let Some(agent) = config.agent(agent_id) {
+            parts.push(format!("{agent_id}={}", agent.security.as_str()));
+        } else {
+            parts.push(format!("{agent_id}=absent"));
+        }
+    };
+    push(&request.lead);
+    for worker in &request.workers {
+        push(worker);
+    }
+    if let Some(reviewer) = request.reviewer.as_deref() {
+        push(reviewer);
+    }
+    parts.join(",")
+}
+
+/// Empreinte complète : course + niveaux de sécurité réels.
+fn full_fingerprint(
+    request: &TeamRequest,
+    root: &std::path::Path,
+    config: &ih_core::config::AppConfig,
+) -> IhResult<String> {
+    let base = fingerprint(request, root)?;
+    Ok(format!(
+        "{base}|securite:{}",
+        security_summary(request, config)
+    ))
+}
+
 fn build_team(request: &TeamRequest, config: &ih_core::config::AppConfig) -> IhResult<Team> {
     let mut team = Team::new("ih");
     team.max_parallel = 1; // séquentiel : la relecture dépend des exécutions
@@ -89,7 +123,8 @@ pub fn team_request_approval(
     let plan = plan_goal(&request.goal, &team, request.work_items)?;
     plan.graph.validate()?;
 
-    let fingerprint = fingerprint(&request, &root)?;
+    let fingerprint = full_fingerprint(&request, &root, &config)?;
+    let security = security_summary(&request, &config);
     let summary = plan
         .graph
         .topological_order()
@@ -98,7 +133,8 @@ pub fn team_request_approval(
         .collect::<Vec<_>>()
         .join("\n");
     let detail = format!(
-        "Objectif : {}\nRépertoire isolé sous : {}\nEmpreinte : {fingerprint}\n\nPlan :\n{summary}\n\n\
+        "Objectif : {}\nRépertoire isolé sous : {}\nEmpreinte : {fingerprint}\n\
+         Niveaux de sécurité : {security}\n\nPlan :\n{summary}\n\n\
          Chaque tâche s'exécute dans un worktree git isolé ; le projet n'est pas modifié. \
          Les fichiers produits seront présentés en diff avant application.",
         request.goal,
@@ -152,8 +188,9 @@ pub fn team_run(
     let config = state.config_snapshot()?;
     let team = build_team(&request, &config)?;
 
-    // Approbation : doit correspondre exactement à cette course.
-    let expected = fingerprint(&request, &root)?;
+    // Approbation : doit correspondre exactement à cette course (niveaux de
+    // sécurité compris).
+    let expected = full_fingerprint(&request, &root, &config)?;
     let pending = state
         .approvals
         .get(&approval_id)?

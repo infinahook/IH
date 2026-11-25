@@ -445,6 +445,8 @@ pub fn workflow_run_now(state: State<'_, AppState>, id: String) -> IhResult<Work
             project_dir: root.clone(),
             prompt: prompt.to_string(),
             session_id: None,
+            // Automatisations : aucune confirmation interactive par étape.
+            confirm_unsandboxed: false,
         });
         match session {
             Ok(session_id) => {

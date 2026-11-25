@@ -10,7 +10,8 @@
 //! machine de développement). La détection dans le `PATH` et la supervision,
 //! elles, sont testées.
 
-use ih_core::config::{AgentConfig, AgentKind};
+use crate::sandbox::{summary as sandbox_summary, SandboxSummary};
+use ih_core::config::{AgentConfig, AgentKind, SecurityLevel};
 use ih_core::platform::{find_in_path, login_shell_path};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -31,6 +32,9 @@ pub struct AgentInfo {
     pub version: Option<String>,
     /// Diagnostic quand la détection ou la sonde de version échoue.
     pub error: Option<String>,
+    /// Niveau de sécurité configuré et état réel de la sandbox.
+    pub security: SecurityLevel,
+    pub sandbox: SandboxSummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +49,8 @@ pub struct AgentAdapter {
     /// Variables d'environnement déclarées pour cet agent (transmises telles
     /// quelles au processus ; aucun secret n'est ajouté par IH).
     pub env: std::collections::BTreeMap<String, String>,
+    /// Niveau de sécurité d'exécution (sandbox système).
+    pub security: SecurityLevel,
 }
 
 impl AgentAdapter {
@@ -58,6 +64,7 @@ impl AgentAdapter {
             enabled: config.enabled,
             timeout_secs: config.timeout_secs,
             env: config.env.clone(),
+            security: config.security,
         }
     }
 
@@ -100,6 +107,8 @@ impl AgentAdapter {
             resolved_path: resolved.map(|p| p.display().to_string()),
             version,
             error,
+            security: self.security,
+            sandbox: sandbox_summary(self.security),
         }
     }
 
@@ -346,6 +355,18 @@ pub fn resolve_program(program: &str, kind: &AgentKind) -> Option<PathBuf> {
             candidates.push(candidate);
         }
     };
+    // Pour DSH, le CLI livré avec le paquet d'application (`/opt/apps/.../bin`)
+    // est autonome (Node embarqué, profil `headless` opérationnel) ; une autre
+    // installation npm du même nom peut exister dans un dossier d'outils
+    // utilisateur sans se comporter pareil en mode headless. On le préfère donc
+    // explicitement, et on retombe sur la recherche PATH ensuite.
+    if kind == &AgentKind::Dsh {
+        for dir in &extra_search_dirs() {
+            for name in &names {
+                push(dir.join(name));
+            }
+        }
+    }
     for name in &names {
         if let Some(found) = find_in_path(name) {
             push(found);
@@ -520,6 +541,7 @@ mod tests {
             enabled: true,
             timeout_secs: 30,
             env: Default::default(),
+            security: ih_core::config::SecurityLevel::default(),
         }
     }
 

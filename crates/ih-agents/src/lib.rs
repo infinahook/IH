@@ -2,6 +2,7 @@
 
 pub mod adapters;
 pub mod normalize;
+pub mod sandbox;
 pub mod supervisor;
 
 pub use adapters::{AgentAdapter, AgentInfo, AgentRegistry};

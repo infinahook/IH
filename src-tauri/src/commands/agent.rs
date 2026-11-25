@@ -6,7 +6,9 @@ use ih_agent_mode::{
     action_fingerprint, collect_changes, create_sandbox, detect_adapters, remove_sandbox,
     AdapterReport,
 };
+use ih_agents::sandbox::{self, SandboxSummary};
 use ih_agents::{AgentAdapter, StartRequest};
+use ih_core::config::SecurityLevel;
 use ih_core::events::AgentState;
 use ih_core::{IhError, IhResult, ProjectId, SessionId};
 use ih_security::approval::{ApprovalDecision, ApprovalRequest};
@@ -34,6 +36,9 @@ pub struct AgentApprovalView {
     pub risk: RiskLevel,
     pub fingerprint: String,
     pub detail: String,
+    /// Niveau de sécurité demandé (`isolated`, `isolated_network`, `none`).
+    pub security: SecurityLevel,
+    pub sandbox: SandboxSummary,
 }
 
 /// Prépare une demande d'approbation pour un lancement de session.
@@ -47,6 +52,8 @@ pub fn agent_session_request_approval(
     project_id: String,
     agent_id: String,
     task: String,
+    // Confirmation explicite exigée pour le niveau non isolé.
+    unsandboxed_ack: Option<bool>,
 ) -> IhResult<AgentApprovalView> {
     if task.trim().is_empty() {
         return Err(IhError::Invalid("tâche vide".into()));
@@ -57,6 +64,23 @@ pub fn agent_session_request_approval(
         .agent(&agent_id)
         .ok_or_else(|| IhError::NotFound(format!("agent {agent_id}")))?;
     let adapter = AgentAdapter::from_config(agent_config);
+    let level = adapter.security;
+    let sandbox = sandbox::summary(level);
+    if level == SecurityLevel::None && unsandboxed_ack != Some(true) {
+        return Err(IhError::Denied(
+            "niveau non isolé : confirmez explicitement l'exécution sans sandbox avant de demander l'approbation"
+                .into(),
+        ));
+    }
+    if level.sandboxed() && !sandbox.engine_ready {
+        return Err(IhError::Agent(format!(
+            "sandbox indisponible : le lancement isolé est refusé. {}",
+            sandbox
+                .error
+                .clone()
+                .unwrap_or_else(|| "sandbox non fonctionnelle".into())
+        )));
+    }
     if adapter.detection().is_none() {
         return Err(IhError::Agent(format!(
             "programme introuvable dans le PATH : {}",
@@ -67,14 +91,46 @@ pub fn agent_session_request_approval(
     let command = format!("{} {}", adapter.program, args.join(" "));
     // Le worktree n'existe pas encore : on empreinte la racine du projet comme
     // répertoire de session (le worktree est créé sous ce dernier).
-    let fingerprint = action_fingerprint(&agent_id, &command, &root, &task);
+    // Le niveau de sécurité fait partie de l'empreinte : changer le niveau
+    // invalide l'approbation existante.
+    let fingerprint = action_fingerprint(
+        &agent_id,
+        &format!("{command} [securite:{}]", level.as_str()),
+        &root,
+        &task,
+    );
 
     let mut detail = format!(
         "Commande : {command}\nRépertoire isolé créé sous : {}\nEmpreinte : {fingerprint}\n\
+         Niveau de sécurité : {} (réseau : {})\n\
          L'agent s'exécute dans une copie (worktree git) : le projet n'est pas modifié \
          pendant la session. Les changements seront présentés en diff avant application.",
-        root.display()
+        root.display(),
+        level.as_str(),
+        if level.network_enabled() {
+            "activé"
+        } else {
+            "désactivé"
+        }
     );
+    if level.sandboxed() {
+        detail.push_str(&format!(
+            "\nSandbox : {} ({}) — dossier personnel privé, /usr et /etc en lecture seule, \
+             /tmp privé, écriture limitée au worktree.",
+            sandbox
+                .engine
+                .clone()
+                .unwrap_or_else(|| "bubblewrap".into()),
+            if sandbox.engine_ready {
+                "opérationnelle"
+            } else {
+                "indisponible"
+            }
+        ));
+    }
+    for warning in &sandbox.warnings {
+        detail.push_str(&format!("\n⚠ {warning}"));
+    }
     // Le worktree est une isolation Git, pas une sandbox système : un drapeau
     // d'autonomie (ex. `--auto`) permet à l'agent d'écrire, d'exécuter des
     // commandes ou de lire des fichiers hors du worktree avec les droits de
@@ -104,6 +160,8 @@ pub fn agent_session_request_approval(
         risk: RiskLevel::High,
         fingerprint,
         detail,
+        security: level,
+        sandbox,
     })
 }
 
@@ -150,9 +208,17 @@ pub fn agent_session_start(
     }
 
     // 1. Vérifie l'empreinte AVANT de consommer l'approbation.
+    let level = adapter.security;
     let (_program, args) = adapter.build_command(&task);
     let command = format!("{} {}", adapter.program, args.join(" "));
-    let fingerprint = action_fingerprint(&agent_id, &command, &root, &task);
+    // Le niveau de sécurité fait partie de l'empreinte : changer le niveau
+    // invalide l'approbation existante.
+    let fingerprint = action_fingerprint(
+        &agent_id,
+        &format!("{command} [securite:{}]", level.as_str()),
+        &root,
+        &task,
+    );
     let pending = state
         .approvals
         .get(&approval_id)?
@@ -195,6 +261,9 @@ pub fn agent_session_start(
         project_dir: workdir.clone(),
         prompt: task.clone(),
         session_id: Some(session_id.clone()),
+        // L'approbation consommée couvre la commande ET le niveau de sécurité :
+        // un niveau non isolé n'est lancé qu'après cette approbation explicite.
+        confirm_unsandboxed: adapter.security == ih_core::config::SecurityLevel::None,
     })?;
     if supervisor_id != session_id.to_string() {
         return Err(IhError::Internal(

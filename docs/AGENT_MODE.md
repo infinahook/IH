@@ -63,7 +63,19 @@ machine de validation sont `kilo 7.8.32`, `dsh 0.1.0-rc.7` et `goose 1.61.0`.
   (`message` assistant → texte lisible, `complete` masqué) ; `--quiet` supprime
   la bannière d'accueil qui polluait la sortie.
 
+## Isolation système : voir [AGENT_SECURITY.md](AGENT_SECURITY.md)
+
+Depuis cette version, chaque agent s'exécute dans une **sandbox bubblewrap**
+selon un niveau configuré par agent (`isolated`, `isolated_network` par défaut,
+`none` avec confirmation explicite). Le worktree reste l'isolation Git ; la
+sandbox ajoute l'isolation des fichiers, de l'environnement et du réseau.
+Détails, permissions et tests réels : [AGENT_SECURITY.md](AGENT_SECURITY.md).
+
 ## Portée réelle de `--auto` (Kilo) — audit du 25/11/2026
+
+La portée décrite ci-dessous est celle de Kilo **hors sandbox** (niveau
+`none`). Dans la sandbox par défaut, l'agent ne peut plus écrire, exécuter ou
+lire hors de son worktree.
 
 Audit mené avec le binaire réel (`kilo 7.8.32`) dans un worktree jetable,
 avec variables et fichiers canaris, et un service HTTP local :

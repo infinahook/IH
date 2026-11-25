@@ -28,6 +28,7 @@ fn adapter(kind: AgentKind, id: &str, program: &str) -> AgentAdapter {
         enabled: true,
         timeout_secs: 300,
         env: Default::default(),
+        security: ih_core::config::SecurityLevel::default(),
     }
 }
 
@@ -87,6 +88,8 @@ fn worktree_isole_et_changements_reels() {
                 project_dir: sandbox.workdir().to_path_buf(),
                 prompt: "Crée le fichier ih-real.txt contenant exactement le mot ok (sans retour à la ligne), puis réponds FAIT.".into(),
                 session_id: None,
+
+confirm_unsandboxed: false,
             })
             .expect("lancement");
         let state = supervisor

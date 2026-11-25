@@ -5609,3 +5609,17 @@ select optgroup {
   align-items: center;
   box-sizing: border-box;
 }
+
+/* --- niveaux de sécurité des agents (sandbox système) ----------------- */
+
+.agent-security,
+.agent-sandbox-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.agent-sandbox-summary {
+  margin: var(--space-2) 0;
+}

@@ -90,6 +90,15 @@ export function TeamPanel({
   const [diffPreviewBusy, setDiffPreviewBusy] = useState(false);
 
   const detected = useMemo(() => selectableAdapters(adapters), [adapters]);
+  // Niveaux de sécurité réellement appliqués à la course (agents sélectionnés).
+  const securitySummary = useMemo(() => {
+    const ids = [lead, ...workers, ...(reviewer ? [reviewer] : [])].filter(Boolean);
+    const labels = ids.map((id) => {
+      const adapter = adapters.find((entry) => entry.id === id);
+      return `${adapter?.label ?? id}=${t(`agent_security.level_${adapter?.security ?? "isolated_network"}`)}`;
+    });
+    return labels.join(" · ");
+  }, [lead, workers, reviewer, adapters, t]);
 
   // Sélection par défaut : premier adaptateur détecté, sans jamais garder un
   // identifiant qui aurait disparu après une nouvelle détection.
@@ -271,6 +280,11 @@ export function TeamPanel({
         </Field>
 
         <div className="form-grid">
+          {securitySummary ? (
+            <p className="small muted">
+              {t("agent_security.team_summary", { levels: securitySummary })}
+            </p>
+          ) : null}
           <Field
             label={t("team.lead")}
             htmlFor="team-lead"

@@ -1516,5 +1516,18 @@
     "role_worker": "Worker",
     "role_reviewer": "Reviewer",
     "roles_saved": "Permissions du rôle « {role} » enregistrées."
+  },
+  "agent_security": {
+    "level_isolated": "Isolé",
+    "level_isolated_network": "Isolé + réseau",
+    "level_none": "Non isolé",
+    "network_on": "Réseau autorisé",
+    "network_off": "Réseau désactivé",
+    "sandbox": "Sandbox : {engine}",
+    "sandbox_ready": "Sandbox opérationnelle",
+    "sandbox_unavailable": "Sandbox indisponible",
+    "none_ack": "Je comprends que l'agent s'exécutera sans sandbox, avec les droits de mon compte Linux (fichiers, réseau, processus).",
+    "none_warning": "Niveau non isolé : confirmation explicite requise avant approbation.",
+    "team_summary": "Niveaux de sécurité : {levels}"
   }
 }

@@ -28,6 +28,7 @@ fn adapter(kind: AgentKind, id: &str, program: &str) -> AgentAdapter {
         enabled: true,
         timeout_secs: 300,
         env: Default::default(),
+        security: ih_core::config::SecurityLevel::default(),
     }
 }
 
@@ -94,6 +95,7 @@ fn lancement_instruction_et_reponse_reelles() {
                     "Réponds uniquement par le mot OK, sans appeler d'outil ni créer de fichier."
                         .into(),
                 session_id: None,
+                confirm_unsandboxed: false,
             })
             .expect("lancement");
         let state = supervisor
@@ -166,6 +168,7 @@ fn annulation_reelle_tue_le_processus() {
                 project_dir: dir.clone(),
                 prompt: "Compte lentement de 1 à 50 en détaillant chaque nombre.".into(),
                 session_id: None,
+                confirm_unsandboxed: false,
             })
             .expect("lancement");
         // Laisse le CLI démarrer réellement, puis annule.
@@ -269,6 +272,7 @@ fn erreur_reelle_est_signalee() {
                 project_dir: dir.clone(),
                 prompt: "OK".into(),
                 session_id: None,
+                confirm_unsandboxed: false,
             })
             .expect("lancement");
         let state = supervisor

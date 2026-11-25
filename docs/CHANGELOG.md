@@ -29,7 +29,22 @@
 - Le superviseur lance l'**exécutable résolu** (chemin absolu) et transmet les
   variables d'environnement déclarées dans la configuration de l'agent.
 - Sélection d'adaptateur : un binaire seulement détecté mais non fonctionnel
-  n'est plus sélectionnable.
+  n'est plus sélectionnable. Pour DSH, le CLI livré avec le paquet
+  d'application (`/opt/apps/.../bin/dsh`, Node embarqué) est préféré à une
+  autre installation npm homonyme : une copie nvm 0.2.2-rc.5 se termine sans
+  sortie en profil `headless`, ce qu'IH ne peut pas accepter comme succès.
+- Un exécutable utilisateur est monté dans la sandbox par sa **cible résolue**
+  (liens symboliques npm résolus, paquet `node_modules` entier) : un script
+  Node a besoin de son paquet, pas du seul fichier de lancement.
+
+### Sécurité — sandbox système des agents
+- **Isolation réelle par bubblewrap** (Zorin OS / Ubuntu : `apt install bubblewrap`, Arch : `pacman -S bubblewrap`) : `/usr`, `/etc` en lecture seule, `/tmp` privé, worktree seul répertoire inscriptible, dossier personnel privé, `--proc`/`--dev` dédiés, PID/IPC/UTS isolés, `--die-with-parent`.
+- **Trois niveaux par agent** (`security` dans `[[agents]]`) : `isolated` (réseau coupé), `isolated_network` (**défaut**, provider distant), `none` (non isolé, confirmation explicite obligatoire, jamais de bascule silencieuse). Le niveau fait partie de l'empreinte d'approbation.
+- **Environnement reconstruit** (`--clearenv` puis HOME/PATH/TMPDIR/LANG/TERM + variables déclarées) : aucun héritage des secrets de l'utilisateur.
+- **Secrets contrôlés** : seuls les identifiants propres à l'agent sont copiés (0600) dans son dossier privé (Kilo auth.json/config, DSH credentials/profils, Goose config/secrets), puis supprimés en fin de session.
+- **Refus explicite** si bubblewrap est indisponible ou inopérant : aucun repli vers une exécution non sandboxée.
+- Interface : niveau, moteur, état du réseau et avertissements affichés dans la page Agents, le mode Agent, l'approbation et le résumé d'équipe.
+- Tests réels (agents installés, canaris) : lecture/écriture dans le worktree autorisées ; canari `$HOME`, `~/.ssh`, sockets, écriture/suppression hors worktree refusés ; réseau coupé en `isolated` ; annulation effective ; diff limité au worktree. Détails : `docs/AGENT_SECURITY.md`.
 
 ### Vérifié
 - Tests réels exécutés sur la machine de validation (`IH_REAL_AGENTS=1`) :
@@ -37,6 +52,12 @@
   lancement et réponse, annulation effective du groupe de processus, erreur
   volontairement provoquée, isolation par worktree git et collecte des fichiers
   modifiés — pour les trois CLI.
+- Sandbox réelle : les trois agents écrivent `sbox-ok.txt` dans le worktree
+  avec un accès hôte refusé (canaris `$HOME`, `~/.ssh`, sockets), un prompt
+  hostile ne fait fuiter aucun canari, et le niveau `isolated` échoue
+  explicitement chez les trois (DNS/transport coupés).
+- 430 tests Rust, 182 tests frontend, `tsc --noEmit` et build de production
+  verts.
 
 ## 0.6.3 — Cohérence visuelle de l'interface
 
