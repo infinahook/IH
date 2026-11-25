@@ -463,9 +463,17 @@ pub fn probe_version(path: &Path) -> Option<String> {
 
 fn probe_version_uncached(path: &Path) -> Option<String> {
     let neutral = std::env::temp_dir();
+    // Sonder un exécutable est la première fois qu'IH l'exécute : il le fait
+    // SANS l'environnement de l'utilisateur (qui peut contenir des secrets) et
+    // avec un environnement minimal explicite.
     let mut child = Command::new(path)
         .arg("--version")
         .current_dir(&neutral)
+        .env_clear()
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("HOME", &neutral)
+        .env("LANG", "C.UTF-8")
+        .env("TERM", "dumb")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

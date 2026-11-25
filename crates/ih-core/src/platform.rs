@@ -201,8 +201,20 @@ pub fn login_shell_path() -> Option<String> {
 fn compute_login_shell_path() -> Option<String> {
     use std::process::{Command, Stdio};
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
-    let mut child = Command::new(shell)
+    // Le shell de connexion est exécuté pour connaître le `PATH` réellement
+    // installé : il reçoit un environnement minimal (jamais les variables de
+    // l'application, qui peuvent contenir des secrets) et son propre `.profile`
+    // fournit le reste.
+    let home = std::env::var_os("HOME").unwrap_or_default();
+    let mut child = Command::new(&shell)
         .args(["-lic", "printf '__IH_PATH__%s__IH_PATH_END__' \"$PATH\""])
+        .env_clear()
+        .env("HOME", &home)
+        .env("USER", std::env::var("USER").unwrap_or_default())
+        .env("LOGNAME", std::env::var("LOGNAME").unwrap_or_default())
+        .env("SHELL", &shell)
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("TERM", "dumb")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
