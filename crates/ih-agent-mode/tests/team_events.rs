@@ -5,7 +5,7 @@
 
 use ih_agent_mode::{create_sandbox, remove_sandbox, run_team_tasks_with_events, TeamTaskOutcome};
 use ih_agents::supervisor::{AgentSupervisor, EventSink};
-use ih_core::config::{AgentConfig, AgentKind, AppConfig};
+use ih_core::config::{AgentConfig, AgentKind, AppConfig, SecurityLevel};
 use ih_core::ResourcePolicy;
 use ih_orchestrator::{plan_goal, Team, TeamRole};
 use std::path::{Path, PathBuf};
@@ -53,6 +53,9 @@ fn evenements_ordonnes_et_sans_doublon() {
         label: "Factice".into(),
         program: script.display().to_string(),
         enabled: true,
+        // Test du flux d'événements, pas de la sandbox : agent factice exécuté
+        // sans isolation (la confirmation est donnée par le mode Équipe).
+        security: SecurityLevel::None,
         ..Default::default()
     });
 

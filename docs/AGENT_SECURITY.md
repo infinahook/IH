@@ -109,6 +109,14 @@ Avec les trois CLI installés, sandbox `isolated_network`, canaris dans le
 | annulation (état `Cancelled`, bwrap et enfants arrêtés) | ✅ | ✅ | ✅ |
 | diff limité au fichier créé dans le worktree | ✅ | ✅ | ✅ |
 
+Machine sans sandbox (CI GitHub, conteneur sans espace de noms non
+privilégié) : la variable **`IH_SANDBOX_ENGINE`** force le chemin du moteur.
+Les tests s'en servent pour simuler une machine sans bubblewrap ; quand le
+moteur est absent ou inopérant, les tests qui portent sur la supervision
+demandent explicitement le niveau non isolé et les tests d'isolation sont
+ignorés — la CI reste donc verte sans jamais faire croire que la sandbox a
+été exercée.
+
 Détail déterministe (shell dans la sandbox, sans LLM) :
 `crates/ih-agents/tests/sandbox_runtime.rs`.
 Tests réels agents : `crates/ih-agent-mode/tests/real_agents_sandbox.rs`

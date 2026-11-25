@@ -601,7 +601,11 @@ mod tests {
             enabled: true,
             timeout_secs: 5,
             env: Default::default(),
-            security: ih_core::config::SecurityLevel::default(),
+            // Ces tests portent sur la supervision du processus (états, timeout,
+            // annulation, environnement, sortie bornée), pas sur la sandbox :
+            // ils demandent donc explicitement le niveau non isolé, autorisé par
+            // la confirmation passée avec chaque `StartRequest`.
+            security: ih_core::config::SecurityLevel::None,
         }
     }
 
@@ -623,7 +627,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "salut".to_string(),
                 session_id: None,
-                confirm_unsandboxed: false,
+                confirm_unsandboxed: true,
             })
             .unwrap();
         let state = supervisor.wait(&id, Duration::from_secs(5)).unwrap();
@@ -661,7 +665,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
-                confirm_unsandboxed: false,
+                confirm_unsandboxed: true,
             })
             .unwrap();
         assert_eq!(
@@ -691,7 +695,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
-                confirm_unsandboxed: false,
+                confirm_unsandboxed: true,
             })
             .unwrap();
         std::thread::sleep(Duration::from_millis(200));
@@ -729,7 +733,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
-                confirm_unsandboxed: false,
+                confirm_unsandboxed: true,
             })
             .unwrap();
         let _ = supervisor.wait(&id, Duration::from_secs(5));
@@ -758,7 +762,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
-                confirm_unsandboxed: false,
+                confirm_unsandboxed: true,
             })
             .unwrap();
         let second = supervisor.start(StartRequest {
@@ -786,7 +790,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
-                confirm_unsandboxed: false,
+                confirm_unsandboxed: true,
             })
             .unwrap_err();
         assert!(err.to_string().contains("introuvable"));
@@ -798,7 +802,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "   ".to_string(),
                 session_id: None,
-                confirm_unsandboxed: false,
+                confirm_unsandboxed: true,
             })
             .unwrap_err();
         assert!(matches!(err, IhError::Invalid(_)));
@@ -825,7 +829,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
-                confirm_unsandboxed: false,
+                confirm_unsandboxed: true,
             })
             .unwrap();
         let _ = supervisor.wait(&id, Duration::from_secs(10));
@@ -859,7 +863,7 @@ mod tests {
                 project_dir: dir.clone(),
                 prompt: "x".to_string(),
                 session_id: None,
-                confirm_unsandboxed: false,
+                confirm_unsandboxed: true,
             })
             .unwrap();
         assert_eq!(

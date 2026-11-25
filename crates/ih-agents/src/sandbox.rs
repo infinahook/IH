@@ -41,7 +41,31 @@ pub struct SandboxAvailability {
 }
 
 /// Détecte Bubblewrap et vérifie qu'il peut créer une sandbox minimale.
+///
+/// `IH_SANDBOX_ENGINE` force le chemin du moteur : les tests utilisent ce point
+/// d'entrée pour simuler une machine **sans** sandbox (CI GitHub, où bubblewrap
+/// absent ou espace de noms non privilégié interdit) sans dépendre du système.
 pub fn availability() -> SandboxAvailability {
+    if let Some(forced) = std::env::var_os("IH_SANDBOX_ENGINE") {
+        let path = PathBuf::from(forced);
+        let found = path.is_file();
+        let version = if found { probe_version(&path) } else { None };
+        let probe = found.then(|| probe_functional(&path));
+        return SandboxAvailability {
+            engine: "bubblewrap".into(),
+            path: found.then(|| path.display().to_string()),
+            version,
+            functional: matches!(probe, Some(Ok(()))),
+            error: match probe {
+                Some(Err(message)) => Some(message),
+                None => Some(format!(
+                    "moteur de sandbox forcé introuvable : {}",
+                    path.display()
+                )),
+                _ => None,
+            },
+        };
+    }
     let Some(path) = ih_core::platform::find_in_path("bwrap").or_else(|| {
         Path::new("/usr/bin/bwrap")
             .exists()
@@ -58,7 +82,20 @@ pub fn availability() -> SandboxAvailability {
         };
     };
     let version = probe_version(&path);
-    let probe = Command::new(&path)
+    let probe = probe_functional(&path);
+    SandboxAvailability {
+        engine: "bubblewrap".into(),
+        path: Some(path.display().to_string()),
+        version,
+        functional: probe.is_ok(),
+        error: probe.err(),
+    }
+}
+
+/// Sonde réelle : démarre une sandbox minimale. Un moteur qui échoue (espace de
+/// noms non privilégié interdit, AppArmor, etc.) est **non fonctionnel**.
+fn probe_functional(path: &Path) -> Result<(), String> {
+    let probe = Command::new(path)
         .args([
             "--unshare-all",
             "--die-with-parent",
@@ -82,32 +119,15 @@ pub fn availability() -> SandboxAvailability {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
-        .output();
-    match probe {
-        Ok(output) if output.status.success() => SandboxAvailability {
-            engine: "bubblewrap".into(),
-            path: Some(path.display().to_string()),
-            version,
-            functional: true,
-            error: None,
-        },
-        Ok(output) => SandboxAvailability {
-            engine: "bubblewrap".into(),
-            path: Some(path.display().to_string()),
-            version,
-            functional: false,
-            error: Some(format!(
-                "bubblewrap refuse de démarrer (user namespaces restreints ?) : {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            )),
-        },
-        Err(error) => SandboxAvailability {
-            engine: "bubblewrap".into(),
-            path: Some(path.display().to_string()),
-            version,
-            functional: false,
-            error: Some(format!("bubblewrap inutilisable : {error}")),
-        },
+        .output()
+        .map_err(|error| format!("bubblewrap inutilisable : {error}"))?;
+    if probe.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "bubblewrap refuse de démarrer (user namespaces restreints ?) : {}",
+            String::from_utf8_lossy(&probe.stderr).trim()
+        ))
     }
 }
 
