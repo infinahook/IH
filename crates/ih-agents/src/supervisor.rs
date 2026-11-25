@@ -73,6 +73,9 @@ pub struct AgentSupervisor {
 impl AgentSupervisor {
     pub fn new(policy: ResourcePolicy, sink: EventSink) -> IhResult<Self> {
         policy.validate()?;
+        // Dossiers privés d'instances IH mortes : purgés au démarrage, sans
+        // toucher à ceux d'instances encore actives.
+        let _ = sandbox::cleanup_orphan_homes();
         Ok(Self {
             policy,
             sink,
@@ -164,6 +167,9 @@ impl AgentSupervisor {
         }
 
         let session_id = request.session_id.clone().unwrap_or_default().into_string();
+        // L'identifiant sert de composant du dossier privé : jamais de valeur
+        // brute non validée près d'un `remove_dir_all`.
+        sandbox::validate_session_tag(&session_id)?;
         let (_, args) = request.agent.build_command(&request.prompt);
         let level = request.agent.security;
 
@@ -201,21 +207,26 @@ impl AgentSupervisor {
             None
         };
 
-        let (program, final_args): (std::path::PathBuf, Vec<String>) = match &sandboxed {
-            Some(plan) => (plan.program.clone(), plan.args.clone()),
-            None => (executable.clone(), args.clone()),
+        // Le garde du dossier privé (RAII) suit la commande : s'il est perdu
+        // sur un chemin d'erreur, les copies d'identifiants sont supprimées.
+        #[allow(clippy::type_complexity)]
+        let (program, final_args, plan_env, private_home) = match sandboxed {
+            Some(plan) => (
+                plan.program.clone(),
+                plan.args.clone(),
+                Some(plan.env.clone()),
+                plan.private_home,
+            ),
+            None => (executable.clone(), args.clone(), None, None),
         };
-        let private_home = sandboxed
-            .as_ref()
-            .and_then(|plan| plan.private_home.clone());
 
         let mut command = Command::new(&program);
         command.args(&final_args);
-        match &sandboxed {
+        match &plan_env {
             // Environnement vidé puis reconstruit explicitement par la sandbox.
-            Some(plan) => {
+            Some(env) => {
                 command.env_clear();
-                command.envs(plan.env.iter().map(|(k, v)| (k.clone(), v.clone())));
+                command.envs(env.iter().map(|(k, v)| (k.clone(), v.clone())));
             }
             None => {
                 // Compatibilité : un agent explicitement non isolé conserve
@@ -340,7 +351,9 @@ impl AgentSupervisor {
         let watchdog_running = running.clone();
         let timeout = Duration::from_secs(request.agent.timeout_secs.max(1));
         let active = self.active.clone();
-        let watched_home = private_home.clone();
+        // Déplacé dans le thread de veille : il est détruit (et le dossier
+        // supprimé) à la fin de la session, quel qu'en soit le motif.
+        let watched_home = private_home;
         std::thread::spawn(move || {
             let started = Instant::now();
             let mut final_state = AgentState::Completed;
@@ -391,10 +404,8 @@ impl AgentSupervisor {
                 }
             }
             // Les copies de secrets de la session sandboxée ne survivent pas
-            // à la session.
-            if let Some(home) = &watched_home {
-                sandbox::cleanup_private_home(home);
-            }
+            // à la session : le garde RAII les supprime en tombant.
+            drop(watched_home);
 
             if let Ok(mut guard) = watchdog_running.state.lock() {
                 *guard = final_state;
@@ -775,6 +786,48 @@ mod tests {
         assert!(matches!(second, Err(IhError::Limit(_))));
         supervisor.cancel(&first).ok();
         let _ = supervisor.wait(&first, Duration::from_secs(5));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Une session sandboxée qui échoue (interpréteur introuvable) ne doit
+    /// laisser aucun dossier privé derrière elle : le garde RAII supprime les
+    /// copies d'identifiants sur le chemin d'erreur.
+    #[test]
+    fn un_echec_de_lancement_sandboxe_ne_laisse_aucun_dossier_prive() {
+        if !sandbox::availability().functional {
+            eprintln!("IGNORÉ: bubblewrap non fonctionnel sur cette machine");
+            return;
+        }
+        let dir = temp_dir();
+        // Script pointant vers un interpréteur absent : la détection réussit
+        // (fichier exécutable), l'exécution échoue dans la sandbox.
+        let script = script(
+            &dir,
+            "casse.sh",
+            "#!/interpreteur_absent/inexistant\necho jamais\n",
+        );
+        let (sink, _events) = collector();
+        let supervisor = AgentSupervisor::new(ResourcePolicy::default(), sink).unwrap();
+        let mut adapter = adapter_for(&script);
+        adapter.security = ih_core::config::SecurityLevel::Isolated;
+        let session = SessionId::parse("ses-echec-sandbox").unwrap();
+        let private_home = std::env::temp_dir().join("ih-agent-home-ses-echec-sandbox");
+        let id = supervisor
+            .start(StartRequest {
+                agent: adapter,
+                project_dir: dir.clone(),
+                prompt: "x".to_string(),
+                session_id: Some(session),
+                confirm_unsandboxed: false,
+            })
+            .expect("lancement");
+        let state = supervisor.wait(&id, Duration::from_secs(10)).unwrap();
+        assert_eq!(state, AgentState::Failed, "l'exécution doit échouer");
+        assert!(
+            !private_home.exists(),
+            "le dossier privé doit être supprimé après un échec : {}",
+            private_home.display()
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

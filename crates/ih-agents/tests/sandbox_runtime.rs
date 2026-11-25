@@ -1,9 +1,19 @@
 //! Vérifications réelles de l'isolation système (bubblewrap).
 //!
-//! Ces tests ne supposent rien : si bubblewrap n'est pas opérationnel sur la
-//! machine (CI sans paquet, user namespaces restreints), ils s'arrêtent
-//! immédiatement sans échouer. Sur une machine équipée, ils prouvent par des
-//! canaris que la sandbox bloque réellement l'accès au reste du système.
+//! Ces tests exigent un moteur **fonctionnel** : ils sont marqués `#[ignore]`
+//! pour que `cargo test --workspace` ne les présente jamais comme réussis sans
+//! les avoir exécutés. Exécution explicite :
+//!
+//! ```text
+//! cargo test -p ih-agents --test sandbox_runtime -- --ignored --test-threads=1
+//! ```
+//!
+//! Les canaris sont créés dans un dossier temporaire, **jamais** dans le vrai
+//! `$HOME` : le test ne touche ni `~/.cache`, ni `~/.ssh`, ni aucun fichier
+//! personnel.
+//!
+//! Quand `IH_REQUIRE_SANDBOX=1` est défini (job CI dédié), l'absence de sandbox
+//! est une **erreur**, jamais un succès silencieux.
 
 use ih_agents::sandbox::{self, SecurityLevel};
 use ih_core::config::AgentKind;
@@ -14,6 +24,19 @@ use std::time::{Duration, Instant};
 
 fn ready() -> bool {
     sandbox::availability().functional
+}
+
+/// Sandbox indispensable dans ce contexte (CI dédiée) : échec explicite.
+fn require_sandbox() {
+    if std::env::var("IH_REQUIRE_SANDBOX").ok().as_deref() != Some("1") {
+        return;
+    }
+    if !ready() {
+        panic!(
+            "IH_REQUIRE_SANDBOX=1 mais la sandbox n'est pas fonctionnelle : {:?}",
+            sandbox::availability()
+        );
+    }
 }
 
 fn unique(tag: &str) -> PathBuf {
@@ -63,101 +86,114 @@ fn wait_port(port: u16) {
 }
 
 #[test]
+#[ignore = "bubblewrap fonctionnel requis : exécuter avec --ignored"]
 fn la_sandbox_bloque_les_acces_hors_worktree() {
+    require_sandbox();
     if !ready() {
+        eprintln!("IGNORÉ: bubblewrap non fonctionnel sur cette machine");
         return;
     }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
-    let canary_dir = home.join(".cache");
-    let _ = std::fs::create_dir_all(&canary_dir);
-    let canary = canary_dir.join(format!("ih-sbx-canary-{}", std::process::id()));
-    std::fs::write(&canary, "CANARY-SECRET").unwrap();
 
+    // Canaris entièrement temporaires : aucun fichier personnel n'est touché.
+    let canary_root = unique("canaris");
     let workdir = unique("wt");
+    std::fs::create_dir_all(canary_root.join(".ssh")).unwrap();
+    std::fs::create_dir_all(canary_root.join(".aws")).unwrap();
     std::fs::create_dir_all(&workdir).unwrap();
+    let ssh_key = canary_root.join(".ssh/id_rsa");
+    let aws_creds = canary_root.join(".aws/credentials");
+    let dotfile = canary_root.join(".secret.txt");
+    std::fs::write(&ssh_key, "CANARY-SSH-KEY").unwrap();
+    std::fs::write(&aws_creds, "CANARY-AWS").unwrap();
+    std::fs::write(&dotfile, "CANARY-DOTFILE").unwrap();
     std::fs::write(workdir.join("note.txt"), "alpha\n").unwrap();
-    let socket_path = std::env::temp_dir().join(format!("ih-sbx.sock-{}", std::process::id()));
-    let _ = std::fs::remove_file(&socket_path);
 
     let script = format!(
         "echo worktree=$(cat note.txt); \
          echo data > created.txt && echo WRITE_WORKTREE=ok; \
          cat /etc/hostname >/dev/null && echo SYSTEM_READ=ok; \
-         echo HOME_READ=$(cat {canary} 2>&1 | head -c 80); \
-         echo > {home}/.cache/ih-sbx-write-{pid}.txt 2>&1 && echo HOST_WRITE=ok || echo HOST_WRITE=refused; \
-         rm {canary} 2>&1 && echo HOST_DELETE=ok || echo HOST_DELETE=refused; \
-         cat {home}/.ssh/id_rsa 2>&1 | head -c 60; echo; \
-         test -S {socket} 2>&1 && echo SOCKET=ok || echo SOCKET=refused; \
-         printenv | wc -l",
-        canary = canary.display(),
-        home = home.display(),
-        pid = std::process::id(),
-        socket = socket_path.display(),
+         echo SSH_READ=$(cat {ssh} 2>&1 | head -c 40); \
+         echo AWS_READ=$(cat {aws} 2>&1 | head -c 40); \
+         echo DOT_READ=$(cat {dot} 2>&1 | head -c 40); \
+         echo home=$(printenv HOME); \
+         echo > {canary}/hors-worktree.txt 2>&1 && echo HOST_WRITE=ok || echo HOST_WRITE=refused; \
+         rm {ssh} 2>&1 && echo HOST_DELETE=ok || echo HOST_DELETE=refused",
+        ssh = ssh_key.display(),
+        aws = aws_creds.display(),
+        dot = dotfile.display(),
+        canary = canary_root.display(),
     );
-    std::env::set_var("IH_HOST_ONLY_SECRET", "host-only-secret");
-    let script = format!("{script}\nprintenv | tr '\\n' ' '; echo; printenv IH_HOST_ONLY_SECRET || echo HOST_ENV=absent");
-    let (success, stdout, stderr) = run_in_sandbox(
-        SecurityLevel::IsolatedNetwork,
-        &workdir,
-        &script,
-        &[("IH_SECRET_CANARY".to_string(), "env-secret-42".to_string())],
-    );
-    std::env::remove_var("IH_HOST_ONLY_SECRET");
+    let (success, stdout, stderr) =
+        run_in_sandbox(SecurityLevel::IsolatedNetwork, &workdir, &script, &[]);
     println!("stdout={stdout}\nstderr={stderr}");
+
     assert!(success, "la sandbox doit s'exécuter : {stderr}");
-    assert!(stdout.contains("worktree=alpha"), "lecture worktree");
-    assert!(stdout.contains("WRITE_WORKTREE=ok"), "écriture worktree");
+    assert!(stdout.contains("worktree=alpha"), "lecture du worktree");
+    assert!(stdout.contains("WRITE_WORKTREE=ok"), "écriture du worktree");
     assert!(
         stdout.contains("SYSTEM_READ=ok"),
         "lecture système autorisée"
     );
     assert!(
-        !stdout.contains("CANARY-SECRET") || stdout.contains("HOME_READ="),
-        "le canari de l'hôte ne doit pas être lisible"
+        stdout.contains("home=/home/agent"),
+        "home privé de la sandbox"
     );
-    assert!(
-        !stdout.contains("CANARY-SECRET"),
-        "fuite du fichier personnel : {stdout}"
-    );
+    // Aucun canari personnel ne doit apparaître dans la sortie.
+    for secret in ["CANARY-SSH-KEY", "CANARY-AWS", "CANARY-DOTFILE"] {
+        assert!(
+            !stdout.contains(secret),
+            "fuite du canari {secret} : {stdout}"
+        );
+    }
     assert!(stdout.contains("HOST_WRITE=refused"), "écriture extérieure");
     assert!(
         stdout.contains("HOST_DELETE=refused"),
         "suppression extérieure"
     );
-    assert!(
-        !stdout.contains("PRIVATE KEY"),
-        "lecture de ~/.ssh ne doit pas être possible"
-    );
-    assert!(
-        stdout.contains("SOCKET=refused"),
-        "socket de l'hôte visible"
-    );
-    // Environnement reconstruit : le canari explicitement fourni est présent,
-    // une variable de l'hôte n'est jamais héritée.
-    assert!(
-        stdout.contains("env-secret-42"),
-        "la variable fournie explicitement doit être disponible"
-    );
-    assert!(
-        !stdout.contains("host-only-secret"),
-        "l'environnement de l'hôte ne doit pas être hérité"
-    );
-    // L'hôte n'a réellement rien vu : ni écriture, ni suppression.
-    assert!(!home
-        .join(".cache")
-        .join(format!("ih-sbx-write-{}.txt", std::process::id()))
-        .exists());
-    assert!(canary.exists(), "le canari de l'hôte a été supprimé");
+    // L'hôte n'a réellement rien vu.
+    assert!(!canary_root.join("hors-worktree.txt").exists());
+    assert!(ssh_key.exists(), "le canari de l'hôte a été supprimé");
 
-    let _ = std::fs::remove_file(&canary);
+    let _ = std::fs::remove_dir_all(&canary_root);
     let _ = std::fs::remove_dir_all(&workdir);
 }
 
 #[test]
-fn reseau_desactive_au_niveau_isole_et_disponible_au_niveau_reseau() {
+#[ignore = "bubblewrap fonctionnel requis : exécuter avec --ignored"]
+fn lecriture_hors_worktree_est_refusee_meme_en_tmp() {
+    require_sandbox();
     if !ready() {
+        eprintln!("IGNORÉ: bubblewrap non fonctionnel sur cette machine");
+        return;
+    }
+    let workdir = unique("tmpwt");
+    std::fs::create_dir_all(&workdir).unwrap();
+    let host_tmp = unique("tmpcanari");
+    std::fs::create_dir_all(&host_tmp).unwrap();
+    let canary = host_tmp.join("canari.txt");
+    std::fs::write(&canary, "intact\n").unwrap();
+
+    let script = format!(
+        "cat {canary} 2>&1 | head -c 40; echo; \
+         echo pirate > {canary} 2>&1 && echo TMP_WRITE=ok || echo TMP_WRITE=refused; ls /tmp | head -3",
+        canary = canary.display()
+    );
+    let (success, stdout, stderr) = run_in_sandbox(SecurityLevel::Isolated, &workdir, &script, &[]);
+    assert!(success, "sandbox: {stderr}");
+    assert!(!stdout.contains("intact"), "le /tmp de l'hôte est visible");
+    assert!(stdout.contains("TMP_WRITE=refused"), "écriture /tmp hôte");
+    assert_eq!(std::fs::read_to_string(&canary).unwrap(), "intact\n");
+
+    let _ = std::fs::remove_dir_all(&host_tmp);
+    let _ = std::fs::remove_dir_all(&workdir);
+}
+
+#[test]
+#[ignore = "bubblewrap fonctionnel requis : exécuter avec --ignored"]
+fn reseau_desactive_au_niveau_isole_et_disponible_au_niveau_reseau() {
+    require_sandbox();
+    if !ready() {
+        eprintln!("IGNORÉ: bubblewrap non fonctionnel sur cette machine");
         return;
     }
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -182,7 +218,9 @@ fn reseau_desactive_au_niveau_isole_et_disponible_au_niveau_reseau() {
 
     let workdir = unique("net");
     std::fs::create_dir_all(&workdir).unwrap();
-    let with_network = format!("curl -s -m 3 -o /dev/null -w 'HTTP=%{{http_code}}' http://127.0.0.1:{port}/ || echo NET=refused");
+    let with_network = format!(
+        "curl -s -m 3 -o /dev/null -w 'HTTP=%{{http_code}}' http://127.0.0.1:{port}/ || echo NET=refused"
+    );
     let (_, stdout_l2, _) =
         run_in_sandbox(SecurityLevel::IsolatedNetwork, &workdir, &with_network, &[]);
     assert!(

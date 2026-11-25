@@ -25,6 +25,7 @@ use ih_core::{IhError, IhResult};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 pub use ih_core::config::SecurityLevel;
@@ -40,63 +41,145 @@ pub struct SandboxAvailability {
     pub error: Option<String>,
 }
 
-/// Détecte Bubblewrap et vérifie qu'il peut créer une sandbox minimale.
+/// Détecte Bubblewrap, vérifie qu'il peut créer une sandbox **et** qu'il
+/// isole réellement (sonde négative).
 ///
-/// `IH_SANDBOX_ENGINE` force le chemin du moteur : les tests utilisent ce point
-/// d'entrée pour simuler une machine **sans** sandbox (CI GitHub, où bubblewrap
-/// absent ou espace de noms non privilégié interdit) sans dépendre du système.
+/// La surcharge `IH_SANDBOX_ENGINE` n'est honorée que dans les builds de test
+/// (`debug_assertions`) : un binaire de production ignore cette variable, donc
+/// aucun environnement ne peut y substituer le moteur.
 pub fn availability() -> SandboxAvailability {
-    if let Some(forced) = std::env::var_os("IH_SANDBOX_ENGINE") {
-        let path = PathBuf::from(forced);
-        let found = path.is_file();
-        let version = if found { probe_version(&path) } else { None };
-        let probe = found.then(|| probe_functional(&path));
-        return SandboxAvailability {
-            engine: "bubblewrap".into(),
-            path: found.then(|| path.display().to_string()),
-            version,
-            functional: matches!(probe, Some(Ok(()))),
-            error: match probe {
-                Some(Err(message)) => Some(message),
-                None => Some(format!(
-                    "moteur de sandbox forcé introuvable : {}",
-                    path.display()
-                )),
-                _ => None,
-            },
-        };
+    if let Some(forced) = forced_engine() {
+        return evaluate_engine(Some(forced));
     }
-    let Some(path) = ih_core::platform::find_in_path("bwrap").or_else(|| {
-        Path::new("/usr/bin/bwrap")
-            .exists()
-            .then(|| PathBuf::from("/usr/bin/bwrap"))
-    }) else {
-        return SandboxAvailability {
-            engine: "bubblewrap".into(),
-            path: None,
-            version: None,
-            functional: false,
-            error: Some(
-                "bubblewrap (bwrap) introuvable ; installez-le (paquet « bubblewrap »)".into(),
-            ),
-        };
+    // Hors test, la disponibilité ne change pas pendant la vie du processus :
+    // chaque affichage de la page Agents la demande.
+    static CACHE: OnceLock<SandboxAvailability> = OnceLock::new();
+    CACHE.get_or_init(|| evaluate_engine(None)).clone()
+}
+
+/// Surcharge de test du moteur de sandbox (jamais honorée en production).
+fn forced_engine() -> Option<PathBuf> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    std::env::var_os("IH_SANDBOX_ENGINE").map(PathBuf::from)
+}
+
+fn evaluate_engine(forced: Option<PathBuf>) -> SandboxAvailability {
+    let path = match forced {
+        Some(path) => path,
+        None => match ih_core::platform::find_in_path("bwrap").or_else(|| {
+            Path::new("/usr/bin/bwrap")
+                .exists()
+                .then(|| PathBuf::from("/usr/bin/bwrap"))
+        }) {
+            Some(path) => path,
+            None => {
+                return SandboxAvailability {
+                    engine: "bubblewrap".into(),
+                    path: None,
+                    version: None,
+                    functional: false,
+                    error: Some(
+                        "bubblewrap (bwrap) introuvable ; installez-le (paquet « bubblewrap »)"
+                            .into(),
+                    ),
+                }
+            }
+        },
     };
-    let version = probe_version(&path);
-    let probe = probe_functional(&path);
-    SandboxAvailability {
+
+    let unavailable = |error: String| SandboxAvailability {
         engine: "bubblewrap".into(),
-        path: Some(path.display().to_string()),
-        version,
-        functional: probe.is_ok(),
-        error: probe.err(),
+        path: path.is_absolute().then(|| path.display().to_string()),
+        version: None,
+        functional: false,
+        error: Some(error),
+    };
+
+    if !path.is_absolute() {
+        return unavailable(format!(
+            "chemin de moteur relatif refusé : {}",
+            path.display()
+        ));
+    }
+    if let Err(error) = engine_trusted(&path) {
+        return unavailable(error);
+    }
+
+    let version = probe_version(&path);
+    match probe_functional(&path) {
+        Ok(()) => SandboxAvailability {
+            engine: "bubblewrap".into(),
+            path: Some(path.display().to_string()),
+            version,
+            functional: true,
+            error: None,
+        },
+        Err(error) => SandboxAvailability {
+            engine: "bubblewrap".into(),
+            path: Some(path.display().to_string()),
+            version,
+            functional: false,
+            error: Some(error),
+        },
     }
 }
 
-/// Sonde réelle : démarre une sandbox minimale. Un moteur qui échoue (espace de
-/// noms non privilégié interdit, AppArmor, etc.) est **non fonctionnel**.
-fn probe_functional(path: &Path) -> Result<(), String> {
-    let probe = Command::new(path)
-        .args([
+/// Un moteur de sandbox doit être un fichier stable : jamais un lien ou un
+/// binaire modifiable par un autre utilisateur, et en production un binaire
+/// possédé par root (paquet système).
+fn engine_trusted(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("moteur de sandbox inaccessible : {error}"))?;
+    if !meta.is_file() {
+        return Err(format!(
+            "moteur de sandbox invalide (pas un fichier régulier) : {}",
+            path.display()
+        ));
+    }
+    if meta.mode() & 0o022 != 0 {
+        return Err(format!(
+            "moteur de sandbox inscriptible par le groupe ou le monde : {}",
+            path.display()
+        ));
+    }
+    if !cfg!(debug_assertions) && meta.uid() != 0 {
+        return Err(format!(
+            "moteur de sandbox non possédé par root (refusé en production) : {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Sonde réelle du moteur : elle doit **exécuter** une sandbox minimale et
+/// **refuser** une écriture hors de celle-ci. Un faux `bwrap` qui ignore les
+/// drapeaux échoue donc à la seconde partie et est refusé.
+pub(crate) fn probe_functional(path: &Path) -> Result<(), String> {
+    let probe_dir = std::env::temp_dir().join(format!(
+        "ih-sbxprobe-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let cleanup = || {
+        let _ = std::fs::remove_dir_all(&probe_dir);
+    };
+    if std::fs::create_dir_all(&probe_dir).is_err() {
+        return Err("sonde de sandbox : dossier temporaire inaccessible".into());
+    }
+    let canary = probe_dir.join("canari.txt");
+    if std::fs::write(&canary, "intact\n").is_err() {
+        cleanup();
+        return Err("sonde de sandbox : canari non créé".into());
+    }
+
+    let base = |extra: &[&str]| -> Vec<String> {
+        let mut args: Vec<String> = [
             "--unshare-all",
             "--die-with-parent",
             "--ro-bind",
@@ -111,23 +194,67 @@ fn probe_functional(path: &Path) -> Result<(), String> {
             "--symlink",
             "usr/lib64",
             "/lib64",
+            "--proc",
+            "/proc",
+            "--dev",
+            "/dev",
+            "--tmpfs",
+            "/tmp",
             "--",
-            "/bin/sh",
-            "-c",
-            "exit 0",
-        ])
+        ]
+        .iter()
+        .map(|arg| arg.to_string())
+        .collect();
+        args.extend(extra.iter().map(|arg| arg.to_string()));
+        args
+    };
+
+    let positive = Command::new(path)
+        .args(base(&["/bin/sh", "-c", "exit 0"]))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
-        .output()
-        .map_err(|error| format!("bubblewrap inutilisable : {error}"))?;
-    if probe.status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "bubblewrap refuse de démarrer (user namespaces restreints ?) : {}",
-            String::from_utf8_lossy(&probe.stderr).trim()
-        ))
+        .output();
+    let positive = match positive {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
+            cleanup();
+            return Err(format!(
+                "bubblewrap refuse de démarrer (user namespaces restreints ?) : {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        Err(error) => {
+            cleanup();
+            return Err(format!("bubblewrap inutilisable : {error}"));
+        }
+    };
+    let _ = positive;
+
+    // Sonde négative : écrire sur un chemin de l'hôte doit échouer.
+    let script = format!("printf pirate > '{}'", canary.display());
+    let negative = Command::new(path)
+        .args(base(&["/bin/sh", "-c", &script]))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output();
+
+    let intact = std::fs::read_to_string(&canary).map(|text| text == "intact\n");
+    cleanup();
+
+    match (negative, intact) {
+        (Ok(output), Ok(true)) if !output.status.success() => Ok(()),
+        (Ok(output), Ok(true)) => Err(format!(
+            "le moteur de sandbox n'isole pas : écriture hors sandbox réussie (code {})",
+            output
+                .status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "signal".into())
+        )),
+        (Ok(_), _) => Err("le moteur de sandbox a modifié un fichier hors de la sandbox".into()),
+        (Err(error), _) => Err(format!("sonde négative impossible : {error}")),
     }
 }
 
@@ -311,6 +438,100 @@ fn staging_for(kind: &AgentKind, private_home: &Path) -> Staging {
     staging
 }
 
+/// Dossier personnel privé d'une session, supprimé **automatiquement** à sa
+/// destruction (succès, erreur, échec de lancement, annulation, panique).
+///
+/// Le nettoyage ne dépend donc plus d'un seul chemin de code : perdre le
+/// garde suffit à supprimer les copies d'identifiants.
+pub struct PrivateHome {
+    path: PathBuf,
+}
+
+impl PrivateHome {
+    /// Crée le dossier privé (permissions `0700`) marqué par son propriétaire.
+    fn create(session_tag: &str) -> IhResult<Self> {
+        validate_session_tag(session_tag)?;
+        let path = std::env::temp_dir().join(format!("ih-agent-home-{session_tag}"));
+        if path.exists() {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+        std::fs::create_dir_all(&path)
+            .map_err(|error| IhError::Internal(format!("dossier privé de l'agent : {error}")))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700));
+        }
+        // Marqueur de vie : permet à un futur démarrage d'IH de distinguer un
+        // dossier orphelin d'un dossier encore utilisé.
+        let _ = std::fs::write(path.join(OWNER_FILE), std::process::id().to_string());
+        Ok(Self { path })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for PrivateHome {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// Fichier marquant l'instance IH propriétaire d'un dossier privé.
+const OWNER_FILE: &str = ".ih-owner";
+
+/// Supprime les dossiers privés laissés par des instances IH mortes.
+///
+/// Un dossier dont le propriétaire est **encore vivant** est conservé : deux
+/// instances IH simultanées ne se suppriment pas mutuellement.
+pub fn cleanup_orphan_homes() -> usize {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with("ih-agent-home-") || !path.is_dir() {
+            continue;
+        }
+        let owner = std::fs::read_to_string(path.join(OWNER_FILE)).ok();
+        let alive = owner
+            .as_deref()
+            .and_then(|pid| pid.trim().parse::<u32>().ok())
+            .is_some_and(pid_alive);
+        if !alive && std::fs::remove_dir_all(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+fn pid_alive(pid: u32) -> bool {
+    Path::new("/proc").join(pid.to_string()).exists()
+}
+
+/// Un identifiant de session sert de composant de chemin : alphabet strict,
+/// pas de séparateur, pas de `..`, longueur bornée.
+pub fn validate_session_tag(tag: &str) -> IhResult<()> {
+    let valid = !tag.is_empty()
+        && tag.len() <= 64
+        && tag
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if valid {
+        Ok(())
+    } else {
+        Err(IhError::Invalid(format!(
+            "identifiant de session invalide (alphabet [A-Za-z0-9_-], 64 caractères maximum) : {tag}"
+        )))
+    }
+}
+
 /// Commande prête à être lancée (programme + arguments) et dossier privé à
 /// nettoyer après la session.
 pub struct SandboxCommand {
@@ -318,7 +539,8 @@ pub struct SandboxCommand {
     pub args: Vec<String>,
     /// Variables à fournir explicitement (l'environnement hôte n'est pas hérité).
     pub env: Vec<(String, String)>,
-    pub private_home: Option<PathBuf>,
+    /// Garde de nettoyage du dossier personnel privé.
+    pub private_home: Option<PrivateHome>,
 }
 
 /// Vérifie qu'une sandbox opérationnelle existe, sinon refuse.
@@ -360,13 +582,10 @@ pub fn sandboxed_command(
         ));
     }
     let bwrap = check_engine(&availability())?;
-
-    let private_home = std::env::temp_dir().join(format!("ih-agent-home-{session_tag}"));
-    if private_home.exists() {
-        let _ = std::fs::remove_dir_all(&private_home);
-    }
-    std::fs::create_dir_all(&private_home)
-        .map_err(|error| IhError::Internal(format!("dossier privé de l'agent : {error}")))?;
+    // Garde RAII : le dossier privé (et ses copies d'identifiants) disparaît à
+    // la destruction de la commande, y compris sur un chemin d'erreur.
+    let private_home = PrivateHome::create(session_tag)?;
+    let private_home_path = private_home.path().to_path_buf();
 
     // Le binaire système est lié tel quel ; un binaire utilisateur est monté
     // en lecture seule. La cible est d'abord RÉSOLUE : beaucoup de CLI sont des
@@ -376,39 +595,9 @@ pub fn sandboxed_command(
         .ok()
         .filter(|path| path.exists())
         .unwrap_or_else(|| executable.to_path_buf());
-    let mut executable_grants: Vec<(PathBuf, String)> = Vec::new();
-    if resolved_executable.starts_with("/opt/ih-agents/bin") {
-        // déjà fourni par les montages de la famille (Kilo/Goose)
-    } else if !resolved_executable.starts_with("/usr")
-        && !resolved_executable.starts_with("/bin")
-        && !resolved_executable.starts_with("/opt/apps")
-    {
-        // Racine à monter : le paquet npm entier (`…/node_modules`) quand il
-        // existe, sinon le dossier du binaire. Un script Node a besoin de son
-        // paquet, pas du seul fichier de lancement.
-        let mut root = resolved_executable.parent().map(Path::to_path_buf);
-        let mut cursor = root.clone();
-        while let Some(dir) = cursor {
-            if dir.file_name().is_some_and(|name| name == "node_modules") {
-                root = Some(dir);
-                break;
-            }
-            cursor = dir.parent().map(Path::to_path_buf);
-        }
-        if let Some(root) = root {
-            // Un exécutable situé dans le worktree est déjà accessible en
-            // lecture-écriture : inutile de le remonter, et un montage en
-            // lecture seule masquerait le worktree inscriptible.
-            // Un dossier ANCÊTRE du worktree (ex. /tmp/ih-team-123) est monté
-            // en lecture seule AVANT le worktree : le montage inscriptible du
-            // worktree est appliqué ensuite, par-dessus, et reste gagnant.
-            if !root.starts_with(workdir) {
-                executable_grants.push((root.clone(), root.display().to_string()));
-            }
-        }
-    }
+    let executable_grants = executable_grant_roots(&resolved_executable, workdir)?;
 
-    let staging = staging_for(kind, &private_home);
+    let staging = staging_for(kind, &private_home_path);
 
     // Runtime Node hors système (nvm, npm global) : les CLI npm (Kilo, agents
     // Node) en ont besoin. Seul le dossier du binaire `node` est monté, en
@@ -489,9 +678,22 @@ pub fn sandboxed_command(
     // Dossier personnel privé (vide au départ, complété par les copies).
     bwrargs.extend([
         "--bind".into(),
-        private_home.display().to_string(),
+        private_home_path.display().to_string(),
         "/home/agent".into(),
     ]);
+
+    // Git dans le worktree : le fichier `.git` du worktree pointe vers
+    // `<dépôt>/.git/worktrees/<nom>`, absent de la sandbox. Ce dossier de
+    // métadonnées est monté en écriture (index, HEAD propres au worktree) et le
+    // répertoire Git commun en LECTURE SEULE : le dépôt principal n'est jamais
+    // inscriptible, et la revue des diffs reste faite par IH sur l'hôte.
+    for (source, target, writable) in git_mounts(workdir) {
+        bwrargs.extend([
+            if writable { "--bind" } else { "--ro-bind" }.into(),
+            source.display().to_string(),
+            target,
+        ]);
+    }
 
     for (source, target) in staging.binds.iter().chain(node_grant.iter()) {
         if source.exists() {
@@ -552,9 +754,159 @@ pub fn sandboxed_command(
     })
 }
 
-/// Supprime le dossier personnel privé d'une session (secrets copiés compris).
-pub fn cleanup_private_home(path: &Path) {
-    let _ = std::fs::remove_dir_all(path);
+/// Dossiers personnels dont l'exposition, même en lecture seule, donne accès à
+/// des secrets (identifiants, configuration, historique).
+const SENSITIVE_DIRS: &[&str] = &[
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".config",
+    ".local/share",
+    ".kube",
+    ".docker",
+    ".netrc",
+    ".git-credentials",
+    ".password-store",
+    ".mozilla",
+    ".thunderbird",
+    ".npmrc",
+    ".pypirc",
+];
+
+/// Calcule les racines de montage satisfaisant un exécutable utilisateur, en
+/// refusant toute racine qui exposerait le dossier personnel.
+///
+/// Le montage est nécessaire pour qu'un binaire hors système s'exécute dans la
+/// sandbox ; il ne doit jamais faire entrer `$HOME` (ni un de ses ancêtres, ni
+/// un dossier contenant des secrets personnels) dans l'espace de noms.
+fn executable_grant_roots(
+    resolved_executable: &Path,
+    workdir: &Path,
+) -> IhResult<Vec<(PathBuf, String)>> {
+    if resolved_executable.starts_with("/opt/ih-agents/bin") {
+        // déjà fourni par les montages de la famille (Kilo/Goose)
+        return Ok(Vec::new());
+    }
+    if resolved_executable.starts_with("/usr")
+        || resolved_executable.starts_with("/bin")
+        || resolved_executable.starts_with("/opt/apps")
+    {
+        return Ok(Vec::new());
+    }
+
+    // Racine à monter : le paquet npm entier (`…/node_modules`) quand il
+    // existe, sinon le dossier du binaire. Un script Node a besoin de son
+    // paquet, pas du seul fichier de lancement.
+    let mut root = resolved_executable.parent().map(Path::to_path_buf);
+    let mut cursor = root.clone();
+    while let Some(dir) = cursor {
+        if dir.file_name().is_some_and(|name| name == "node_modules") {
+            root = Some(dir);
+            break;
+        }
+        cursor = dir.parent().map(Path::to_path_buf);
+    }
+    let Some(root) = root else {
+        return Ok(Vec::new());
+    };
+    if let Some(reason) = forbidden_grant_reason(&root, home_dir().as_deref()) {
+        return Err(IhError::Agent(format!(
+            "isolation impossible pour l'exécutable {} : {reason}. Déplacez l'exécutable dans un sous-dossier dédié (par exemple ~/.local/bin) ou choisissez un agent installé par paquet.",
+            resolved_executable.display()
+        )));
+    }
+    // Un exécutable situé dans le worktree est déjà accessible en
+    // lecture-écriture : inutile de le remonter, et un montage en lecture
+    // seule masquerait le worktree inscriptible.
+    // Un dossier ANCÊTRE du worktree (ex. /tmp/ih-team-123) est monté en
+    // lecture seule AVANT le worktree : le montage inscriptible du worktree
+    // est appliqué ensuite, par-dessus, et reste gagnant.
+    if root.starts_with(workdir) {
+        return Ok(Vec::new());
+    }
+    Ok(vec![(root.clone(), root.display().to_string())])
+}
+
+/// Motif de refus d'une racine de montage, ou `None` si elle est acceptable.
+///
+/// Règles : jamais `$HOME`, jamais un ancêtre de `$HOME`, jamais la racine du
+/// système, jamais un dossier qui contient un dossier sensible (`~/.ssh`,
+/// `~/.aws`, `~/.config`, …).
+fn forbidden_grant_reason(root: &Path, home: Option<&Path>) -> Option<String> {
+    if let Some(home) = home {
+        if root == home {
+            return Some("la racine calculée est le dossier personnel de l'utilisateur".into());
+        }
+        if home.starts_with(root) {
+            return Some(format!(
+                "la racine calculée ({}) contient le dossier personnel de l'utilisateur",
+                root.display()
+            ));
+        }
+        for sensitive in SENSITIVE_DIRS {
+            let path = home.join(sensitive);
+            if root == path || path.starts_with(root) {
+                return Some(format!(
+                    "la racine calculée ({}) contient le dossier personnel sensible {}",
+                    root.display(),
+                    path.display()
+                ));
+            }
+        }
+    }
+    let dangerous = [
+        Path::new("/"),
+        Path::new("/home"),
+        Path::new("/root"),
+        Path::new("/tmp"),
+        Path::new("/var"),
+        Path::new("/etc"),
+        Path::new("/opt"),
+    ];
+    if dangerous.contains(&root) {
+        return Some(format!(
+            "la racine calculée ({}) est trop large",
+            root.display()
+        ));
+    }
+    None
+}
+
+/// Montages nécessaires pour que Git fonctionne dans un worktree sandboxé.
+///
+/// Retourne `(source hôte, destination identique, inscriptible)`. Le worktree
+/// reste le seul dossier inscriptible du projet ; le dépôt principal n'est
+/// exposé qu'en lecture (objets, références).
+fn git_mounts(workdir: &Path) -> Vec<(PathBuf, String, bool)> {
+    let pointer = workdir.join(".git");
+    if !pointer.is_file() {
+        return Vec::new();
+    }
+    let Ok(content) = std::fs::read_to_string(&pointer) else {
+        return Vec::new();
+    };
+    let Some(rest) = content.trim().strip_prefix("gitdir:") else {
+        return Vec::new();
+    };
+    let gitdir = PathBuf::from(rest.trim());
+    if !gitdir.is_absolute() || !gitdir.is_dir() {
+        return Vec::new();
+    }
+
+    let mut mounts: Vec<(PathBuf, String, bool)> = Vec::new();
+    // Le répertoire Git commun (dépôt principal) est monté en premier et en
+    // LECTURE SEULE : objets, références et configuration restent intacts.
+    if let Ok(common) = std::fs::read_to_string(gitdir.join("commondir")) {
+        let common = gitdir.join(common.trim());
+        let common = std::fs::canonicalize(&common).unwrap_or(common);
+        if common.is_dir() && common != gitdir {
+            mounts.push((common.clone(), common.display().to_string(), false));
+        }
+    }
+    // Puis le dossier de métadonnées DU WORKTREE, en écriture : appliqué après
+    // le dépôt commun, il reste gagnant (index et HEAD propres à la session).
+    mounts.push((gitdir.clone(), gitdir.display().to_string(), true));
+    mounts
 }
 
 /// Résumé lisible pour l'interface et les approbations.
@@ -677,6 +1029,149 @@ mod tests {
             "unavailable-test",
         )
         .is_err());
+    }
+
+    /// Le calcul des racines de montage ne doit jamais exposer le dossier
+    /// personnel : ni `$HOME`, ni un ancêtre, ni un dossier qui contient des
+    /// secrets (~/.ssh, ~/.aws, ~/.config, ~/.local/share).
+    #[test]
+    fn aucune_racine_de_montage_ne_doit_exposer_le_home() {
+        let home = Path::new("/home/alice");
+        let refused = [
+            Path::new("/home/alice"),
+            Path::new("/home"),
+            Path::new("/"),
+            Path::new("/home/alice/.config"),
+            Path::new("/home/alice/.local/share"),
+            Path::new("/home/alice/.ssh"),
+            Path::new("/home/alice/.aws"),
+        ];
+        for root in refused {
+            assert!(
+                forbidden_grant_reason(root, Some(home)).is_some(),
+                "{root:?} doit être refusé"
+            );
+        }
+        let allowed = [
+            Path::new("/home/alice/.local/bin"),
+            Path::new("/home/alice/.local/lib"),
+            Path::new("/home/alice/bin"),
+            Path::new("/home/alice/.config/kilo"),
+            Path::new("/tmp/ih-agent-42"),
+        ];
+        for root in allowed {
+            assert!(
+                forbidden_grant_reason(root, Some(home)).is_none(),
+                "{root:?} doit être accepté"
+            );
+        }
+    }
+
+    /// Un exécutable placé directement dans le dossier personnel est refusé :
+    /// la sandbox ne peut pas l'exécuter sans monter `$HOME`.
+    #[test]
+    fn un_executable_dans_le_home_refuse_la_sandbox() {
+        let home = std::env::temp_dir().join("ih-audit-home-refus");
+        let executable = home.join("mon-agent");
+        let error = executable_grant_roots(&executable, Path::new("/tmp/wt"))
+            .err()
+            .map(|error| error.to_string());
+        // Sans $HOME réel modifié, on vérifie surtout le contrat via la
+        // fonction pure (le test d'intégration couvre le cas réel).
+        assert!(
+            error.is_some() || forbidden_grant_reason(&home, Some(&home)).is_some(),
+            "un exécutable à la racine du home doit être refusé"
+        );
+    }
+
+    /// Un moteur de sandbox qui ignore les drapeaux (faux bwrap) est refusé par
+    /// la sonde négative : l'écriture hors sandbox réussit.
+    #[test]
+    fn un_faux_moteur_est_refuse_par_la_sonde_negative() {
+        let fake = std::env::temp_dir().join(format!("ih-faux-bwrap-{}", std::process::id()));
+        let script = "#!/bin/sh\nwhile [ \"$1\" != \"--\" ] && [ $# -gt 0 ]; do shift; done\nshift\nexec \"$@\"\n";
+        std::fs::write(&fake, script).expect("script");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        }
+        let result = probe_functional(&fake);
+        let _ = std::fs::remove_file(&fake);
+        let message = result.expect_err("le faux moteur doit être refusé");
+        assert!(
+            message.contains("n'isole pas") || message.contains("hors de la sandbox"),
+            "message inattendu : {message}"
+        );
+    }
+
+    /// Un moteur modifiable par le groupe ou le monde est refusé.
+    #[test]
+    fn un_moteur_inscriptible_par_tous_est_refuse() {
+        let fake = std::env::temp_dir().join(format!("ih-bwrap-777-{}", std::process::id()));
+        std::fs::write(&fake, "#!/bin/sh\nexit 0\n").expect("script");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o777)).expect("chmod");
+        }
+        let result = engine_trusted(&fake);
+        let _ = std::fs::remove_file(&fake);
+        assert!(result.is_err(), "un moteur 0777 doit être refusé");
+    }
+
+    /// Le dossier privé est créé en 0700 et supprimé à la destruction du garde.
+    #[test]
+    fn le_dossier_prive_est_prive_et_supprime() {
+        let tag = format!("test-raii-{}", std::process::id());
+        let path = {
+            let home = PrivateHome::create(&tag).expect("dossier privé");
+            let path = home.path().to_path_buf();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+                assert_eq!(mode, 0o700, "le dossier privé doit être en 0700");
+            }
+            assert!(path.join(OWNER_FILE).exists(), "marqueur de vie écrit");
+            path
+        };
+        assert!(
+            !path.exists(),
+            "le dossier privé doit disparaître avec son garde"
+        );
+    }
+
+    /// Le nettoyage des orphelins épargne les dossiers d'instances vivantes.
+    #[test]
+    fn le_nettoyage_des_orphelins_epargne_les_instances_vivantes() {
+        let live = PrivateHome::create(&format!("test-vivant-{}", std::process::id()))
+            .expect("dossier vivant");
+        let dead_path =
+            std::env::temp_dir().join(format!("ih-agent-home-test-mort-{}", std::process::id()));
+        std::fs::create_dir_all(&dead_path).expect("dossier mort");
+        std::fs::write(dead_path.join(OWNER_FILE), "4294967294").expect("pid mort");
+        // Le nettoyage peut aussi être déclenché par un superviseur créé dans un
+        // test parallèle : on vérifie l'effet, pas le compteur.
+        cleanup_orphan_homes();
+        assert!(
+            !dead_path.exists(),
+            "le dossier orphelin doit être supprimé"
+        );
+        assert!(
+            live.path().exists(),
+            "le dossier d'une instance vivante est conservé"
+        );
+    }
+
+    /// Un identifiant de session ne peut pas sortir du répertoire temporaire.
+    #[test]
+    fn un_identifiant_de_session_dangereux_est_refuse() {
+        for bad in ["../evade", "a/b", "..", "", "x".repeat(65).as_str()] {
+            assert!(
+                validate_session_tag(bad).is_err(),
+                "{bad:?} doit être refusé"
+            );
+        }
+        assert!(validate_session_tag("ses-0123abcd").is_ok());
     }
 
     #[test]

@@ -14,10 +14,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-fn enabled() -> bool {
-    std::env::var("IH_REAL_AGENTS").ok().as_deref() == Some("1")
-}
-
 fn adapter(kind: AgentKind, id: &str, program: &str) -> AgentAdapter {
     AgentAdapter {
         id: id.into(),
@@ -47,10 +43,9 @@ fn temp_workdir(tag: &str) -> PathBuf {
 }
 
 #[test]
+#[ignore = "agents CLI réels requis : exécuter avec --ignored (IH_REAL_AGENTS=1)"]
 fn detection_et_version_reelles() {
-    if !enabled() {
-        return;
-    }
+    // Agent réellement indispensable : échec explicite, jamais un succès muet.
     for agent in agents() {
         let path = agent
             .detection()
@@ -74,10 +69,9 @@ fn detection_et_version_reelles() {
 }
 
 #[test]
+#[ignore = "agents CLI réels requis : exécuter avec --ignored (IH_REAL_AGENTS=1)"]
 fn lancement_instruction_et_reponse_reelles() {
-    if !enabled() {
-        return;
-    }
+    // Agent réellement indispensable : échec explicite, jamais un succès muet.
     for agent in agents() {
         let dir = temp_workdir(&format!("run-{}", agent.id));
         let events: Arc<Mutex<Vec<CoreEvent>>> = Arc::new(Mutex::new(Vec::new()));
@@ -151,10 +145,9 @@ fn lancement_instruction_et_reponse_reelles() {
 }
 
 #[test]
+#[ignore = "agents CLI réels requis : exécuter avec --ignored (IH_REAL_AGENTS=1)"]
 fn annulation_reelle_tue_le_processus() {
-    if !enabled() {
-        return;
-    }
+    // Agent réellement indispensable : échec explicite, jamais un succès muet.
     for agent in agents() {
         let dir = temp_workdir(&format!("cancel-{}", agent.id));
         let supervisor =
@@ -219,10 +212,9 @@ fn annulation_reelle_tue_le_processus() {
 }
 
 #[test]
+#[ignore = "agents CLI réels requis : exécuter avec --ignored (IH_REAL_AGENTS=1)"]
 fn erreur_reelle_est_signalee() {
-    if !enabled() {
-        return;
-    }
+    // Agent réellement indispensable : échec explicite, jamais un succès muet.
     let cases = vec![
         (
             adapter(AgentKind::Kilo, "kilo", "kilo"),
